@@ -4,6 +4,9 @@ import contextlib
 import math
 import warnings
 from pathlib import Path
+from typing import Tuple, Dict, Any, Optional, List
+from scipy.spatial.transform import Rotation
+
 
 import cv2
 import matplotlib.pyplot as plt
@@ -12,9 +15,15 @@ import torch
 from PIL import Image, ImageDraw, ImageFont
 from PIL import __version__ as pil_version
 
+import pandas as pd
+import seaborn as sn
+
 from ultralytics.utils import LOGGER, TryExcept, ops, plt_settings, threaded
 from .checks import check_font, check_version, is_ascii
 from .files import increment_path
+from ultralytics.data.kitti_utils import Object3d
+from ultralytics.data.decode_helper import decode_detections, extract_dets_from_targets
+from ultralytics.data.raycasting import project_to_image
 
 
 class Colors:
@@ -649,6 +658,87 @@ def plot_labels(boxes, cls, names=(), save_dir=Path(""), on_plot=None):
     if on_plot:
         on_plot(fname)
 
+def plot_labels_2D(boxes2d, classes, class2id, save_dir, img_size, type_):
+    # Plot dataset labels
+    LOGGER.info(f"Plotting labels to {save_dir / f'labels_2D_{type_}.jpg'}... ")
+    nc = len(class2id)  # number of classes
+    boxes = boxes2d[:150000]  # limit to 150k boxes
+    x = pd.DataFrame(boxes, columns=["x", "y", "width", "height"])
+
+    # Seaborn correlogram
+    sn.pairplot(x, corner=True, diag_kind="auto", kind="hist", diag_kws=dict(bins=50), plot_kws=dict(pmax=0.9))
+    plt.savefig(save_dir / f"labels_correlogram_2D_{type_}.jpg", dpi=200)
+    plt.close()
+
+    # Matplotlib labels
+    ax = plt.subplots(2, 2, figsize=(12, 8), tight_layout=True)[1].ravel()
+    y = ax[0].hist(classes, bins=np.linspace(0, nc, nc + 1) - 0.5, rwidth=0.8)
+    for i in range(nc):
+        y[2].patches[i].set_color([x / 255 for x in colors(i)])
+    ax[0].set_ylabel("instances")
+    if 0 < len(class2id) < 30:
+        ax[0].set_xticks(range(len(class2id)))
+        ax[0].set_xticklabels(list(class2id.keys()), rotation=90, fontsize=10)
+    else:
+        ax[0].set_xlabel("classes")
+    sn.histplot(x, x="x", y="y", ax=ax[2], bins=50, pmax=0.9)
+    sn.histplot(x, x="width", y="height", ax=ax[3], bins=50, pmax=0.9)
+
+    # Rectangles
+    boxes = boxes / np.array([1.0, 1.0, img_size[0], img_size[1]])
+    boxes[:, 0:2] = 0.5  # center
+    boxesXY = ops.xywh2xyxy(boxes) * np.array([img_size[0], img_size[1], img_size[0], img_size[1]])
+    img = Image.fromarray(np.ones((img_size[1], img_size[0], 3), dtype=np.uint8) * 255)
+    for cls, box in zip(classes[:500], boxesXY[:500]):
+        ImageDraw.Draw(img).rectangle(box.tolist(), width=1, outline=colors(cls * 5))  # plot
+    ImageDraw.Draw(img).rectangle([0, 0, img_size[0], img_size[1]], width=5, outline=(0, 0, 0))  # plot
+    ax[1].imshow(img)
+    ax[1].axis("off")
+
+    for a in [0, 1, 2, 3]:
+        for s in ["top", "right", "left", "bottom"]:
+            ax[a].spines[s].set_visible(False)
+
+    fname = save_dir / f"labels_{type_}.jpg"
+    plt.savefig(fname, dpi=400)
+    plt.close()
+
+def _plot_labels_3D(sizes3d, pos3d, occlusions, truncations, levels, save_dir, type_):
+    LOGGER.info(f"Plotting labels to {save_dir / f'labels_correlogram_3D_{type_}.jpg'}... ")
+    boxes = np.concatenate([pos3d, sizes3d], 1)  # limit to 150k boxes
+    x = pd.DataFrame(boxes, columns=["x", "y", "z", "height", "width", "length"])
+
+    # Seaborn correlogram
+    sn.pairplot(x, corner=True, diag_kind="auto", kind="hist", diag_kws=dict(bins=50), plot_kws=dict(pmax=0.9))
+    plt.savefig(save_dir / f"labels_correlogram_3D_{type_}.jpg", dpi=200)
+    plt.close()
+
+@plt_settings()
+def plot_labels_3D(labels_: [Object3d], class2id={}, save_dir=Path(""), img_size=(1280, 384), on_plot=None):
+    """Plot training labels including class histograms and box statistics."""
+
+    # Filter matplotlib>=3.7.2 warning and Seaborn use_inf and is_categorical FutureWarnings
+    warnings.filterwarnings("ignore", category=UserWarning, message="The figure layout has changed to tight")
+    warnings.filterwarnings("ignore", category=FutureWarning)
+
+    labels_ = [label for label in labels_ if label.level_str not in ["DontCare", "UnKnown"]]
+    car_labels = [label for label in labels_ if label.cls_type == "Car"]
+    easy_labels = [label for label in labels_ if label.level == 1]
+    moderate_labels = [label for label in labels_ if label.level == 2]
+    hard_labels = [label for label in labels_ if label.level == 3]
+
+    label_list = [labels_, car_labels, easy_labels, moderate_labels, hard_labels]
+    for labels, type_ in zip(label_list, ["all", "cars", "easy", "moderate", "hard"]):
+        boxes2d = ops.xyxy2xywh(np.array([lb.box2d for lb in labels]))  # xywh
+        sizes3d = np.array([np.array([lb.h, lb.w, lb.l]) for lb in labels])  # h, w, l
+        pos3d = np.array([lb.pos for lb in labels])  # x (image -> right), y (image -> down), z (into plane)
+        occlusions = np.array([lb.occlusion for lb in labels])
+        truncations = np.array([lb.trucation for lb in labels])
+        classes = np.array([class2id[lb.cls_type] for lb in labels])
+        levels = np.array([lb.level for lb in labels])
+
+        plot_labels_2D(boxes2d, classes, class2id, save_dir, img_size, type_)
+        _plot_labels_3D(sizes3d, pos3d, occlusions, truncations, levels, save_dir, type_)
 
 def save_one_box(xyxy, im, file=Path("im.jpg"), gain=1.02, pad=10, square=False, BGR=False, save=True):
     """
@@ -698,7 +788,7 @@ def save_one_box(xyxy, im, file=Path("im.jpg"), gain=1.02, pad=10, square=False,
     return crop
 
 
-@threaded
+#TODO undo @threaded
 def plot_images(
     images,
     batch_idx,
@@ -714,6 +804,7 @@ def plot_images(
     max_subplots=16,
     save=True,
     conf_thres=0.25,
+    targets3d=None,
 ):
     """Plot image grid with labels."""
     if isinstance(images, torch.Tensor):
@@ -729,12 +820,18 @@ def plot_images(
     if isinstance(batch_idx, torch.Tensor):
         batch_idx = batch_idx.cpu().numpy()
 
-    max_size = 1920  # max image size
+    max_size = 1920*2  # max image size
     bs, _, h, w = images.shape  # batch size, _, height, width
     bs = min(bs, max_subplots)  # limit plot images
     ns = np.ceil(bs**0.5)  # number of subplots (square)
-    if np.max(images[0]) <= 1:
+    if np.max(images[0]) <= 3:
+        if np.min(images[0]) < 0:
+            mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+            std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+            images = (images.transpose(0, 2, 3, 1) * std + mean).transpose(0, 3, 1, 2)
         images *= 255  # de-normalise (optional)
+
+
 
     # Build Image
     mosaic = np.full((int(ns * h), int(ns * w), 3), 255, dtype=np.uint8)  # init
@@ -1045,3 +1142,160 @@ def feature_visualization(x, module_type, stage, n=32, save_dir=Path("runs/detec
         plt.savefig(f, dpi=300, bbox_inches="tight")
         plt.close()
         np.save(str(f.with_suffix(".npy")), x[0].cpu().numpy())  # npy save
+
+
+class VisObject3D():
+
+    def __init__(self, translation, rotation, dimension, box2d, cls_id):
+        self.translation = np.array(translation)
+        self.rotation = rotation
+        self.dimension = dimension
+        self.box2d = box2d
+        self.cls_id = cls_id
+        self.box_idxs = [0, 1, 2, 3, 0,  # base
+                                    4, 7, 3, 7,  # right
+                                    6, 2, 6,  # back
+                                    5,  # left
+                                    4, 1, 5, 0]  # front
+        # yapf: enable
+        self.tip_idxs = [0, 1, 2, 0]
+
+    def get_box_corners(self) -> np.ndarray:
+        # corners in local coordinate frame
+        l, w, h = self.dimension
+        corners_x = [l / 2, l / 2, -l / 2, -l / 2, l / 2, l / 2, -l / 2, -l / 2]
+        corners_y = [w / 2, -w / 2, -w / 2, w / 2, w / 2, -w / 2, -w / 2, w / 2]
+        corners_z = [0, 0, 0, 0, h, h, h, h]
+
+        # rotate and translate
+        T = get_transform(self.translation, self.rotation)
+        return np.dot(T[:3, :3], np.array([corners_x, corners_y, corners_z])).T + T[:3, 3].reshape(1, 3)
+
+    def get_tip_corners(self, z_offset: float = 0) -> np.ndarray:
+        # corners in local coordinate frame
+        l, w, _ = self.dimension
+        corners_x = [0, l / 2, 0]
+        corners_y = [w / 2, 0, -w / 2]
+        corners_z = [z_offset, z_offset, z_offset]
+
+        # rotate and translate
+        T = get_transform(self.translation, self.rotation)
+        return np.dot(T[:3, :3], np.array([corners_x, corners_y, corners_z])).T + T[:3, 3].reshape(1, 3)
+
+    def get_bbox(self, camera_matrix: np.ndarray) -> np.ndarray:
+        box_corners = project_to_image(self.get_box_corners(), camera_matrix)
+        u_min, v_min = np.min(box_corners[:, 0]), np.min(box_corners[:, 1])
+        u_max, v_max = np.max(box_corners[:, 0]), np.max(box_corners[:, 1])
+        # return bbox in COCO format (u_top_left, v_top_left, width, height)
+        return np.array([u_min, v_min, u_max - u_min, v_max - v_min])
+
+    def get_coord_axes(self) -> np.ndarray:
+        return np.array([
+            [0, 0, 0],
+            [1, 0, 0],
+            [0, 0, 0],
+            [0, 1, 0],
+            [0, 0, 0],
+            [0, 0, 1]
+        ]) + self.translation
+
+
+def get_transform(translation: np.ndarray, rotation: np.ndarray) -> np.ndarray:
+    transform = np.eye(4)
+    transform[:3, :3] = Rotation.from_rotvec(rotation).as_matrix()
+    transform[:3, 3] = translation
+    return transform
+
+
+class KITTIVisualizer():
+
+    def __init__(self, classes=["Pedestrian", "Car", "Cyclist"]):
+        self.classes = classes
+        self.max_imgs = 16
+
+    def plot_batch(self, batch, dataset):
+        targets_, infos_ = self.collate_targets(batch)
+        images, infos = batch["img"], batch["info"]
+        calibs = [dataset.get_calib(info) for info in infos_['img_id']]
+        plt.clf()
+        fig, ax = plt.subplots(math.ceil(self.max_imgs**0.5), math.ceil(self.max_imgs**0.5),
+                               figsize=(36, 12), gridspec_kw = {'wspace':0, 'hspace':0}, constrained_layout=True)
+        ax = ax.ravel()
+
+        dets = extract_dets_from_targets(targets=targets_, K=50).detach().cpu().numpy()
+        results = decode_detections(dets=dets, info=infos_, calibs=calibs, cls_mean_size=dataset.cls_mean_size, threshold=0.2)
+
+        for i, (image, calib, (img_id, result), info) in enumerate(zip(images, calibs, results.items(), infos)):
+            if i > self.max_imgs:
+                break
+            img = image.numpy().transpose(1, 2, 0).copy()
+            img = np.clip((img * dataset.std + dataset.mean) * 255, 0, 255).astype(np.uint8)
+            img = cv2.resize(img, info["img_size"])
+
+            for object in result:
+                cls = object[0]
+                alpha = object[1]
+                bbox2d = np.array(object[2:6])
+                dimensions = np.array([object[8], object[7], object[6]])
+                translation = object[9:12]
+                ry = object[12]
+                egoc_rot_matrix = self.get_egoc_rot_matrix(ry)
+                score = object[13]
+
+                self.plot_3d_obj(img,
+                                 VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
+                                             dimensions, bbox2d, cls),
+                                 calib.P2)
+
+            ax[i].imshow(img)
+            ax[i].axis("off")
+
+        plt.show()
+        print()
+
+    def plot_3d_obj(self, img: np.ndarray, obj: VisObject3D, camera_matrix: np.ndarray, thickness: int = 1, gt: bool = True,
+                 bbox2d=False):
+
+        box_corners = project_to_image(obj.get_box_corners(), camera_matrix).astype(np.int32)
+        tip_corners = project_to_image(obj.get_tip_corners(), camera_matrix).astype(np.int32)
+        color_none_bottom, color_bottom = ((255, 0, 0), (255, 0, 0)) if gt else ((0, 255, 0), (0, 0, 255))
+        cv2.polylines(img, [box_corners[obj.box_idxs[:5]]], isClosed=False, color=color_none_bottom,
+                      thickness=thickness,
+                      lineType=cv2.LINE_AA)
+        cv2.polylines(img, [tip_corners], isClosed=True, color=color_none_bottom, thickness=thickness,
+                      lineType=cv2.LINE_AA)
+        cv2.polylines(img, [box_corners[obj.box_idxs[5:]]], isClosed=True, color=color_bottom, thickness=thickness,
+                      lineType=cv2.LINE_AA)
+        '''
+        axes = project_to_image(obj.get_coord_axes(), camera_matrix)
+        cv2.line(img, (int(axes[0][0]), int(axes[0][1])), (int(axes[1][0]), int(axes[1][1])), color=(255, 0, 0))
+        cv2.line(img, (int(axes[2][0]), int(axes[2][1])), (int(axes[3][0]), int(axes[3][1])), color=(0, 255, 0))
+        cv2.line(img, (int(axes[4][0]), int(axes[4][1])), (int(axes[5][0]), int(axes[5][1])), color=(0, 0, 255))
+        '''
+        if bbox2d:
+            color_bbox = (255, 70, 70) if gt else (70, 70, 70)
+            cv2.rectangle(img, (int(obj.box2d[0]), int(obj.box2d[1])), (int(obj.box2d[2]), int(obj.box2d[3])), color_bbox, thickness=3)
+
+
+
+    @staticmethod
+    def get_egoc_rot_matrix(rot_y, **kwargs):
+        euler_angles = np.asarray([np.pi / 2, rot_y, 0])
+        rot_matrix = Rotation.from_euler('xyz', euler_angles).as_matrix()
+        return torch.from_numpy(rot_matrix).to(dtype=torch.float32)
+
+    @staticmethod
+    def collate_targets(batch):
+        """Collates data samples into batches."""
+        targets = {}
+        keys = batch["targets"][0].keys()
+        values = list(zip(*[list(b.values()) for b in batch["targets"]]))
+        for i, k in enumerate(keys):
+            targets[k] = np.stack(values[i], 0)
+        infos = {}
+        keys = batch["info"][0].keys()
+        values = list(zip(*[list(b.values()) for b in batch["info"]]))
+        for i, k in enumerate(keys):
+            infos[k] = np.stack(values[i], 0)
+        return targets, infos
+

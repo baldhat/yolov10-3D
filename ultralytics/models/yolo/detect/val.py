@@ -101,7 +101,7 @@ class DetectionValidator(BaseValidator):
         ori_shape = batch["ori_shape"][si]
         imgsz = batch["img"].shape[2:]
         ratio_pad = batch["ratio_pad"][si]
-        if len(cls):
+        if type(cls) is torch.Tensor and cls.nelement() > 0 or type(cls) is list and len(list) > 0:
             bbox = ops.xywh2xyxy(bbox) * torch.tensor(imgsz, device=self.device)[[1, 0, 1, 0]]  # target boxes
             ops.scale_boxes(imgsz, bbox, ori_shape, ratio_pad=ratio_pad)  # native-space labels
         return dict(cls=cls, bbox=bbox, ori_shape=ori_shape, imgsz=imgsz, ratio_pad=ratio_pad)
@@ -126,7 +126,7 @@ class DetectionValidator(BaseValidator):
             )
             pbatch = self._prepare_batch(si, batch)
             cls, bbox = pbatch.pop("cls"), pbatch.pop("bbox")
-            nl = len(cls)
+            nl = len(cls) if type(cls) is list else cls.nelement()
             stat["target_cls"] = cls
             if npr == 0:
                 if nl:

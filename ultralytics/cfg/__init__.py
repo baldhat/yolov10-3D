@@ -556,15 +556,23 @@ def entrypoint(debug=""):
         from ultralytics import YOLO
 
         model = YOLO(model, task=task)
-    else:
-        from ultralytics import YOLOv10
-
-        # Special case for the HuggingFace Hub
-        split_path = model.split('/')
-        if len(split_path) == 2 and (not os.path.exists(model)):
-            model = YOLOv10.from_pretrained(model)
+    elif "yolov10" in stem:
+        if "3d" in stem.lower():
+            from ultralytics import YOLOv10_3D
+            split_path = model.split('/')
+            if len(split_path) == 2 and (not os.path.exists(model)):
+                model = YOLOv10_3D.from_pretrained(model)
+            else:
+                model = YOLOv10_3D(model)
         else:
-            model = YOLOv10(model)
+            from ultralytics import YOLOv10
+
+            # Special case for the HuggingFace Hub
+            split_path = model.split('/')
+            if len(split_path) == 2 and (not os.path.exists(model)):
+                model = YOLOv10.from_pretrained(model)
+            else:
+                model = YOLOv10(model)
     if isinstance(overrides.get("pretrained"), str):
         model.load(overrides["pretrained"])
 

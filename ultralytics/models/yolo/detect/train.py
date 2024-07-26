@@ -44,7 +44,7 @@ class DetectionTrainer(BaseTrainer):
 
     def get_dataloader(self, dataset_path, batch_size=16, rank=0, mode="train"):
         """Construct and return dataloader."""
-        assert mode in ["train", "val"]
+        assert mode in ["train", "val", "trainval"]
         with torch_distributed_zero_first(rank):  # init dataset *.cache only once if DDP
             dataset = self.build_dataset(dataset_path, mode, batch_size)
         shuffle = mode == "train"
@@ -130,6 +130,7 @@ class DetectionTrainer(BaseTrainer):
             paths=batch["im_file"],
             fname=self.save_dir / f"train_batch{ni}.jpg",
             on_plot=self.on_plot,
+            targets3d=batch["targets"] if "targets" in batch.keys() else None,
         )
 
     def plot_metrics(self):
