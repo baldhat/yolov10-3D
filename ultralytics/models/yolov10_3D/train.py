@@ -15,7 +15,6 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
         self.visualizer = KITTIVisualizer()
 
     def build_dataset(self, img_path, mode="train", batch=None):
-        gs = max(int(de_parallel(self.model).stride.max() if self.model else 0), 32)
         return KITTIDataset(img_path, mode, self.args)
 
     def get_validator(self):
@@ -53,6 +52,6 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
             paths=batch["im_file"],
             fname=self.save_dir / f"train_batch{ni}.jpg",
             on_plot=self.on_plot,
-            max_subplots=4
+            max_subplots=9
         )
-        self.visualizer.plot_batch(batch, self.train_loader.dataset)
+        self.visualizer.plot_batch(batch, self.train_loader.dataset, self.save_dir / f"train_batch3d{ni}.jpg")

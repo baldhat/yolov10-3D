@@ -179,7 +179,8 @@ class Annotator:
                 self.draw.polygon([tuple(b) for b in box], width=self.lw, outline=color)
             else:
                 p1 = (box[0], box[1])
-                self.draw.rectangle(box, width=self.lw, outline=color)  # box
+                self.draw.point(p1)
+                self.draw.rectangle([(box[0], box[1]), (box[2], box[3])], width=self.lw, outline=color)  # box
             if label:
                 w, h = self.font.getsize(label)  # text width, height
                 outside = p1[1] - h >= 0  # label fits outside box
@@ -788,7 +789,7 @@ def save_one_box(xyxy, im, file=Path("im.jpg"), gain=1.02, pad=10, square=False,
     return crop
 
 
-#TODO undo @threaded
+#@threaded
 def plot_images(
     images,
     batch_idx,
@@ -1211,9 +1212,9 @@ class KITTIVisualizer():
 
     def __init__(self, classes=["Pedestrian", "Car", "Cyclist"]):
         self.classes = classes
-        self.max_imgs = 16
+        self.max_imgs = 9
 
-    def plot_batch(self, batch, dataset):
+    def plot_batch(self, batch, dataset, filename):
         targets_, infos_ = self.collate_targets(batch)
         images, infos = batch["img"], batch["info"]
         calibs = [dataset.get_calib(info) for info in infos_['img_id']]
@@ -1226,7 +1227,7 @@ class KITTIVisualizer():
         results = decode_detections(dets=dets, info=infos_, calibs=calibs, cls_mean_size=dataset.cls_mean_size, threshold=0.2)
 
         for i, (image, calib, (img_id, result), info) in enumerate(zip(images, calibs, results.items(), infos)):
-            if i > self.max_imgs:
+            if i >= self.max_imgs:
                 break
             img = image.numpy().transpose(1, 2, 0).copy()
             img = np.clip((img * dataset.std + dataset.mean) * 255, 0, 255).astype(np.uint8)
@@ -1250,11 +1251,10 @@ class KITTIVisualizer():
             ax[i].imshow(img)
             ax[i].axis("off")
 
-        plt.show()
-        print()
+        plt.savefig(filename, dpi=300, bbox_inches="tight")
 
     def plot_3d_obj(self, img: np.ndarray, obj: VisObject3D, camera_matrix: np.ndarray, thickness: int = 1, gt: bool = True,
-                 bbox2d=False):
+                 bbox2d=True):
 
         box_corners = project_to_image(obj.get_box_corners(), camera_matrix).astype(np.int32)
         tip_corners = project_to_image(obj.get_tip_corners(), camera_matrix).astype(np.int32)

@@ -563,7 +563,7 @@ def entrypoint(debug=""):
             if len(split_path) == 2 and (not os.path.exists(model)):
                 model = YOLOv10_3D.from_pretrained(model)
             else:
-                model = YOLOv10_3D(model)
+                model = YOLOv10_3D(model) #.from_pretrained("jameslahm/yolov10n")
         else:
             from ultralytics import YOLOv10
 

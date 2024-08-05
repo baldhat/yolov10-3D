@@ -397,6 +397,7 @@ class SemanticDataset(BaseDataset):
 
 class KITTIDataset(data.Dataset):
     def __init__(self, image_file_path, mode, args):
+        mode = "val" # FIXME
         # basic configuration
         self.num_classes = 3
         self.max_objs = 50
@@ -504,8 +505,10 @@ class KITTIDataset(data.Dataset):
                 random_crop_flag = True
                 scale = np.clip(np.random.randn() * self.scale + 1, 1 - self.scale, 1 + self.scale)
                 crop_size = img_size * scale
-                center[0] += img_size[0] * np.clip(np.random.randn() * self.shift, -2 * self.shift, 2 * self.shift)
-                center[1] += img_size[1] * np.clip(np.random.randn() * self.shift, -2 * self.shift, 2 * self.shift)
+                shift_0 = img_size[0] * np.clip(np.random.randn() * self.shift, -2 * self.shift, 2 * self.shift)
+                shift_1 = img_size[1] * np.clip(np.random.randn() * self.shift, -2 * self.shift, 2 * self.shift)
+                center[0] += shift_0
+                center[1] += shift_1
 
         if random_mix_flag == True:
             count_num = 0
@@ -595,10 +598,13 @@ class KITTIDataset(data.Dataset):
 
                 # process 2d bbox & get 2d center
                 bbox_2d = objects[i].box2d.copy()
-                bbox_2d_ = xyxy2xywh(bbox_2d)
                 # add affine transformation for 2d boxes.
                 bbox_2d[:2] = affine_transform(bbox_2d[:2], trans)
                 bbox_2d[2:] = affine_transform(bbox_2d[2:], trans)
+                bbox_2d_ = bbox_2d
+                bbox_2d_[:2] = bbox_2d[:2] * (img_size / self.resolution)
+                bbox_2d_[2:] = bbox_2d[2:] * (img_size / self.resolution)
+                bbox_2d_ = xyxy2xywh(bbox_2d_)
                 # modify the 2d bbox according to pre-compute downsample ratio
                 bbox_2d[:] /= self.downsample
 
@@ -682,10 +688,14 @@ class KITTIDataset(data.Dataset):
                         continue
                     # process 2d bbox & get 2d center
                     bbox_2d = objects[i].box2d.copy()
-                    bbox_2d_ = xyxy2xywh(bbox_2d)
                     # add affine transformation for 2d boxes.
                     bbox_2d[:2] = affine_transform(bbox_2d[:2], trans)
                     bbox_2d[2:] = affine_transform(bbox_2d[2:], trans)
+
+                    bbox_2d_ = bbox_2d
+                    bbox_2d_[:2] = bbox_2d[:2] * (img_size / self.resolution)
+                    bbox_2d_[2:] = bbox_2d[2:] * (img_size / self.resolution)
+                    bbox_2d_ = xyxy2xywh(bbox_2d_)
                     # modify the 2d bbox according to pre-compute downsample ratio
                     bbox_2d[:] /= self.downsample
 

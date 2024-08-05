@@ -22,3 +22,10 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
             boxes, scores, labels = ops.v10postprocess(preds, self.args.max_det, self.nc)
             bboxes = ops.xywh2xyxy(boxes)
             return torch.cat([bboxes, scores.unsqueeze(-1), labels.unsqueeze(-1)], dim=-1)
+
+    def preprocess(self, batch):
+        batch["img"] = batch["img"].to(self.device, non_blocking=True)
+        batch["img"] = (batch["img"].half() if self.args.half else batch["img"].float())
+        for k in ["batch_idx", "cls", "bboxes"]:
+            batch[k] = batch[k].to(self.device)
+        return batch
