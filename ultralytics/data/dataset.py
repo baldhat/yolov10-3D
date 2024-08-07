@@ -397,7 +397,6 @@ class SemanticDataset(BaseDataset):
 
 class KITTIDataset(data.Dataset):
     def __init__(self, image_file_path, mode, args):
-        mode = "val" # FIXME
         # basic configuration
         self.num_classes = 3
         self.max_objs = 50
@@ -601,9 +600,9 @@ class KITTIDataset(data.Dataset):
                 # add affine transformation for 2d boxes.
                 bbox_2d[:2] = affine_transform(bbox_2d[:2], trans)
                 bbox_2d[2:] = affine_transform(bbox_2d[2:], trans)
-                bbox_2d_ = bbox_2d
-                bbox_2d_[:2] = bbox_2d[:2] * (img_size / self.resolution)
-                bbox_2d_[2:] = bbox_2d[2:] * (img_size / self.resolution)
+                bbox_2d_ = np.copy(bbox_2d)
+                bbox_2d_[:2] = bbox_2d[:2]
+                bbox_2d_[2:] = bbox_2d[2:]
                 bbox_2d_ = xyxy2xywh(bbox_2d_)
                 # modify the 2d bbox according to pre-compute downsample ratio
                 bbox_2d[:] /= self.downsample
@@ -692,9 +691,9 @@ class KITTIDataset(data.Dataset):
                     bbox_2d[:2] = affine_transform(bbox_2d[:2], trans)
                     bbox_2d[2:] = affine_transform(bbox_2d[2:], trans)
 
-                    bbox_2d_ = bbox_2d
-                    bbox_2d_[:2] = bbox_2d[:2] * (img_size / self.resolution)
-                    bbox_2d_[2:] = bbox_2d[2:] * (img_size / self.resolution)
+                    bbox_2d_ = np.copy(bbox_2d)
+                    bbox_2d_[:2] = bbox_2d[:2]
+                    bbox_2d_[2:] = bbox_2d[2:]
                     bbox_2d_ = xyxy2xywh(bbox_2d_)
                     # modify the 2d bbox according to pre-compute downsample ratio
                     bbox_2d[:] /= self.downsample
@@ -781,9 +780,10 @@ class KITTIDataset(data.Dataset):
 
         if len(boxes_2d) > 0:
             # We need xywh in [0, 1]
-            bboxes = torch.tensor(np.array(boxes_2d) / np.concatenate((np.array(img_size), np.array(img_size))))
+            bboxes = torch.clip(torch.tensor(np.array(boxes_2d) / self.resolution[[0, 1, 0, 1]]), 0, 1)
         else:
             bboxes = torch.empty(0)
+        ratio_pad = np.array([self.resolution/img_size, np.array([0, 0])])
 
         return {
             "img": inputs,
@@ -796,8 +796,8 @@ class KITTIDataset(data.Dataset):
             "bboxes": bboxes,
             "batch_idx": torch.zeros(len(boxes_2d)),
             "im_file": '%06d.txt' % info["img_id"],
-            "ori_shape": info["img_size"],
-            "ratio_pad": torch.tensor([[1, 1], [0, 0]])
+            "ori_shape": info["img_size"][::-1],
+            "ratio_pad": torch.tensor(ratio_pad)
         }
 
     @staticmethod

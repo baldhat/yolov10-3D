@@ -179,7 +179,6 @@ class Annotator:
                 self.draw.polygon([tuple(b) for b in box], width=self.lw, outline=color)
             else:
                 p1 = (box[0], box[1])
-                self.draw.point(p1)
                 self.draw.rectangle([(box[0], box[1]), (box[2], box[3])], width=self.lw, outline=color)  # box
             if label:
                 w, h = self.font.getsize(label)  # text width, height

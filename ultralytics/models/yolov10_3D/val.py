@@ -1,12 +1,15 @@
 from ultralytics.models.yolo.detect import DetectionValidator
 from ultralytics.utils import ops
 import torch
+from ultralytics.data.dataset import KITTIDataset
 
 class YOLOv10_3DDetectionValidator(DetectionValidator):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.args.save_json |= self.is_coco
 
+    def build_dataset(self, img_path, mode="val", batch=None):
+        return KITTIDataset(img_path, mode, self.args)
     def postprocess(self, preds):
         if isinstance(preds, dict):
             preds = preds["one2one"]
