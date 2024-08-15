@@ -19,7 +19,8 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
 
     def get_validator(self):
         """Returns a DetectionValidator for YOLO model validation."""
-        self.loss_names = "box_om", "cls_om", "dfl_om", "box_oo", "cls_oo", "dfl_oo", 
+        self.loss_names = ("box_om", "cls_om", "dep_om", "o3d_om", "s3d_om", "hd_om",
+                           "box_oo", "cls_oo", "dep_oo", "o3d_oo", "s3d_oo", "hd_oo")
         return YOLOv10_3DDetectionValidator(
             self.test_loader, save_dir=self.save_dir, args=copy(self.args), _callbacks=self.callbacks
         )

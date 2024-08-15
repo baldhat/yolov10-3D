@@ -14,6 +14,7 @@ from .transformer import MLP, DeformableTransformerDecoder, DeformableTransforme
 from .utils import bias_init_with_prob, linear_init
 import copy
 from ultralytics.utils import ops
+import numpy as np
 
 __all__ = "Detect", "Segment", "Pose", "Classify", "OBB", "RTDETRDecoder"
 
@@ -32,13 +33,20 @@ class Detect(nn.Module):
         super().__init__()
         self.nc = nc  # number of classes
         self.nl = len(ch)  # number of detection layers
+        # number of bounding boxes to predict:
         self.reg_max = 16  # DFL channels (ch[0] // 16 to scale 4/8/12/16/20 for n/s/m/l/x)
         self.no = nc + self.reg_max * 4  # number of outputs per anchor
         self.stride = torch.zeros(self.nl)  # strides computed during build
         c2, c3 = max((16, ch[0] // 4, self.reg_max * 4)), max(ch[0], min(self.nc, 100))  # channels
+        # bounding box predictor:
         self.cv2 = nn.ModuleList(
-            nn.Sequential(Conv(x, c2, 3), Conv(c2, c2, 3), nn.Conv2d(c2, 4 * self.reg_max, 1)) for x in ch
+            nn.Sequential(
+                Conv(x, c2, 3),
+                Conv(c2, c2, 3),
+                nn.Conv2d(c2, 4 * self.reg_max, 1))
+            for x in ch
         )
+        # class predictor:
         self.cv3 = nn.ModuleList(nn.Sequential(Conv(x, c3, 3), Conv(c3, c3, 3), nn.Conv2d(c3, self.nc, 1)) for x in ch)
         self.dfl = DFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
 
@@ -535,41 +543,188 @@ class v10Detect(Detect):
             b[-1].bias.data[: m.nc] = math.log(5 / m.nc / (640 / s) ** 2)  # cls (.01 objects, 80 classes, 640 img)
 
 
-class v10Detect3d(Detect):
+def weights_init_xavier(m):
+    classname = m.__class__.__name__
+    if classname.find('Linear') != -1:
+        nn.init.xavier_uniform_(m.weight)
+        if m.bias is not None:
+            nn.init.constant_(m.bias, 0.0)
+    elif classname.find('Conv2d') != -1:
+        nn.init.xavier_uniform_(m.weight)
+        if m.bias is not None:
+            nn.init.constant_(m.bias, 0.0)
+    elif classname.find('Conv') != -1:
+        nn.init.xavier_uniform_(m.conv.weight)
+        if m.conv.bias is not None:
+            nn.init.constant_(m.conv.bias, 0.0)
+    elif classname.find('BatchNorm') != -1:
+        if m.affine:
+            nn.init.constant_(m.weight, 1.0)
+            nn.init.constant_(m.bias, 0.0)
+
+# TODO: Re-add one2one branch
+class v10Detect3d(nn.Module):
     max_det = 50
 
-    def __init__(self, nc=3, ch=()):
-        super().__init__(nc, ch)
-        c3 = max(ch[0], min(self.nc, 100))  # channels
-        self.cv3 = nn.ModuleList(nn.Sequential(nn.Sequential(Conv(x, x, 3, g=x), Conv(x, c3, 1)), \
-                                               nn.Sequential(Conv(c3, c3, 3, g=c3), Conv(c3, c3, 1)), \
-                                               nn.Conv2d(c3, self.nc, 1)) for i, x in enumerate(ch))
+    dynamic = False  # force grid reconstruction
+    export = False  # export mode
+    shape = None
+    anchors = torch.empty(0)  # init
+    strides = torch.empty(0)  # init
 
-        self.one2one_cv2 = copy.deepcopy(self.cv2)
-        self.one2one_cv3 = copy.deepcopy(self.cv3)
+    def __init__(self, nc=80, ch=()):
+        """Initializes the YOLOv8 detection layer with specified number of classes and channels."""
+        super().__init__()
+        self.nc = nc  # number of classes
+        self.nl = len(ch)  # number of detection layers
+        self.no = nc + 2 + 2 + 2 + 3 + 24 + 1 + 1  # number of outputs per anchor
+        self.stride = torch.zeros(self.nl)  # strides computed during build
+        cls_c, o2d_c, s2d_c, o3d_c, s3d_c, hd_c, dep_c, dep_un_c = 128, 128, 128, 128, 128, 128, 128, 128 #TODO: optimize
+
+        self.cls = nn.ModuleList(nn.Sequential(Conv(x, cls_c, 3),
+                                              Conv(cls_c, cls_c, 3),
+                                              nn.Conv2d(cls_c, self.nc, 1)) for x in ch)
+        self.o2d = nn.ModuleList(nn.Sequential(Conv(x, o2d_c, 3),
+                                              Conv(o2d_c, o2d_c, 3),
+                                              nn.Conv2d(o2d_c, 2, 1)) for x in ch)
+        self.s2d = nn.ModuleList(nn.Sequential(Conv(x, s2d_c, 3),
+                                              Conv(s2d_c, s2d_c, 3),
+                                              nn.Conv2d(s2d_c, 2, 1)) for x in ch)
+        self.o3d = nn.ModuleList(nn.Sequential(Conv(x, o3d_c, 3),
+                                              Conv(o3d_c, o3d_c, 3),
+                                              nn.Conv2d(o3d_c, 2, 1)) for x in ch)
+        self.s3d = nn.ModuleList(nn.Sequential(Conv(x, s3d_c, 3),
+                                              Conv(s3d_c, s3d_c, 3),
+                                              nn.Conv2d(s3d_c, 3, 1)) for x in ch)
+        self.hd = nn.ModuleList(nn.Sequential(Conv(x, hd_c, 3),
+                                              Conv(hd_c, hd_c, 3),
+                                              nn.Conv2d(hd_c, 24, 1)) for x in ch)
+        self.dep = nn.ModuleList(nn.Sequential(Conv(x, dep_c, 3),
+                                              Conv(dep_c, dep_c, 3),
+                                              nn.Conv2d(dep_c, 1, 1)) for x in ch)
+        self.dep_un = nn.ModuleList(nn.Sequential(Conv(x, dep_un_c, 3),
+                                              Conv(dep_un_c, dep_un_c, 3),
+                                              nn.Conv2d(dep_un_c, 1, 1)) for x in ch)
+
+        self.o2o_heads = nn.ModuleList([self.cls, self.o2d, self.s2d, self.o3d, self.s3d, self.hd, self.dep, self.dep_un])
+        self.o2m_heads = copy.deepcopy(self.o2o_heads)
+
+    def decode(self, cls, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un):
+        s2d = pred_s2d * self.strides
+        o2d = (pred_o2d + self.anchors) * self.strides
+        xy1 = o2d - s2d / 2
+        xy2 = o2d + s2d / 2
+        bbox = torch.cat((xy1, xy2), dim=1)
+
+        center3d = (pred_o3d + self.anchors) * self.strides
+
+        # cls_id = cls.argmax(dim=1).unsqueeze(1)
+        # pred_bin = pred_hd[:, :12, :]
+        # pred_res = pred_hd[:, 12:, :]
+        # bins = pred_bin.argmax(dim=1)
+        # idx = torch.nn.functional.one_hot(pred_bin.max(dim=1, keepdim=True)[1].permute(0, 2, 1), num_classes=12).squeeze(-2)
+        # res = pred_res[idx.bool().permute(0, 2, 1)].view(bins.shape)
+        # alpha = class2angle(bins, res)
+
+        return torch.cat((cls, bbox, center3d, pred_s3d, pred_hd, pred_dep, pred_dep_un), dim=1)
+
+    def inference(self, x):
+        shape = x[0].shape  # BCHW
+        x_cat = torch.cat([xi.view(shape[0], self.no, -1) for xi in x], 2)
+        if self.dynamic or self.shape != shape:
+            self.anchors, self.strides = (x.transpose(0, 1) for x in make_anchors(x, self.stride, 0.5))
+            self.shape = shape
+
+        if self.export and self.format in (
+        "saved_model", "pb", "tflite", "edgetpu", "tfjs"):  # avoid TF FlexSplitV ops
+            box = x_cat[:, : self.reg_max * 4]
+            cls = x_cat[:, self.reg_max * 4:]
+        else:
+            cls, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un = (
+                torch.cat([xi.view(x[0].shape[0], self.no, -1) for xi in x], 2).split(
+                    (self.nc, 2, 2, 2, 3, 24, 1, 1), 1
+                ))
+            preds = self.decode(cls, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un)
+
+        if self.export and self.format in ("tflite", "edgetpu"):
+            # Precompute normalization factor to increase numerical stability
+            # See https://github.com/ultralytics/ultralytics/issues/7371
+            grid_h = shape[2]
+            grid_w = shape[3]
+            grid_size = torch.tensor([grid_w, grid_h, grid_w, grid_h], device=box.device).reshape(1, 4, 1)
+            norm = self.strides / (self.stride[0] * grid_size)
+            dbox = self.decode_bboxes(box * norm, self.anchors.unsqueeze(0) * norm[:, :2])
+        # else:
+        #
+        #     dbox = self.decode_bboxes(box, self.anchors.unsqueeze(0)) * self.strides
+
+        y = preds#torch.cat((cls, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un), 1)
+        return y if self.export else (y, x)
+
+    def forward_feat(self, x, heads):
+        y = []
+        for i in range(self.nl):
+            y.append(torch.cat([module[i](x[i]) for module in heads], 1))
+        return y
+
+    def _forward(self, x):
+        """Concatenates and returns predicted bounding boxes and class probabilities."""
+        y = self.forward_feat(x, self.o2m_heads)
+
+        if self.training:
+            return y
+
+        return self.inference(y)
 
     def forward(self, x):
-        one2one = self.forward_feat([xi.detach() for xi in x], self.one2one_cv2, self.one2one_cv3)
+        one2one = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
         if not self.export:
-            one2many = super().forward(x)
+            one2many = self._forward(x)
 
         if not self.training:
             one2one = self.inference(one2one)
             if not self.export:
                 return {"one2many": one2many, "one2one": one2one}
             else:
-                assert (self.max_det != -1)
+                raise NotImplementedError("TODO")
+                assert(self.max_det != -1)
                 boxes, scores, labels = ops.v10postprocess(one2one.permute(0, 2, 1), self.max_det, self.nc)
                 return torch.cat([boxes, scores.unsqueeze(-1), labels.unsqueeze(-1).to(boxes.dtype)], dim=-1)
         else:
             return {"one2many": one2many, "one2one": one2one}
 
+    def decode_bboxes(self, bboxes, anchors):
+        # anchor_points:
+        # pred_2d: offset_2d (2), size_2d(2)
+        offset, size = bboxes.split((2, 2), dim=1)
+        centers = anchors + offset
+        xy1 = centers - size / 2
+        xy2 = centers + size / 2
+        xy = xy1 + (xy2 - xy1) / 2
+        wh = xy2 - xy1
+        return torch.cat((xy, wh), dim=1)
+
     def bias_init(self):
-        super().bias_init()
-        """Initialize Detect() biases, WARNING: requires stride availability."""
-        m = self  # self.model[-1]  # Detect() module
-        # cf = torch.bincount(torch.tensor(np.concatenate(dataset.labels, 0)[:, 0]).long(), minlength=nc) + 1
-        # ncf = math.log(0.6 / (m.nc - 0.999999)) if cf is None else torch.log(cf / cf.sum())  # nominal class frequency
-        for a, b, s in zip(m.one2one_cv2, m.one2one_cv3, m.stride):  # from
-            a[-1].bias.data[:] = 1.0  # box
-            b[-1].bias.data[: m.nc] = math.log(5 / m.nc / (640 / s) ** 2)  # cls (.01 objects, 80 classes, 640 img)
+        # TODO: Better weight initialization
+        for i in range(self.nl):
+            self.cls[i][-1].bias.data[: self.nc] = math.log(5 / self.nc / ((1280 / self.stride[i]) * (384 / self.stride[i])))
+            self.s2d[i][-1].bias.data.fill_(6)
+            self.o2d[i][-1].bias.data.fill_(0.5)
+            self.o3d[i][-1].bias.data.fill_(0.5)
+            # self.s3d[i].apply(weights_init_xavier)
+            # self.hd[i].apply(weights_init_xavier)
+            #
+            # self.dep[i].apply(weights_init_xavier)
+            # self.dep_un[i].apply(weights_init_xavier)
+
+        self.o2o_heads = nn.ModuleList(
+             [self.cls, self.o2d, self.s2d, self.o3d, self.s3d, self.hd, self.dep, self.dep_un])
+        self.o2m_heads = copy.deepcopy(self.o2o_heads)
+        pass
+
+    def fill_fc_weights(self, layers):
+        for m in layers.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.normal_(m.weight, std=0.001)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)

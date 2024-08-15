@@ -22,7 +22,7 @@ from ultralytics.utils import LOGGER, TryExcept, ops, plt_settings, threaded
 from .checks import check_font, check_version, is_ascii
 from .files import increment_path
 from ultralytics.data.kitti_utils import Object3d
-from ultralytics.data.decode_helper import decode_detections, extract_dets_from_targets
+from ultralytics.data.decode_helper import decode_batch, decode_preds
 from ultralytics.data.raycasting import project_to_image
 
 
@@ -873,6 +873,9 @@ def plot_images(
                 boxes[..., 0::2] += x
                 boxes[..., 1::2] += y
                 for j, box in enumerate(boxes.astype(np.int64).tolist()):
+                    if box[2] <= box[0] or box[3] <= box[1]:
+                        print("Warning: Invalid bounding box")
+                        continue
                     c = classes[j]
                     color = colors(c)
                     c = names.get(c, c) if names else c
@@ -1099,7 +1102,6 @@ def output_to_target(output, max_det=300):
     targets = torch.cat(targets, 0).numpy()
     return targets[:, 0], targets[:, 1], targets[:, 2:-1], targets[:, -1]
 
-
 def output_to_rotated_target(output, max_det=300):
     """Convert model output to target format [batch_id, class_id, x, y, w, h, conf] for plotting."""
     targets = []
@@ -1214,23 +1216,21 @@ class KITTIVisualizer():
         self.max_imgs = 9
 
     def plot_batch(self, batch, dataset, filename):
-        targets_, infos_ = self.collate_targets(batch)
-        images, infos = batch["img"], batch["info"]
+        infos_ = self.collate_infos(batch)
         calibs = [dataset.get_calib(info) for info in infos_['img_id']]
+        targets = decode_batch(batch, calibs, dataset.cls_mean_size)
+        images, infos = batch["img"], batch["info"]
+
         plt.clf()
         fig, ax = plt.subplots(math.ceil(self.max_imgs**0.5), math.ceil(self.max_imgs**0.5),
                                figsize=(36, 12), gridspec_kw = {'wspace':0, 'hspace':0}, constrained_layout=True)
         ax = ax.ravel()
 
-        dets = extract_dets_from_targets(targets=targets_, K=50).detach().cpu().numpy()
-        results = decode_detections(dets=dets, info=infos_, calibs=calibs, cls_mean_size=dataset.cls_mean_size, threshold=0.2)
-
-        for i, (image, calib, (img_id, result), info) in enumerate(zip(images, calibs, results.items(), infos)):
+        for i, (image, calib, (img_id, result), info) in enumerate(zip(images, calibs, targets.items(), infos)):
             if i >= self.max_imgs:
                 break
             img = image.numpy().transpose(1, 2, 0).copy()
             img = np.clip((img * dataset.std + dataset.mean) * 255, 0, 255).astype(np.uint8)
-            img = cv2.resize(img, info["img_size"])
 
             for object in result:
                 cls = object[0]
@@ -1252,7 +1252,46 @@ class KITTIVisualizer():
 
         plt.savefig(filename, dpi=300, bbox_inches="tight")
 
-    def plot_3d_obj(self, img: np.ndarray, obj: VisObject3D, camera_matrix: np.ndarray, thickness: int = 1, gt: bool = True,
+    def plot_preds(self, batch, preds, dataset, paths, fname, names, threshold=0.2):
+        infos_ = self.collate_infos(batch)
+        calibs = [dataset.get_calib(info) for info in infos_['img_id']]
+        targets = decode_preds(preds, calibs, dataset.cls_mean_size, batch["im_file"])
+        images, infos = batch["img"], batch["info"]
+
+        plt.clf()
+        fig, ax = plt.subplots(math.ceil(self.max_imgs ** 0.5), math.ceil(self.max_imgs ** 0.5),
+                               figsize=(36, 12), gridspec_kw={'wspace': 0, 'hspace': 0}, constrained_layout=True)
+        ax = ax.ravel()
+
+        for i, (image, calib, (img_id, result), info) in enumerate(zip(images, calibs, targets.items(), infos)):
+            if i >= self.max_imgs:
+                break
+            img = image.detach().cpu().numpy().transpose(1, 2, 0).copy()
+            img = np.clip((img * dataset.std + dataset.mean) * 255, 0, 255).astype(np.uint8)
+
+            for object in result:
+                cls = object[0]
+                alpha = object[1]
+                bbox2d = np.array(object[2:6])
+                dimensions = np.array([object[8], object[7], object[6]])
+                translation = object[9:12]
+                ry = object[12]
+                egoc_rot_matrix = self.get_egoc_rot_matrix(ry)
+                score = object[13]
+                if score < threshold:
+                    continue
+
+                self.plot_3d_obj(img,
+                                 VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
+                                             dimensions, bbox2d, cls),
+                                 calib.P2)
+
+            ax[i].imshow(img)
+            ax[i].axis("off")
+
+        plt.savefig(fname, dpi=300, bbox_inches="tight")
+
+    def plot_3d_obj(self, img: np.ndarray, obj: VisObject3D, camera_matrix: np.ndarray, thickness: int = 1, gt: bool = False,
                  bbox2d=True):
 
         box_corners = project_to_image(obj.get_box_corners(), camera_matrix).astype(np.int32)
@@ -1265,12 +1304,6 @@ class KITTIVisualizer():
                       lineType=cv2.LINE_AA)
         cv2.polylines(img, [box_corners[obj.box_idxs[5:]]], isClosed=True, color=color_bottom, thickness=thickness,
                       lineType=cv2.LINE_AA)
-        '''
-        axes = project_to_image(obj.get_coord_axes(), camera_matrix)
-        cv2.line(img, (int(axes[0][0]), int(axes[0][1])), (int(axes[1][0]), int(axes[1][1])), color=(255, 0, 0))
-        cv2.line(img, (int(axes[2][0]), int(axes[2][1])), (int(axes[3][0]), int(axes[3][1])), color=(0, 255, 0))
-        cv2.line(img, (int(axes[4][0]), int(axes[4][1])), (int(axes[5][0]), int(axes[5][1])), color=(0, 0, 255))
-        '''
         if bbox2d:
             color_bbox = (255, 70, 70) if gt else (70, 70, 70)
             cv2.rectangle(img, (int(obj.box2d[0]), int(obj.box2d[1])), (int(obj.box2d[2]), int(obj.box2d[3])), color_bbox, thickness=3)
@@ -1284,17 +1317,12 @@ class KITTIVisualizer():
         return torch.from_numpy(rot_matrix).to(dtype=torch.float32)
 
     @staticmethod
-    def collate_targets(batch):
+    def collate_infos(batch):
         """Collates data samples into batches."""
-        targets = {}
-        keys = batch["targets"][0].keys()
-        values = list(zip(*[list(b.values()) for b in batch["targets"]]))
-        for i, k in enumerate(keys):
-            targets[k] = np.stack(values[i], 0)
         infos = {}
         keys = batch["info"][0].keys()
         values = list(zip(*[list(b.values()) for b in batch["info"]]))
         for i, k in enumerate(keys):
             infos[k] = np.stack(values[i], 0)
-        return targets, infos
+        return infos
 

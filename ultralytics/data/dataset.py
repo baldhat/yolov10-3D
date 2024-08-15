@@ -547,7 +547,17 @@ class KITTIDataset(data.Dataset):
         img = img.transpose(2, 0, 1)  # C * H * W
 
         features_size = self.resolution // self.downsample  # W * H
+
         #  ============================   get labels   ==============================
+        gt_boxes_2d = []
+        gt_cls = []
+        gt_center_2d = []
+        gt_center_3d = []
+        gt_size_2d = []
+        gt_size_3d = []
+        gt_depth = []
+        gt_heading_bin = []
+        gt_heading_res = []
         if self.split != 'test':
             objects = self.get_label(index)
             # data augmentation for labels
@@ -573,8 +583,6 @@ class KITTIDataset(data.Dataset):
             height2d = np.zeros((self.max_objs, 1), dtype=np.float32)
             cls_ids = np.zeros((self.max_objs), dtype=np.int64)
             indices = np.zeros((self.max_objs), dtype=np.int64)
-            boxes_2d = []
-            cls_2d = []
 
             # if torch.__version__ == '1.10.0+cu113':
             if torch.__version__ in ['1.10.0+cu113', '1.10.0', '1.6.0', '1.4.0']:
@@ -595,6 +603,9 @@ class KITTIDataset(data.Dataset):
                 if objects[i].level_str == 'UnKnown' or objects[i].pos[-1] < 2:
                     continue
 
+                if objects[i].trucation > 0.5 or objects[i].occlusion > 2:
+                    continue
+
                 # process 2d bbox & get 2d center
                 bbox_2d = objects[i].box2d.copy()
                 # add affine transformation for 2d boxes.
@@ -604,6 +615,7 @@ class KITTIDataset(data.Dataset):
                 bbox_2d_[:2] = bbox_2d[:2]
                 bbox_2d_[2:] = bbox_2d[2:]
                 bbox_2d_ = xyxy2xywh(bbox_2d_)
+                gt_size_2d_ = bbox_2d_[2:]
                 # modify the 2d bbox according to pre-compute downsample ratio
                 bbox_2d[:] /= self.downsample
 
@@ -616,6 +628,9 @@ class KITTIDataset(data.Dataset):
                 center_3d, _ = calib.rect_to_img(center_3d)  # project 3D center to image plane
                 center_3d = center_3d[0]  # shape adjustment
                 center_3d = affine_transform(center_3d.reshape(-1), trans)
+                #gt_center_2d_ = affine_transform(center_2d.reshape(-1), trans)
+                gt_center_3d_ = center_3d.copy()
+                gt_center_2d_ = center_2d * self.downsample
                 center_3d /= self.downsample
 
                 # generate the center of gaussian heatmap [optional: 3d center or 2d center]
@@ -634,8 +649,11 @@ class KITTIDataset(data.Dataset):
 
                 cls_id = self.cls2id[objects[i].cls_type]
                 cls_ids[i] = cls_id
-                cls_2d.append([cls_id])
-                boxes_2d.append(bbox_2d_)
+                gt_cls.append([cls_id])
+                gt_boxes_2d.append(bbox_2d_)
+                gt_center_3d.append(gt_center_3d_)
+                gt_center_2d.append(gt_center_2d_)
+                gt_size_2d.append(gt_size_2d_)
                 draw_umich_gaussian(heatmap[cls_id], center_heatmap, radius)
 
                 # encoding 2d/3d offset & 2d size
@@ -645,8 +663,7 @@ class KITTIDataset(data.Dataset):
 
                 # encoding depth
                 depth[i] = objects[i].pos[-1]
-                if random_crop_flag:
-                    depth[i] *= scale
+                depth[i] *= scale
 
                 # encoding heading angle
                 # heading_angle = objects[i].alpha
@@ -654,17 +671,24 @@ class KITTIDataset(data.Dataset):
                 if heading_angle > np.pi:  heading_angle -= 2 * np.pi  # check range
                 if heading_angle < -np.pi: heading_angle += 2 * np.pi
                 heading_bin[i], heading_res[i] = angle2class(heading_angle)
+                gt_heading_bin.append(heading_bin[i])
+                gt_heading_res.append(heading_res[i])
 
                 offset_3d[i] = center_3d - center_heatmap
                 src_size_3d[i] = np.array([objects[i].h, objects[i].w, objects[i].l], dtype=np.float32)
                 mean_size = self.cls_mean_size[self.cls2id[objects[i].cls_type]]
                 size_3d[i] = src_size_3d[i] - mean_size
+                s3d = (np.array([objects[i].h, objects[i].w, objects[i].l], dtype=np.float32)
+                       - self.cls_mean_size[self.cls2id[objects[i].cls_type]])
+                gt_size_3d.append(s3d)
 
                 # objects[i].trucation <=0.5 and objects[i].occlusion<=2 and (objects[i].box2d[3]-objects[i].box2d[1])>=25:
                 if objects[i].trucation <= 0.5 and objects[i].occlusion <= 2:
                     mask_2d[i] = 1
 
                 vis_depth[i] = depth[i]
+                gt_depth.append(objects[i].pos[-1] * scale) # FIXME: check
+
             if random_mix_flag == True:
                 # if False:
                 objects = self.get_label(random_index)
@@ -685,6 +709,10 @@ class KITTIDataset(data.Dataset):
 
                     if objects[i].level_str == 'UnKnown' or objects[i].pos[-1] < 2:
                         continue
+
+                    if objects[i].trucation > 0.5 or objects[i].occlusion > 2:
+                        continue
+
                     # process 2d bbox & get 2d center
                     bbox_2d = objects[i].box2d.copy()
                     # add affine transformation for 2d boxes.
@@ -695,6 +723,7 @@ class KITTIDataset(data.Dataset):
                     bbox_2d_[:2] = bbox_2d[:2]
                     bbox_2d_[2:] = bbox_2d[2:]
                     bbox_2d_ = xyxy2xywh(bbox_2d_)
+                    gt_size_2d_ = bbox_2d_[2:]
                     # modify the 2d bbox according to pre-compute downsample ratio
                     bbox_2d[:] /= self.downsample
 
@@ -706,6 +735,9 @@ class KITTIDataset(data.Dataset):
                     center_3d, _ = calib.rect_to_img(center_3d)  # project 3D center to image plane
                     center_3d = center_3d[0]  # shape adjustment
                     center_3d = affine_transform(center_3d.reshape(-1), trans)
+                    #gt_center_2d_ = affine_transform(center_2d.reshape(-1), trans)
+                    gt_center_3d_ = center_3d.copy()
+                    gt_center_2d_ = center_2d * self.downsample
                     center_3d /= self.downsample
 
                     # generate the center of gaussian heatmap [optional: 3d center or 2d center]
@@ -724,8 +756,11 @@ class KITTIDataset(data.Dataset):
 
                     cls_id = self.cls2id[objects[i].cls_type]
                     cls_ids[i + object_num] = cls_id
-                    cls_2d.append([cls_id])
-                    boxes_2d.append(bbox_2d_)
+                    gt_cls.append([cls_id])
+                    gt_boxes_2d.append(bbox_2d_)
+                    gt_center_3d.append(gt_center_3d_)
+                    gt_center_2d.append(gt_center_2d_)
+                    gt_size_2d.append(gt_size_2d_)
                     draw_umich_gaussian(heatmap[cls_id], center_heatmap, radius)
 
                     # encoding 2d/3d offset & 2d size
@@ -735,8 +770,7 @@ class KITTIDataset(data.Dataset):
 
                     # encoding depth
                     depth[i + object_num] = objects[i].pos[-1]
-                    if random_crop_flag:
-                        depth[i + object_num] *= scale
+                    depth[i + object_num] *= scale
 
                     # encoding heading angle
                     # heading_angle = objects[i].alpha
@@ -744,16 +778,22 @@ class KITTIDataset(data.Dataset):
                     if heading_angle > np.pi:  heading_angle -= 2 * np.pi  # check range
                     if heading_angle < -np.pi: heading_angle += 2 * np.pi
                     heading_bin[i + object_num], heading_res[i + object_num] = angle2class(heading_angle)
+                    gt_heading_bin.append(heading_bin[i + object_num])
+                    gt_heading_res.append(heading_res[i + object_num])
 
                     offset_3d[i + object_num] = center_3d - center_heatmap
                     src_size_3d[i + object_num] = np.array([objects[i].h, objects[i].w, objects[i].l], dtype=np.float32)
                     mean_size = self.cls_mean_size[self.cls2id[objects[i].cls_type]]
                     size_3d[i + object_num] = src_size_3d[i + object_num] - mean_size
+                    s3d = (np.array([objects[i].h, objects[i].w, objects[i].l], dtype=np.float32)
+                           - self.cls_mean_size[self.cls2id[objects[i].cls_type]])
+                    gt_size_3d.append(s3d)
 
                     if objects[i].trucation <= 0.5 and objects[i].occlusion <= 2:
                         mask_2d[i + object_num] = 1
 
                     vis_depth[i + object_num] = depth[i + object_num]
+                    gt_depth.append(objects[i].pos[-1] * scale) # FIXME: check
 
             targets = {'depth': depth,
                        'size_2d': size_2d,
@@ -770,17 +810,15 @@ class KITTIDataset(data.Dataset):
                        }
         else:
             targets = {}
-            boxes_2d = []
-            cls_2d = []
 
         inputs = torch.tensor(img)
         info = {'img_id': index,
                 'img_size': img_size,
                 'bbox_downsample_ratio': img_size / features_size}
 
-        if len(boxes_2d) > 0:
+        if len(gt_boxes_2d) > 0:
             # We need xywh in [0, 1]
-            bboxes = torch.clip(torch.tensor(np.array(boxes_2d) / self.resolution[[0, 1, 0, 1]]), 0, 1)
+            bboxes = torch.clip(torch.tensor(np.array(gt_boxes_2d) / self.resolution[[0, 1, 0, 1]]), 0, 1)
         else:
             bboxes = torch.empty(0)
         ratio_pad = np.array([self.resolution/img_size, np.array([0, 0])])
@@ -792,12 +830,19 @@ class KITTIDataset(data.Dataset):
             "coord_range": torch.tensor(coord_range),
             "targets": targets,
             "info": info,
-            "cls": torch.tensor(np.array(cls_2d)),
+            "cls": torch.tensor(np.array(gt_cls)),
             "bboxes": bboxes,
-            "batch_idx": torch.zeros(len(boxes_2d)),
+            "batch_idx": torch.zeros(len(gt_boxes_2d)),
             "im_file": '%06d.txt' % info["img_id"],
-            "ori_shape": info["img_size"][::-1],
-            "ratio_pad": torch.tensor(ratio_pad)
+            "ori_shape": info["img_size"][::-1], # this one is (height, width)
+            "ratio_pad": torch.tensor(ratio_pad),
+            "center_2d": torch.tensor(np.array(gt_center_2d)),
+            "center_3d": torch.tensor(np.array(gt_center_3d)),
+            "size_2d": torch.tensor(np.array(gt_size_2d)),
+            "size_3d": torch.tensor(np.array(gt_size_3d)),
+            "depth": torch.tensor(np.array(gt_depth)),
+            "heading_bin": torch.tensor(np.array(gt_heading_bin)),
+            "heading_res": torch.tensor(np.array(gt_heading_res)),
         }
 
     @staticmethod
@@ -810,7 +855,8 @@ class KITTIDataset(data.Dataset):
             value = values[i]
             if k in ["img", "calib", "coord_range", "ratio_pad"]:
                 value = torch.stack(value, 0)
-            if k in ["bboxes", "cls"]:
+            if k in ["bboxes", "cls", "depth", "center_3d", "center_2d", "size_2d", "heading_bin",
+                     "heading_res", "size_3d"]:
                 value = torch.cat(value, 0)
             new_batch[k] = value
         new_batch["batch_idx"] = list(new_batch["batch_idx"])

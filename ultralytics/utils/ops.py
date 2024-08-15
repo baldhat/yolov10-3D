@@ -862,3 +862,18 @@ def v10postprocess(preds, max_det, nc=80):
     index = index // nc
     boxes = boxes.gather(dim=1, index=index.unsqueeze(-1).repeat(1, 1, boxes.shape[-1]))
     return boxes, scores, labels
+
+def v10_3Dpostprocess(preds, max_det, nc=3):
+    assert(preds.shape[-1] == 38)
+    scores, reg = preds.split([nc, preds.shape[-1] - nc], dim=-1)
+    max_scores = scores.amax(dim=-1)
+    max_scores, index = torch.topk(max_scores, max_det, dim=-1)
+    index = index.unsqueeze(-1)
+    reg = torch.gather(reg, dim=1, index=index.repeat(1, 1, reg.shape[-1]))
+    scores = torch.gather(scores, dim=1, index=index.repeat(1, 1, scores.shape[-1]))
+
+    scores, index = torch.topk(scores.flatten(1), max_det, dim=-1)
+    labels = index % nc
+    index = index // nc
+    reg = reg.gather(dim=1, index=index.unsqueeze(-1).repeat(1, 1, reg.shape[-1]))
+    return reg, scores, labels

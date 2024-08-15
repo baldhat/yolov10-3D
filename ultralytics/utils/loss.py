@@ -1,14 +1,19 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
-
+import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from ultralytics.utils.metrics import OKS_SIGMA
 from ultralytics.utils.ops import crop_mask, xywh2xyxy, xyxy2xywh
-from ultralytics.utils.tal import RotatedTaskAlignedAssigner, TaskAlignedAssigner, dist2bbox, dist2rbox, make_anchors
+from ultralytics.utils.tal import (RotatedTaskAlignedAssigner, TaskAlignedAssigner, TaskAlignedAssigner3d,
+                                   dist2bbox, dist2rbox, make_anchors)
 from .metrics import bbox_iou, probiou
 from .tal import bbox2dist
+
+import numpy as np
+import matplotlib.pyplot as plt
+import cv2
 
 
 class VarifocalLoss(nn.Module):
@@ -727,10 +732,10 @@ class v10DetectLoss:
         return loss_one2many[0] + loss_one2one[0], torch.cat((loss_one2many[1], loss_one2one[1]))
 
 
-class v10_3DDetectLoss:
+class DetectLoss3d:
     def __init__(self, model):
-        self.one2many = v8DetectionLoss(model, tal_topk=10)
-        self.one2one = v8DetectionLoss(model, tal_topk=1)
+        self.one2many = DDDetectionLoss(model, tal_topk=10)
+        self.one2one = DDDetectionLoss(model, tal_topk=1)
 
     def __call__(self, preds, batch):
         one2many = preds["one2many"]
@@ -738,3 +743,255 @@ class v10_3DDetectLoss:
         one2one = preds["one2one"]
         loss_one2one = self.one2one(one2one, batch)
         return loss_one2many[0] + loss_one2one[0], torch.cat((loss_one2many[1], loss_one2one[1]))
+
+
+class DDDetectionLoss():
+    def __init__(self, model, tal_topk=10):  # model must be de-paralleled
+        device = next(model.parameters()).device  # get model device
+        h = model.args  # hyperparameters
+
+        m = model.model[-1]  # Detect() module
+        self.bce = nn.BCEWithLogitsLoss(reduction="none")
+        self.hyp = h
+        self.stride = m.stride  # model strides
+        self.nc = m.nc  # number of classes
+        self.no = m.no
+        self.device = device
+
+        self.use_dfl = False
+
+        self.assigner = TaskAlignedAssigner3d(topk=tal_topk, num_classes=self.nc, alpha=0.5, beta=6.0)
+
+    def preprocess(self, targets, batch_size, scale_tensor):
+        """Preprocesses the target counts and matches with the input batch size to output a tensor."""
+        if targets.shape[0] == 0:
+            out = torch.zeros(batch_size, 0, 17, device=self.device)
+        else:
+            i = targets[:, 0]  # image index
+            _, counts = i.unique(return_counts=True)
+            counts = counts.to(dtype=torch.int32)
+            out = torch.zeros(batch_size, counts.max(), 17, device=self.device)
+            for j in range(batch_size):
+                matches = i == j
+                n = matches.sum()
+                if n:
+                    out[j, :n] = targets[matches, 1:]
+            out[..., 1:5] = xywh2xyxy(out[..., 1:5].mul_(scale_tensor))
+        return out
+
+    def bbox_decode(self, anchor_points, pred_2d, stride_tensor):
+        # anchor_points:
+        # pred_2d: offset_2d (2), size_2d(2)
+        offset, size = pred_2d.split((2, 2), dim=-1)
+        centers = anchor_points + offset
+        xy1 = centers - size / 2
+        xy2 = centers + size / 2
+        return torch.cat((xy1, xy2), dim=-1) * stride_tensor
+
+    def __call__(self, preds, batch):
+        """Calculate the sum of the loss for box, cls and dfl multiplied by batch size."""
+        loss = torch.zeros(6, device=self.device)  # box, cls, dep, o3d, s3d, hd
+        feats = preds[1] if isinstance(preds, tuple) else preds
+        pred_scores, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un = (
+            torch.cat([xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2).split(
+            (self.nc, 2, 2, 2, 3, 24, 1, 1), 1
+        ))
+
+        # num classes
+        pred_scores = pred_scores.permute(0, 2, 1).contiguous()
+        # offset 2d (2), size 2d (2) = 4
+        pred_2d = torch.cat((pred_o2d.permute(0, 2, 1).contiguous(), pred_s2d.permute(0, 2, 1).contiguous()), -1)
+        # offset 3d (2), size 3d (3) = 5
+        pred_3d = torch.cat((pred_o3d.permute(0, 2, 1).contiguous(),     # offset 3d (2)
+                             pred_s3d.permute(0, 2, 1).contiguous(),            # size 3d (3)
+                             pred_hd.permute(0, 2, 1).contiguous(),             # heading bins (12) + heading res (12)
+                             pred_dep.permute(0, 2, 1).contiguous(),            # depth (1)
+                             pred_dep_un.permute(0, 2, 1).contiguous()), -1)    # depth uncertainty (1)
+        # = 38
+
+        dtype = pred_scores.dtype
+        batch_size = pred_scores.shape[0]
+        imgsz = torch.tensor(feats[0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]  # image size (h,w)
+        anchor_points, stride_tensor = make_anchors(feats, self.stride, 0.5)
+
+        # Targets
+        gts = torch.cat((batch["batch_idx"].view(-1, 1), batch["cls"].view(-1, 1),
+                                batch["bboxes"], batch["center_2d"], batch["size_2d"],
+                                batch["center_3d"], batch["size_3d"], batch["depth"].view(-1, 1),
+                                batch["heading_bin"], batch["heading_res"]), 1)
+        gts = self.preprocess(gts.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
+        gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin, gt_heading_res = gts.split(
+            (1, 4, 2, 2, 2, 3, 1, 1, 1), 2)
+        mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0)
+
+        # Pboxes
+        pred_bboxes = self.bbox_decode(anchor_points, pred_2d, stride_tensor)
+
+        targets, fg_mask, target_gt_idx = self.assigner(
+            pred_scores.detach().sigmoid(),
+            pred_bboxes.detach().type(gt_bboxes.dtype),
+            anchor_points * stride_tensor,
+            (gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin, gt_heading_res),
+            mask_gt,
+        )
+        (_, target_scores, target_center_2d, target_size_2d, target_center_3d,
+         target_size_3d, target_depth, target_heading_bin, target_heading_res) = targets
+
+        target_scores_sum = max(target_scores.sum(), 1)
+
+        targets_2d = targets[2:4]
+        targets_3d = targets[4:9] # center, size, depth, head_bin, head_res
+
+        #self.debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor)
+        #self.debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_bboxes, stride_tensor)
+
+        loss[0] = (self.compute_box2d_loss(targets_2d, pred_2d, anchor_points, stride_tensor, fg_mask, target_scores_sum)
+                   * self.hyp.loss2d)
+        loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum * self.hyp.cls
+
+        loss[2:6] = self.compute_box3d_loss(targets_3d, pred_3d, anchor_points, stride_tensor,
+                                            fg_mask, target_scores_sum)
+
+        weights = self.compute_loss_weights(loss)
+        loss *= weights
+
+        return loss.sum() * batch_size, loss.detach()
+
+    def compute_loss_weights(self, current_loss):
+        weights = torch.ones(6, device=self.device)
+        if current_loss[1] > 1.6:
+            weights[2:] = 0
+        return weights
+
+    def compute_box2d_loss(self, targets_2d, pred_2d, anchor_points, stride_tensor, fg_mask, num_targets):
+        target_center_2d, target_size_2d = targets_2d
+        pred_2d = pred_2d * stride_tensor
+        anchor_points = anchor_points * stride_tensor
+
+        pred_offset = pred_2d[fg_mask][..., :2]
+        pred_size = pred_2d[fg_mask][..., 2:]
+        target_size = target_size_2d[fg_mask]
+        target_offset = (target_center_2d - anchor_points)[fg_mask]
+
+        offset2d_loss = F.l1_loss(pred_offset, target_offset, reduction="mean")
+        size2d_loss = F.l1_loss(pred_size, target_size, reduction="mean")
+
+        return (size2d_loss + offset2d_loss) / num_targets
+
+    def compute_box3d_loss(self, targets_3d, pred_3d, anchor_points, stride_tensor, fg_mask, num_targets):
+        pred_depth = pred_3d[fg_mask][..., -2]
+        pred_depth_un = pred_3d[fg_mask][..., -1]
+        target_depth = targets_3d[-3][fg_mask].squeeze()
+        depth_loss = (laplacian_aleatoric_uncertainty_loss_new(pred_depth, target_depth, pred_depth_un).sum()
+                      / num_targets * self.hyp.depth)
+
+        anchor_points = anchor_points * stride_tensor
+        pred_offset = (pred_3d[..., :2] * stride_tensor)[fg_mask]
+        target_center_3d = targets_3d[0]
+        target_offset = (target_center_3d - anchor_points)[fg_mask]
+        offset3d_loss = (F.l1_loss(pred_offset, target_offset, reduction="mean")
+                         / num_targets * self.hyp.offset3d)
+
+        pred_size = pred_3d[fg_mask][..., 2:5]
+        target_size = targets_3d[1][fg_mask]
+        size3d_loss = (F.l1_loss(pred_size, target_size, reduction="sum")
+                       / num_targets * self.hyp.size3d)
+
+        pred_heading = pred_3d[fg_mask][..., 5:29]
+        target_bin = targets_3d[-2][fg_mask]
+        target_res = targets_3d[-1][fg_mask]
+        heading_loss = (compute_heading_loss(pred_heading, target_bin, target_res)
+                        / num_targets * self.hyp.heading)
+
+        if depth_loss != depth_loss:
+            print('badNAN----------------depth_loss', depth_loss)
+        if offset3d_loss != offset3d_loss:
+            print('badNAN----------------offset3d_loss', offset3d_loss)
+        if size3d_loss != size3d_loss:
+            print('badNAN----------------size3d_loss', size3d_loss)
+        if heading_loss != heading_loss:
+            print('badNAN----------------heading_loss', heading_loss)
+
+        return torch.stack((depth_loss, offset3d_loss, size3d_loss, heading_loss))
+
+    def debug_show_assigned_targets2d(self, batch, targets_2d, fg_mask, pred_bboxes, stride_tensor):
+        target_center_2d, target_size_2d = targets_2d
+        target_bboxes = torch.cat(
+            (target_center_2d - target_size_2d / 2, target_center_2d + target_size_2d / 2), dim=-1)
+
+        plt.clf()
+        color = {8: (255, 255, 0), 16: (0, 255, 255), 32: (255, 0, 255)}
+        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        fig, axes = plt.subplots(2, 2, figsize=(36, 12), gridspec_kw={'wspace': 0, 'hspace': 0},
+                                 constrained_layout=True)
+        for i, ax in enumerate(np.ravel(axes)):
+            img = batch["img"][i].detach().cpu().numpy().transpose(1, 2, 0).copy()
+            img = np.clip((img * std + mean) * 255, 0, 255).astype(np.uint8)
+
+            target_boxes = target_bboxes[i][fg_mask[i]].int().cpu()
+            for box in target_boxes:
+                p1, p2 = box.split((2, 2), dim=0)
+                cv2.rectangle(img, p1.numpy(), p2.numpy(), (255, 0, 0), 3)  # gt
+
+            pred_boxes = pred_bboxes[i][fg_mask[i]].cpu()
+            stride = stride_tensor[fg_mask[i]].cpu()
+            for j, box in enumerate(pred_boxes):
+                c = color[stride[j].item()]
+                p1, p2 = box.split((2, 2), dim=0)
+                cv2.rectangle(img, p1.int().numpy(), p2.int().numpy(), c)  # gt
+                cv2.circle(img, (p1 + (p2 - p1) / 2).int().numpy(), 4, (0, 255, 255), -1)
+
+            t_center_2d = target_center_2d[i][fg_mask[i]].int().cpu()
+            for center2d in t_center_2d:
+                cv2.circle(img, center2d.numpy(), 5, (0, 0, 255), -1)
+
+            ax.imshow(img)
+            ax.axis("off")
+        plt.show()
+
+    def debug_show_assigned_targets3d(self, batch, targets_3d, fg_mask, pred3d, stride_tensor):
+        target_center_3d, _, _, _, _ = targets_3d
+        plt.clf()
+        color = {8: (255, 255, 0), 16: (0, 255, 255), 32: (255, 0, 255)}
+        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        fig, axes = plt.subplots(2, 2, figsize=(36, 12), gridspec_kw={'wspace': 0, 'hspace': 0},
+                                 constrained_layout=True)
+        for i, ax in enumerate(np.ravel(axes)):
+            img = batch["img"][i].detach().cpu().numpy().transpose(1, 2, 0).copy()
+            img = np.clip((img * std + mean) * 255, 0, 255).astype(np.uint8)
+
+            t_center_3d = target_center_3d[i][fg_mask[i]].int().cpu()
+            for center_3d in t_center_3d:
+                cv2.circle(img, center_3d.numpy(), 5, (0, 0, 255), -1)
+
+            ax.imshow(img)
+            ax.axis("off")
+        plt.show()
+
+def laplacian_aleatoric_uncertainty_loss_new(input, target, log_variance):
+    '''
+    References:
+        MonoPair: Monocular 3D Object Detection Using Pairwise Spatial Relationships, CVPR'20
+        Geometry and Uncertainty in Deep Learning for Computer Vision, University of Cambridge
+    '''
+    loss = 1.4142 * torch.exp(-0.5*log_variance) * torch.abs(input - target) + 0.5*log_variance
+    return loss
+
+
+def compute_heading_loss(input, target_cls, target_reg):
+    target_cls = target_cls.view(-1).long()
+    target_reg = target_reg.view(-1)
+
+    # classification loss
+    input_cls = input[..., 0:12]
+    cls_loss = F.cross_entropy(input_cls, target_cls, reduction='sum')
+
+    # regression loss
+    input_reg = input[..., 12:24]
+    cls_onehot = torch.zeros(target_cls.shape[0], 12).cuda().scatter_(dim=1, index=target_cls.view(-1, 1), value=1)
+    input_reg = torch.sum(input_reg * cls_onehot, 1)
+    reg_loss = F.l1_loss(input_reg, target_reg, reduction='sum')
+
+    return cls_loss + reg_loss

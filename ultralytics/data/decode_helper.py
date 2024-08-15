@@ -12,6 +12,96 @@ def class2angle(cls, residual, to_label_format=False, num_heading_bin = 12):
         angle = angle - 2 * np.pi
     return angle
 
+def bin2angle(cls, residual, num_heading_bin = 12):
+    ''' Inverse function to angle2class. '''
+    angle_per_class = 2 * np.pi / float(num_heading_bin)
+    angle_center = cls * angle_per_class
+    angle = angle_center + residual
+    angle[angle > np.pi] = angle[angle > np.pi] - 2 * np.pi
+    return angle
+
+def decode_batch(batch, calibs, cls_mean_size):
+    results = {}
+    for i in range(batch["img"].shape[0]):
+        targets = []
+        mask = batch["batch_idx"] == i
+        num_targets = mask.sum()
+        for j in range(num_targets):
+            cls_id = batch["cls"][mask][j].item()
+
+            bbox = batch["bboxes"][mask][j].cpu().numpy().tolist()
+
+            x = bbox[0] * batch["img"].shape[-1]
+
+            dimensions = batch["size_3d"][mask][j].cpu().numpy()
+            dimensions += cls_mean_size[int(cls_id)]
+
+            depth = batch["depth"][mask][j].cpu().numpy()
+
+            x3d = batch["center_3d"][mask][j, 0].cpu().numpy()
+            y3d = batch["center_3d"][mask][j, 1].cpu().numpy()
+            locations = calibs[i].img_to_rect(x3d, y3d, depth).reshape(-1)
+            locations[1] += dimensions[0] / 2
+
+            hd_bin, hd_res = batch["heading_bin"][mask][j].item(), batch["heading_res"][mask][j].item()
+            alpha = class2angle(hd_bin, hd_res, to_label_format=True)
+            ry = calibs[i].alpha2ry(alpha, x)  # FIXME: is this correct? is this all we need?
+
+            score = 1
+
+            targets.append([cls_id, alpha] + bbox + dimensions.tolist() + locations.tolist() + [ry, score])
+
+        results[batch["im_file"][i]] = targets
+    return results
+
+
+
+def decode_preds(preds, calibs, cls_mean_size, im_files, threshold=0.001):
+    preds = preds.detach().cpu()
+    bbox, pred_center3d, pred_s3d, pred_hd, pred_dep, pred_dep_un, scores, labels = preds.split(
+        (4, 2, 3, 24, 1, 1, 1, 1), dim=-1)
+
+    pred_bin = pred_hd[..., :12]
+    pred_res = pred_hd[..., 12:]
+    bins = pred_bin.argmax(dim=-1)
+    idx = torch.nn.functional.one_hot(pred_bin.max(dim=-1, keepdim=True)[1], num_classes=12).squeeze(-2)
+    res = pred_res[idx.bool()].view(bins.shape)
+    alphas = bin2angle(bins, res)
+
+    scores = scores.sigmoid()
+
+    results = {}
+    for i, img in enumerate(preds):
+        targets = []
+        for j, pred in enumerate(img):
+            if scores[i, j].item() < threshold:
+                continue
+            cls_id = labels[i, j].item()
+
+            bbox_ = bbox[i, j].numpy().tolist()
+            x = bbox_[0]
+
+            dimensions = pred_s3d[i, j].numpy()
+            dimensions += cls_mean_size[int(cls_id)]
+
+            depth = pred_dep[i, j].numpy()
+
+            x3d = pred_center3d[i, j, 0].numpy() * 1224/1280.0
+            y3d = pred_center3d[i, j, 1].numpy() * 1224/1280.0
+            locations = calibs[i].img_to_rect(x3d, y3d, depth).reshape(-1)
+            locations[1] += dimensions[0] / 2
+
+            alpha = alphas[i, j].item()
+            ry = calibs[i].alpha2ry(alpha, x)  # FIXME: is this correct? is this all we need?
+
+            score = scores[i, j].item() # FIXME: include depth uncertainty
+
+            targets.append([cls_id, alpha] + bbox_ + dimensions.tolist() + locations.tolist() + [ry, score])
+
+        results[im_files[i]] = targets
+    return results
+
+
 
 def decode_detections(dets, info, calibs, cls_mean_size, threshold, problist=None):
     '''
@@ -147,7 +237,7 @@ def extract_dets_from_targets(targets, K=50):
     heatmap = torch.tensor(targets['heatmap'])
 
     batch, channel, height, width = heatmap.size() # get shape
-    heading_ = nn.functional.one_hot(torch.tensor(targets['heading_bin'])).squeeze()
+    heading_ = nn.functional.one_hot(torch.tensor(targets['heading_bin']), num_classes=12).squeeze()
     heading = torch.zeros_like(heading_)
     heading_res_ = torch.zeros_like(heading_, dtype=torch.float)
     heading_res = torch.zeros_like(heading_res_)

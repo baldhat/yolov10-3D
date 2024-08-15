@@ -239,7 +239,7 @@ class Calibration(object):
 
         return boxes, boxes_corner
 
-    def camera_dis_to_rect(self, u, v, d):
+    def camera_dis_to_rect(self, u, v, d): # FIXME use me
         """
         Can only process valid u, v, d, which means u, v can not beyond the image shape, reprojection error 0.02
         :param u: (N)
