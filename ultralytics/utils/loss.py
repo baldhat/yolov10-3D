@@ -852,14 +852,14 @@ class DDDetectionLoss():
         loss[2:6] = self.compute_box3d_loss(targets_3d, pred_3d, anchor_points, stride_tensor,
                                             fg_mask, target_scores_sum)
 
-        weights = self.compute_loss_weights(loss)
-        loss *= weights
+        #weights = self.compute_loss_weights(loss)
+        #loss *= weights
 
         return loss.sum() * batch_size, loss.detach()
 
     def compute_loss_weights(self, current_loss):
         weights = torch.ones(6, device=self.device)
-        if current_loss[1] > 1.6:
+        if current_loss[1] > 1.9:
             weights[2:] = 0
         return weights
 
@@ -894,7 +894,8 @@ class DDDetectionLoss():
 
         pred_size = pred_3d[fg_mask][..., 2:5]
         target_size = targets_3d[1][fg_mask]
-        size3d_loss = (F.l1_loss(pred_size, target_size, reduction="sum")
+        size3d_loss = (F
+                       .l1_loss(pred_size, target_size, reduction="sum")
                        / num_targets * self.hyp.size3d)
 
         pred_heading = pred_3d[fg_mask][..., 5:29]
@@ -921,8 +922,10 @@ class DDDetectionLoss():
 
         plt.clf()
         color = {8: (255, 255, 0), 16: (0, 255, 255), 32: (255, 0, 255)}
-        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        #mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        #std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        mean = 0
+        std = 1
         fig, axes = plt.subplots(2, 2, figsize=(36, 12), gridspec_kw={'wspace': 0, 'hspace': 0},
                                  constrained_layout=True)
         for i, ax in enumerate(np.ravel(axes)):
@@ -954,8 +957,10 @@ class DDDetectionLoss():
         target_center_3d, _, _, _, _ = targets_3d
         plt.clf()
         color = {8: (255, 255, 0), 16: (0, 255, 255), 32: (255, 0, 255)}
-        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        #mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        #std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        mean = 0
+        std = 1
         fig, axes = plt.subplots(2, 2, figsize=(36, 12), gridspec_kw={'wspace': 0, 'hspace': 0},
                                  constrained_layout=True)
         for i, ax in enumerate(np.ravel(axes)):

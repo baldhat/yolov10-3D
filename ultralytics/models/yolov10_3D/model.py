@@ -10,6 +10,7 @@ class YOLOv10_3D(Model, PyTorchModelHubMixin):
     def __init__(self, model="yolov10n_3D.yaml", task=None, verbose=False,
                  names=None):
         super().__init__(model=model, task=task, verbose=verbose)
+
         if names is not None:
             setattr(self.model, 'names', names)
 

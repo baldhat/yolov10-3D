@@ -89,7 +89,6 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
             pred2d = torch.cat((pred_bbox, pred_conf.unsqueeze(-1), pred_cls.unsqueeze(-1)), dim=-1)
             # Evaluate
             if nl:
-                bbox = ops.xywh2xyxy(bbox) * torch.tensor(batch["img"].shape[:-3:-1], device=self.device).repeat(2)
                 stat["tp"] = self._process_batch(pred2d, bbox, cls)
                 if self.args.plots:
                     self.confusion_matrix.process_batch(pred2d, bbox, cls)
@@ -119,11 +118,14 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
 
         self.save_results(self.results, output_dir=self.save_dir)
         self.results = {}
-        CarmAP = eval.eval_from_scrach(
-            self.dataloader.dataset.label_dir,
-            os.path.join(self.save_dir, 'preds'),
-            ap_mode=40)
-        self.metrics.results_dict["CarAP0.7"] = CarmAP
+        try:
+            CarmAP = eval.eval_from_scrach(
+                self.dataloader.dataset.label_dir,
+                os.path.join(self.save_dir, 'preds'),
+                ap_mode=40)
+            self.metrics.results_dict["CarAP0.7"] = CarmAP
+        except:
+            print("Failed to evaluate mAP")
         return self.metrics.results_dict
 
     def save_results(self, results, output_dir='./outputs'):
@@ -161,12 +163,14 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
     def _prepare_batch(self, batch):
         infos_ = self.collate_infos(batch)
         calibs = [self.dataloader.dataset.get_calib(info) for info in infos_['img_id']]
-        return decode_batch(batch, calibs, self.dataloader.dataset.cls_mean_size)
+        return decode_batch(batch, calibs, self.dataloader.dataset.cls_mean_size, use_camera_dis=self.dataloader.dataset.use_camera_dis)
 
     def _prepare_preds(self, preds, batch):
         infos_ = self.collate_infos(batch)
         calibs = [self.dataloader.dataset.get_calib(info) for info in infos_['img_id']]
-        return decode_preds(preds, calibs, self.dataloader.dataset.cls_mean_size, batch["im_file"])
+        inv_trans = [inv for inv in infos_["trans_inv"]]
+        return decode_preds(preds, calibs, self.dataloader.dataset.cls_mean_size, batch["im_file"], inv_trans,
+                            use_camera_dis=self.dataloader.dataset.use_camera_dis)
 
     def plot_predictions(self, batch, preds, ni):
         self.visualizer.plot_preds(
@@ -176,6 +180,21 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
             paths=batch["im_file"],
             fname=self.save_dir / f"val_batch{ni}_pred3d.jpg",
             names=self.names
+        )
+        self.visualizer.plot_bev(
+            batch,
+            preds,
+            self.dataloader.dataset,
+            paths=batch["im_file"],
+            fname=self.save_dir / f"val_batch{ni}_pred_bev.jpg",
+            names=self.names
+        )
+
+    def plot_val_samples(self, batch, ni):
+        self.visualizer.plot_batch(
+            batch,
+            self.dataloader.dataset,
+            self.save_dir / f"val_batch{ni}_label3d.jpg",
         )
 
     @staticmethod

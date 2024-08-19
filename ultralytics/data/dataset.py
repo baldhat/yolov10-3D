@@ -404,6 +404,7 @@ class KITTIDataset(data.Dataset):
         self.cls2id = {'Pedestrian': 0, 'Car': 1, 'Cyclist': 2}
         self.resolution = np.array([1280, 384])  # W * H
         self.use_3d_center = True  # cfg['use_3d_center']
+        self.use_camera_dis = args.cam_dis
         self.writelist = ['Car','Pedestrian','Cyclist']  # cfg['writelist']
 
         '''    
@@ -418,13 +419,14 @@ class KITTIDataset(data.Dataset):
 
         # data split loading
         assert mode in ['train', 'val', 'trainval', 'test']
-        self.split = mode
+        self.split = mode#"val" # FIXME
+        self.mode = mode #"val"  # FIXME
         root_dir = pathlib.Path(image_file_path).parent.parent
         split_dir = image_file_path
         self.idx_list = [x.strip() for x in open(split_dir).readlines()]
 
         # path configuration
-        self.data_dir = os.path.join(root_dir, 'testing' if mode == 'test' else 'training')
+        self.data_dir = os.path.join(root_dir, 'testing' if self.mode == 'test' else 'training')
         self.image_dir = os.path.join(self.data_dir, 'image_2')
         self.depth_dir = os.path.join(self.data_dir, 'depth')
         self.calib_dir = os.path.join(self.data_dir, 'calib')
@@ -434,7 +436,7 @@ class KITTIDataset(data.Dataset):
         self.labels = self.get_labels()
 
         # data augmentation configuration
-        self.data_augmentation = True if mode in ['train', 'trainval'] else False
+        self.data_augmentation = True if self.mode in ['train', 'trainval'] else False
         self.random_flip = args.fliplr
         self.random_crop = args.random_crop
         self.scale = args.scale
@@ -442,8 +444,10 @@ class KITTIDataset(data.Dataset):
         self.mixup = args.mixup
 
         # statistics
-        self.mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-        self.std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        #self.mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        #self.std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        self.mean = 0
+        self.std = 1
 
         # others
         self.downsample = 4
@@ -558,6 +562,7 @@ class KITTIDataset(data.Dataset):
         gt_depth = []
         gt_heading_bin = []
         gt_heading_res = []
+
         if self.split != 'test':
             objects = self.get_label(index)
             # data augmentation for labels
@@ -611,6 +616,7 @@ class KITTIDataset(data.Dataset):
                 # add affine transformation for 2d boxes.
                 bbox_2d[:2] = affine_transform(bbox_2d[:2], trans)
                 bbox_2d[2:] = affine_transform(bbox_2d[2:], trans)
+
                 bbox_2d_ = np.copy(bbox_2d)
                 bbox_2d_[:2] = bbox_2d[:2]
                 bbox_2d_[2:] = bbox_2d[2:]
@@ -624,8 +630,8 @@ class KITTIDataset(data.Dataset):
                 center_2d = np.array([(bbox_2d[0] + bbox_2d[2]) / 2, (bbox_2d[1] + bbox_2d[3]) / 2],
                                      dtype=np.float32)  # W * H
                 center_3d = objects[i].pos + [0, -objects[i].h / 2, 0]  # real 3D center in 3D space
-                center_3d = center_3d.reshape(-1, 3)  # shape adjustment (N, 3)
-                center_3d, _ = calib.rect_to_img(center_3d)  # project 3D center to image plane
+                r_center_3d = center_3d.reshape(-1, 3)  # shape adjustment (N, 3)
+                center_3d, _ = calib.rect_to_img(r_center_3d)  # project 3D center to image plane
                 center_3d = center_3d[0]  # shape adjustment
                 center_3d = affine_transform(center_3d.reshape(-1), trans)
                 #gt_center_2d_ = affine_transform(center_2d.reshape(-1), trans)
@@ -687,7 +693,13 @@ class KITTIDataset(data.Dataset):
                     mask_2d[i] = 1
 
                 vis_depth[i] = depth[i]
-                gt_depth.append(objects[i].pos[-1] * scale) # FIXME: check
+
+                if self.use_camera_dis:
+                    r_center_3d[-1] *= scale
+                    dep = np.linalg.norm(r_center_3d)
+                    gt_depth.append(dep)
+                else:
+                    gt_depth.append(depth[i])
 
             if random_mix_flag == True:
                 # if False:
@@ -731,8 +743,8 @@ class KITTIDataset(data.Dataset):
                     center_2d = np.array([(bbox_2d[0] + bbox_2d[2]) / 2, (bbox_2d[1] + bbox_2d[3]) / 2],
                                          dtype=np.float32)  # W * H
                     center_3d = objects[i].pos + [0, -objects[i].h / 2, 0]  # real 3D center in 3D space
-                    center_3d = center_3d.reshape(-1, 3)  # shape adjustment (N, 3)
-                    center_3d, _ = calib.rect_to_img(center_3d)  # project 3D center to image plane
+                    r_center_3d = center_3d.reshape(-1, 3)  # shape adjustment (N, 3)
+                    center_3d, _ = calib.rect_to_img(r_center_3d)  # project 3D center to image plane
                     center_3d = center_3d[0]  # shape adjustment
                     center_3d = affine_transform(center_3d.reshape(-1), trans)
                     #gt_center_2d_ = affine_transform(center_2d.reshape(-1), trans)
@@ -793,7 +805,13 @@ class KITTIDataset(data.Dataset):
                         mask_2d[i + object_num] = 1
 
                     vis_depth[i + object_num] = depth[i + object_num]
-                    gt_depth.append(objects[i].pos[-1] * scale) # FIXME: check
+
+                    if self.use_camera_dis:
+                        r_center_3d[-1] *= scale
+                        dep = np.linalg.norm(r_center_3d)
+                        gt_depth.append(dep)
+                    else:
+                        gt_depth.append(depth[i + object_num])
 
             targets = {'depth': depth,
                        'size_2d': size_2d,
@@ -814,7 +832,8 @@ class KITTIDataset(data.Dataset):
         inputs = torch.tensor(img)
         info = {'img_id': index,
                 'img_size': img_size,
-                'bbox_downsample_ratio': img_size / features_size}
+                'bbox_downsample_ratio': img_size / features_size,
+                'trans_inv': trans_inv}
 
         if len(gt_boxes_2d) > 0:
             # We need xywh in [0, 1]

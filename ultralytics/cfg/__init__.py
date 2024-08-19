@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import Dict, List, Union
 import re
 
+from ultralytics.nn.modules import v10Detect3d
 from ultralytics.utils import (
     ASSETS,
     DEFAULT_CFG,
@@ -563,7 +564,17 @@ def entrypoint(debug=""):
             if len(split_path) == 2 and (not os.path.exists(model)):
                 model = YOLOv10_3D.from_pretrained(model)
             else:
-                model = YOLOv10_3D(model) #.from_pretrained("jameslahm/yolov10n")
+                if full_args_dict["pretrained_backbone"]:
+                    from copy import deepcopy
+                    backbone = YOLOv10_3D.from_pretrained("jameslahm/" + model.split("_")[0])
+                    model = YOLOv10_3D(model)
+                    model_seq = deepcopy(model.model.model)
+                    for i, module in enumerate(model_seq):
+                        if not isinstance(module, v10Detect3d):
+                            model.model.model[i] = deepcopy(backbone.model.model[i])
+                else:
+                    model = YOLOv10_3D(model)  # .from_pretrained("jameslahm/yolov10n")
+
         else:
             from ultralytics import YOLOv10
 

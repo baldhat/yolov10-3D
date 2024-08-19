@@ -562,7 +562,6 @@ def weights_init_xavier(m):
             nn.init.constant_(m.weight, 1.0)
             nn.init.constant_(m.bias, 0.0)
 
-# TODO: Re-add one2one branch
 class v10Detect3d(nn.Module):
     max_det = 50
 
@@ -706,16 +705,20 @@ class v10Detect3d(nn.Module):
 
     def bias_init(self):
         # TODO: Better weight initialization
+        deps = [5, 15, 25]
         for i in range(self.nl):
             self.cls[i][-1].bias.data[: self.nc] = math.log(5 / self.nc / ((1280 / self.stride[i]) * (384 / self.stride[i])))
             self.s2d[i][-1].bias.data.fill_(6)
             self.o2d[i][-1].bias.data.fill_(0.5)
             self.o3d[i][-1].bias.data.fill_(0.5)
+            self.s3d[i][-1].bias.data.fill_(0.1)
+            self.dep[i][-1].bias.data.fill_(deps[i])
+
             # self.s3d[i].apply(weights_init_xavier)
             # self.hd[i].apply(weights_init_xavier)
             #
-            # self.dep[i].apply(weights_init_xavier)
-            # self.dep_un[i].apply(weights_init_xavier)
+            #self.dep[i].apply(weights_init_xavier)
+            #self.dep_un[i].apply(weights_init_xavier)
 
         self.o2o_heads = nn.ModuleList(
              [self.cls, self.o2d, self.s2d, self.o3d, self.s3d, self.hd, self.dep, self.dep_un])
