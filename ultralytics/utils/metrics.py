@@ -893,6 +893,38 @@ class DetMetrics(SimpleClass):
         return self.box.curves_results
 
 
+class Det3dMetrics(DetMetrics):
+
+    def __init__(self, save_dir=Path("."), plot=False, on_plot=None, names=()) -> None:
+        super().__init__(save_dir, plot, on_plot, names)
+        self.carAP3d = 0
+
+    @property
+    def keys(self):
+        """Returns a list of keys for accessing specific metrics."""
+        return ["metrics/precision(B)", "metrics/recall(B)", "metrics/mAP50(B)", "metrics/mAP50-95(B)", "metrics/Car3D@0.7"]
+
+    @property
+    def results_dict(self):
+        """Returns dictionary of computed performance metrics and statistics."""
+        return dict(zip(self.keys + ["fitness"], self.mean_results() + [self.fitness]))
+
+    @property
+    def fitness(self):
+        """Returns the fitness of box object."""
+        return self.carAP3d
+
+    def class_result(self, i):
+        """Return the result of evaluating the performance of an object detection model on a specific class."""
+        if i == 1:
+            return self.box.class_result(i) + (self.carAP3d,)
+        else:
+            return self.box.class_result(i) + (-1,)
+
+    def mean_results(self):
+        """Calculate mean of detected objects & return precision, recall, mAP50, and mAP50-95."""
+        return self.box.mean_results() + [self.carAP3d]
+
 class SegmentMetrics(SimpleClass):
     """
     Calculates and aggregates detection and segmentation metrics over a given set of classes.

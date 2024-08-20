@@ -564,7 +564,7 @@ def entrypoint(debug=""):
             if len(split_path) == 2 and (not os.path.exists(model)):
                 model = YOLOv10_3D.from_pretrained(model)
             else:
-                if full_args_dict["pretrained_backbone"]:
+                if full_args_dict["pretrained_backbone"] and overrides["mode"] == "train":
                     from copy import deepcopy
                     backbone = YOLOv10_3D.from_pretrained("jameslahm/" + model.split("_")[0])
                     model = YOLOv10_3D(model)
