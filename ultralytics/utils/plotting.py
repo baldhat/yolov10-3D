@@ -1237,13 +1237,11 @@ class KITTIVisualizer():
 
             for object in result:
                 cls = object[0]
-                alpha = object[1]
                 bbox2d = np.array(object[2:6])
                 dimensions = np.array([object[8], object[7], object[6]])
                 translation = object[9:12]
                 ry = object[12]
                 egoc_rot_matrix = self.get_egoc_rot_matrix(ry)
-                score = object[13]
 
                 self.plot_3d_obj(img,
                                  VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
@@ -1259,7 +1257,7 @@ class KITTIVisualizer():
         infos_ = self.collate_infos(batch)
         calibs = [dataset.get_calib(info) for info in infos_['img_id']]
         preds = decode_preds(preds, calibs, dataset.cls_mean_size, batch["im_file"], infos_['trans_inv'],
-                             use_camera_dis=dataset.use_camera_dis, undo_augment=False)
+                             use_camera_dis=dataset.use_camera_dis, threshold=threshold, undo_augment=False)
         targets = decode_batch(batch, calibs, dataset.cls_mean_size, use_camera_dis=dataset.use_camera_dis,
                                undo_augment=False)
         images, infos = batch["img"], batch["info"]
@@ -1283,9 +1281,6 @@ class KITTIVisualizer():
                 translation = object[9:12]
                 ry = object[12]
                 egoc_rot_matrix = self.get_egoc_rot_matrix(ry)
-                score = object[13]
-                if score < threshold:
-                    continue
 
                 self.plot_3d_obj(img,
                                  VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
@@ -1299,9 +1294,6 @@ class KITTIVisualizer():
                 translation = object[9:12]
                 ry = object[12]
                 egoc_rot_matrix = self.get_egoc_rot_matrix(ry)
-                score = object[13]
-                if score < threshold:
-                    continue
 
                 self.plot_3d_obj(img,
                                  VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
@@ -1355,9 +1347,6 @@ class KITTIVisualizer():
                 translation[1] *= -1
                 translation += R
                 ry = object[12]
-                score = object[13]
-                if score < threshold:
-                    continue
 
                 bev = np.concatenate((translation, dimensions, np.expand_dims(ry, 0)))
                 box = cv2.boxPoints((bev[:2], bev[2:4], bev[4] * 180 / np.pi)).astype(np.int32)
@@ -1370,9 +1359,6 @@ class KITTIVisualizer():
                 translation[1] *= -1
                 translation += R
                 ry = object[12]
-                score = object[13]
-                if score < threshold:
-                    continue
 
                 bev = np.concatenate((translation, dimensions, np.expand_dims(ry, 0)))
                 box = cv2.boxPoints((bev[:2], bev[2:4], bev[4] * 180 / np.pi)).astype(np.int32)
