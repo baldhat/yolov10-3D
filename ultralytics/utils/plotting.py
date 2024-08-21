@@ -1232,7 +1232,7 @@ class KITTIVisualizer():
             if i >= self.max_imgs:
                 break
             img = image.cpu().numpy().transpose(1, 2, 0).copy()
-            img = np.clip((img * dataset.std + dataset.mean), 0, 255).astype(np.uint8)
+            #img = np.clip((img * dataset.std + dataset.mean), 0, 255).astype(np.uint8)
             img = cv2.resize(img, info["img_size"])
 
             for object in result:
@@ -1271,7 +1271,8 @@ class KITTIVisualizer():
             if i >= self.max_imgs:
                 break
             img = image.detach().cpu().numpy().transpose(1, 2, 0).copy()
-            img = np.clip((img * dataset.std + dataset.mean) * 255, 0, 255).astype(np.uint8)
+            #img = np.clip((img * dataset.std + dataset.mean) * 255, 0, 255).astype(np.uint8)
+            #img = np.clip((img * dataset.std + dataset.mean) * 255, 0, 255).astype(np.uint8)
             img = cv2.resize(img, info["img_size"])
 
             for object in result:

@@ -46,7 +46,7 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
 
     def plot_training_samples(self, batch, ni):
         plot_images(
-            images=batch["img"],
+            images=batch["img"].clone(),
             batch_idx=batch["batch_idx"],
             cls=batch["cls"].squeeze(-1),
             bboxes=batch["bboxes"],
