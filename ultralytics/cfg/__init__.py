@@ -559,14 +559,15 @@ def entrypoint(debug=""):
         model = YOLO(model, task=task)
     elif "yolov10" in stem:
         if "3d" in stem.lower():
-            from ultralytics import YOLOv10_3D
+            from ultralytics import YOLOv10_3D, YOLOv10
             split_path = model.split('/')
             if len(split_path) == 2 and (not os.path.exists(model)):
                 model = YOLOv10_3D.from_pretrained(model)
             else:
-                if full_args_dict["pretrained_backbone"] and overrides["mode"] == "train":
+                if ((overrides.get("pretrained_backbone", None) is None) and
+                    full_args_dict["pretrained_backbone"]) and overrides["mode"] == "train":
                     from copy import deepcopy
-                    backbone = YOLOv10_3D.from_pretrained("jameslahm/" + model.split("_")[0])
+                    backbone = YOLOv10.from_pretrained("jameslahm/" + model.split("_")[0])
                     model = YOLOv10_3D(model)
                     model_seq = deepcopy(model.model.model)
                     for i, module in enumerate(model_seq):

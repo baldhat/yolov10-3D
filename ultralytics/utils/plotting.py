@@ -1232,7 +1232,7 @@ class KITTIVisualizer():
             if i >= self.max_imgs:
                 break
             img = image.cpu().numpy().transpose(1, 2, 0).copy()
-            img = np.clip((img * dataset.std + dataset.mean), 0, 255).astype(np.uint8)
+            #img = np.clip((img * dataset.std + dataset.mean), 0, 255).astype(np.uint8)
             img = cv2.resize(img, info["img_size"])
 
             for object in result:
@@ -1271,7 +1271,8 @@ class KITTIVisualizer():
             if i >= self.max_imgs:
                 break
             img = image.detach().cpu().numpy().transpose(1, 2, 0).copy()
-            img = np.clip((img * dataset.std + dataset.mean) * 255, 0, 255).astype(np.uint8)
+            #img = np.clip((img * dataset.std + dataset.mean) * 255, 0, 255).astype(np.uint8)
+            #img = np.clip((img * dataset.std + dataset.mean) * 255, 0, 255).astype(np.uint8)
             img = cv2.resize(img, info["img_size"])
 
             for object in result:
@@ -1373,7 +1374,7 @@ class KITTIVisualizer():
                  bbox2d=True):
         box_corners = project_to_image(obj.get_box_corners(), camera_matrix).astype(np.int32)
         tip_corners = project_to_image(obj.get_tip_corners(), camera_matrix).astype(np.int32)
-        color_none_bottom, color_bottom = ((0, 255, 0), (0, 0, 255)) if gt else ((255, 0, 0), (255, 0, 0))
+        color_none_bottom, color_bottom = ((0, 1, 0), (0, 0, 1)) if gt else ((1, 0, 0), (1, 0, 0))
         cv2.polylines(img, [box_corners[obj.box_idxs[:5]]], isClosed=False, color=color_none_bottom,
                       thickness=thickness,
                       lineType=cv2.LINE_AA)
@@ -1382,7 +1383,7 @@ class KITTIVisualizer():
         cv2.polylines(img, [box_corners[obj.box_idxs[5:]]], isClosed=True, color=color_bottom, thickness=thickness,
                       lineType=cv2.LINE_AA)
         if bbox2d:
-            color_bbox = (255, 70, 70) if gt else (70, 70, 70)
+            color_bbox = (1, 0.35, 0.35) if gt else (0.35, 0.35, 0.35)
             bbox = np.array(obj.box2d)
             cv2.rectangle(img, bbox[:2].astype(np.int32), bbox[2:].astype(np.int32), color_bbox, thickness=2)
 
