@@ -9,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Dict, List, Union
 import re
+import torch
 
 from ultralytics.nn.modules import v10Detect3d
 from ultralytics.utils import (
@@ -559,22 +560,12 @@ def entrypoint(debug=""):
         model = YOLO(model, task=task)
     elif "yolov10" in stem:
         if "3d" in stem.lower():
-            from ultralytics import YOLOv10_3D, YOLOv10
+            from ultralytics import YOLOv10_3D
             split_path = model.split('/')
             if len(split_path) == 2 and (not os.path.exists(model)):
                 model = YOLOv10_3D.from_pretrained(model)
             else:
-                if ((overrides.get("pretrained_backbone", None) is None) and
-                    full_args_dict["pretrained_backbone"]) and overrides["mode"] == "train":
-                    from copy import deepcopy
-                    backbone = YOLOv10.from_pretrained("jameslahm/" + model.split("_")[0])
-                    model = YOLOv10_3D(model)
-                    model_seq = deepcopy(model.model.model)
-                    for i, module in enumerate(model_seq):
-                        if not isinstance(module, v10Detect3d):
-                            model.model.model[i] = deepcopy(backbone.model.model[i])
-                else:
-                    model = YOLOv10_3D(model)  # .from_pretrained("jameslahm/yolov10n")
+                model = YOLOv10_3D(model)
 
         else:
             from ultralytics import YOLOv10

@@ -449,9 +449,6 @@ class KITTIDataset(data.Dataset):
         self.mean = 0
         self.std = 1
 
-        # others
-        self.downsample = 4
-
     def get_image(self, idx):
         img_file = os.path.join(self.image_dir, '%06d.png' % idx)
         assert os.path.exists(img_file)
@@ -547,10 +544,7 @@ class KITTIDataset(data.Dataset):
         coord_range = np.array([center - crop_size / 2, center + crop_size / 2]).astype(np.float32)
         # image encoding
         img = np.array(img).astype(np.float32) / 255.0
-        img = (img - self.mean) / self.std
         img = img.transpose(2, 0, 1)  # C * H * W
-
-        features_size = self.resolution // self.downsample  # W * H
 
         #  ============================   get labels   ==============================
         gt_boxes_2d = []
@@ -575,28 +569,8 @@ class KITTIDataset(data.Dataset):
                     object.pos[0] *= -1
                     if object.ry > np.pi:  object.ry -= 2 * np.pi
                     if object.ry < -np.pi: object.ry += 2 * np.pi
-            # labels encoding
-            heatmap = np.zeros((self.num_classes, features_size[1], features_size[0]), dtype=np.float32)  # C * H * W
-            size_2d = np.zeros((self.max_objs, 2), dtype=np.float32)
-            offset_2d = np.zeros((self.max_objs, 2), dtype=np.float32)
-            depth = np.zeros((self.max_objs, 1), dtype=np.float32)
-            heading_bin = np.zeros((self.max_objs, 1), dtype=np.int64)
-            heading_res = np.zeros((self.max_objs, 1), dtype=np.float32)
-            src_size_3d = np.zeros((self.max_objs, 3), dtype=np.float32)
-            size_3d = np.zeros((self.max_objs, 3), dtype=np.float32)
-            offset_3d = np.zeros((self.max_objs, 2), dtype=np.float32)
-            height2d = np.zeros((self.max_objs, 1), dtype=np.float32)
-            cls_ids = np.zeros((self.max_objs), dtype=np.int64)
-            indices = np.zeros((self.max_objs), dtype=np.int64)
-
-            # if torch.__version__ == '1.10.0+cu113':
-            if torch.__version__ in ['1.10.0+cu113', '1.10.0', '1.6.0', '1.4.0']:
-                mask_2d = np.zeros((self.max_objs), dtype=np.bool)
-            else:
-                mask_2d = np.zeros((self.max_objs), dtype=np.uint8)
+           
             object_num = len(objects) if len(objects) < self.max_objs else self.max_objs
-
-            vis_depth = np.zeros((self.max_objs, 7, 7), dtype=np.float32)
 
             count = 0
             for i in range(object_num):
@@ -622,84 +596,55 @@ class KITTIDataset(data.Dataset):
                 bbox_2d_[2:] = bbox_2d[2:]
                 bbox_2d_ = xyxy2xywh(bbox_2d_)
                 gt_size_2d_ = bbox_2d_[2:]
-                # modify the 2d bbox according to pre-compute downsample ratio
-                bbox_2d[:] /= self.downsample
-
-
-                # process 3d bbox & get 3d center
                 center_2d = np.array([(bbox_2d[0] + bbox_2d[2]) / 2, (bbox_2d[1] + bbox_2d[3]) / 2],
                                      dtype=np.float32)  # W * H
+                
+                 # process 3d bbox & get 3d center
                 center_3d = objects[i].pos + [0, -objects[i].h / 2, 0]  # real 3D center in 3D space
                 r_center_3d = center_3d.reshape(-1, 3)  # shape adjustment (N, 3)
                 center_3d, _ = calib.rect_to_img(r_center_3d)  # project 3D center to image plane
                 center_3d = center_3d[0]  # shape adjustment
                 center_3d = affine_transform(center_3d.reshape(-1), trans)
-                #gt_center_2d_ = affine_transform(center_2d.reshape(-1), trans)
                 gt_center_3d_ = center_3d.copy()
-                gt_center_2d_ = center_2d * self.downsample
-                center_3d /= self.downsample
-
+                
                 # generate the center of gaussian heatmap [optional: 3d center or 2d center]
-                center_heatmap = center_3d.astype(np.int32) if self.use_3d_center else center_2d.astype(np.int32)
-                if center_heatmap[0] < 0 or center_heatmap[0] >= features_size[0]: continue
-                if center_heatmap[1] < 0 or center_heatmap[1] >= features_size[1]: continue
-
-                # generate the radius of gaussian heatmap
-                w, h = bbox_2d[2] - bbox_2d[0], bbox_2d[3] - bbox_2d[1]
-                radius = gaussian_radius((w, h))
-                radius = max(0, int(radius))
-
-                if objects[i].cls_type in ['Van', 'Truck', 'DontCare']:
-                    draw_umich_gaussian(heatmap[1], center_heatmap, radius)
-                    continue
+                center_heatmap = center_3d.astype(np.int32)
+                if center_heatmap[0] < 0 or center_heatmap[0] >= self.resolution[0]: continue
+                if center_heatmap[1] < 0 or center_heatmap[1] >= self.resolution[1]: continue
 
                 cls_id = self.cls2id[objects[i].cls_type]
-                cls_ids[i] = cls_id
                 gt_cls.append([cls_id])
                 gt_boxes_2d.append(bbox_2d_)
                 gt_center_3d.append(gt_center_3d_)
-                gt_center_2d.append(gt_center_2d_)
+                gt_center_2d.append(center_2d)
                 gt_size_2d.append(gt_size_2d_)
-                draw_umich_gaussian(heatmap[cls_id], center_heatmap, radius)
-
-                # encoding 2d/3d offset & 2d size
-                indices[i] = center_heatmap[1] * features_size[0] + center_heatmap[0]
-                offset_2d[i] = center_2d - center_heatmap
-                size_2d[i] = 1. * w, 1. * h
 
                 # encoding depth
-                depth[i] = objects[i].pos[-1]
-                depth[i] *= scale
+                depth = objects[i].pos[-1]
+                depth *= scale
 
                 # encoding heading angle
                 # heading_angle = objects[i].alpha
                 heading_angle = calib.ry2alpha(objects[i].ry, (objects[i].box2d[0] + objects[i].box2d[2]) / 2)
                 if heading_angle > np.pi:  heading_angle -= 2 * np.pi  # check range
                 if heading_angle < -np.pi: heading_angle += 2 * np.pi
-                heading_bin[i], heading_res[i] = angle2class(heading_angle)
-                gt_heading_bin.append(heading_bin[i])
-                gt_heading_res.append(heading_res[i])
+                heading_bin, heading_res = angle2class(heading_angle)
+                gt_heading_bin.append(heading_bin)
+                gt_heading_res.append(heading_res)
 
-                offset_3d[i] = center_3d - center_heatmap
-                src_size_3d[i] = np.array([objects[i].h, objects[i].w, objects[i].l], dtype=np.float32)
+                src_size_3d = np.array([objects[i].h, objects[i].w, objects[i].l], dtype=np.float32)
                 mean_size = self.cls_mean_size[self.cls2id[objects[i].cls_type]]
-                size_3d[i] = src_size_3d[i] - mean_size
+                size_3d = src_size_3d - mean_size
                 s3d = (np.array([objects[i].h, objects[i].w, objects[i].l], dtype=np.float32)
                        - self.cls_mean_size[self.cls2id[objects[i].cls_type]])
                 gt_size_3d.append(s3d)
 
-                # objects[i].trucation <=0.5 and objects[i].occlusion<=2 and (objects[i].box2d[3]-objects[i].box2d[1])>=25:
-                if objects[i].trucation <= 0.5 and objects[i].occlusion <= 2:
-                    mask_2d[i] = 1
-
-                vis_depth[i] = depth[i]
-
                 if self.use_camera_dis:
-                    r_center_3d[-1] *= scale
+                    r_center_3d *= scale
                     dep = np.linalg.norm(r_center_3d)
                     gt_depth.append(dep)
                 else:
-                    gt_depth.append(depth[i])
+                    gt_depth.append(depth)
 
             if random_mix_flag == True:
                 # if False:
@@ -736,103 +681,57 @@ class KITTIDataset(data.Dataset):
                     bbox_2d_[2:] = bbox_2d[2:]
                     bbox_2d_ = xyxy2xywh(bbox_2d_)
                     gt_size_2d_ = bbox_2d_[2:]
-                    # modify the 2d bbox according to pre-compute downsample ratio
-                    bbox_2d[:] /= self.downsample
+                    center_2d = np.array([(bbox_2d[0] + bbox_2d[2]) / 2, (bbox_2d[1] + bbox_2d[3]) / 2],
+                                          dtype=np.float32)  # W * H
 
                     # process 3d bbox & get 3d center
-                    center_2d = np.array([(bbox_2d[0] + bbox_2d[2]) / 2, (bbox_2d[1] + bbox_2d[3]) / 2],
-                                         dtype=np.float32)  # W * H
                     center_3d = objects[i].pos + [0, -objects[i].h / 2, 0]  # real 3D center in 3D space
                     r_center_3d = center_3d.reshape(-1, 3)  # shape adjustment (N, 3)
                     center_3d, _ = calib.rect_to_img(r_center_3d)  # project 3D center to image plane
                     center_3d = center_3d[0]  # shape adjustment
                     center_3d = affine_transform(center_3d.reshape(-1), trans)
-                    #gt_center_2d_ = affine_transform(center_2d.reshape(-1), trans)
-                    gt_center_3d_ = center_3d.copy()
-                    gt_center_2d_ = center_2d * self.downsample
-                    center_3d /= self.downsample
 
                     # generate the center of gaussian heatmap [optional: 3d center or 2d center]
-                    center_heatmap = center_3d.astype(np.int32) if self.use_3d_center else center_2d.astype(np.int32)
+                    center_heatmap = center_3d.astype(np.int32)
                     if center_heatmap[0] < 0 or center_heatmap[0] >= features_size[0]: continue
                     if center_heatmap[1] < 0 or center_heatmap[1] >= features_size[1]: continue
 
-                    # generate the radius of gaussian heatmap
-                    w, h = bbox_2d[2] - bbox_2d[0], bbox_2d[3] - bbox_2d[1]
-                    radius = gaussian_radius((w, h))
-                    radius = max(0, int(radius))
-
-                    if objects[i].cls_type in ['Van', 'Truck', 'DontCare']:
-                        draw_umich_gaussian(heatmap[1], center_heatmap, radius)
-                        continue
-
                     cls_id = self.cls2id[objects[i].cls_type]
-                    cls_ids[i + object_num] = cls_id
                     gt_cls.append([cls_id])
                     gt_boxes_2d.append(bbox_2d_)
-                    gt_center_3d.append(gt_center_3d_)
-                    gt_center_2d.append(gt_center_2d_)
+                    gt_center_3d.append(center_3d)
+                    gt_center_2d.append(center_2d)
                     gt_size_2d.append(gt_size_2d_)
-                    draw_umich_gaussian(heatmap[cls_id], center_heatmap, radius)
-
-                    # encoding 2d/3d offset & 2d size
-                    indices[i + object_num] = center_heatmap[1] * features_size[0] + center_heatmap[0]
-                    offset_2d[i + object_num] = center_2d - center_heatmap
-                    size_2d[i + object_num] = 1. * w, 1. * h
 
                     # encoding depth
-                    depth[i + object_num] = objects[i].pos[-1]
-                    depth[i + object_num] *= scale
+                    depth = objects[i].pos[-1]
+                    depth *= scale
 
                     # encoding heading angle
-                    # heading_angle = objects[i].alpha
                     heading_angle = calib.ry2alpha(objects[i].ry, (objects[i].box2d[0] + objects[i].box2d[2]) / 2)
                     if heading_angle > np.pi:  heading_angle -= 2 * np.pi  # check range
                     if heading_angle < -np.pi: heading_angle += 2 * np.pi
-                    heading_bin[i + object_num], heading_res[i + object_num] = angle2class(heading_angle)
-                    gt_heading_bin.append(heading_bin[i + object_num])
-                    gt_heading_res.append(heading_res[i + object_num])
+                    heading_bin, heading_res = angle2class(heading_angle)
+                    gt_heading_bin.append(heading_bin)
+                    gt_heading_res.append(heading_res)
 
-                    offset_3d[i + object_num] = center_3d - center_heatmap
-                    src_size_3d[i + object_num] = np.array([objects[i].h, objects[i].w, objects[i].l], dtype=np.float32)
+                    src_size_3d = np.array([objects[i].h, objects[i].w, objects[i].l], dtype=np.float32)
                     mean_size = self.cls_mean_size[self.cls2id[objects[i].cls_type]]
-                    size_3d[i + object_num] = src_size_3d[i + object_num] - mean_size
+                    size_3d = src_size_3d - mean_size
                     s3d = (np.array([objects[i].h, objects[i].w, objects[i].l], dtype=np.float32)
                            - self.cls_mean_size[self.cls2id[objects[i].cls_type]])
                     gt_size_3d.append(s3d)
 
-                    if objects[i].trucation <= 0.5 and objects[i].occlusion <= 2:
-                        mask_2d[i + object_num] = 1
-
-                    vis_depth[i + object_num] = depth[i + object_num]
-
                     if self.use_camera_dis:
-                        r_center_3d[-1] *= scale
+                        r_center_3d *= scale
                         dep = np.linalg.norm(r_center_3d)
                         gt_depth.append(dep)
                     else:
-                        gt_depth.append(depth[i + object_num])
-
-            targets = {'depth': depth,
-                       'size_2d': size_2d,
-                       'heatmap': heatmap,
-                       'offset_2d': offset_2d,
-                       'indices': indices,
-                       'size_3d': size_3d,
-                       'offset_3d': offset_3d,
-                       'heading_bin': heading_bin,
-                       'heading_res': heading_res,
-                       'cls_ids': cls_ids,
-                       'mask_2d': mask_2d,
-                       'vis_depth': vis_depth,
-                       }
-        else:
-            targets = {}
+                        gt_depth.append(depth)
 
         inputs = torch.tensor(img)
         info = {'img_id': index,
                 'img_size': img_size,
-                'bbox_downsample_ratio': img_size / features_size,
                 'trans_inv': trans_inv}
 
         if len(gt_boxes_2d) > 0:
@@ -846,12 +745,10 @@ class KITTIDataset(data.Dataset):
             "img": inputs,
             "ori_img": ori_img,
             "calib": torch.tensor(calib.P2),
-            "coord_range": torch.tensor(coord_range),
-            "targets": targets,
             "info": info,
             "cls": torch.tensor(np.array(gt_cls)),
             "bboxes": bboxes,
-            "batch_idx": torch.zeros(len(gt_boxes_2d)),
+            "batch_idx": torch.zeros(len(gt_boxes_2d)), # Used during collate_fn
             "im_file": '%06d.txt' % info["img_id"],
             "ori_shape": info["img_size"][::-1], # this one is (height, width)
             "ratio_pad": torch.tensor(ratio_pad),

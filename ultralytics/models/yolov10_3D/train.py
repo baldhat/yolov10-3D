@@ -1,6 +1,8 @@
 from ultralytics.models.yolo.detect import DetectionTrainer
 from .val import YOLOv10_3DDetectionValidator
 from .model import YOLOv10_3DDetectionModel
+from ultralytics.models.yolov10 import YOLOv10
+from ultralytics.nn.modules.head import v10Detect3d
 from copy import copy
 from ultralytics.utils import RANK
 from ultralytics.data.dataset import KITTIDataset
@@ -27,9 +29,16 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
 
     def get_model(self, cfg=None, weights=None, verbose=True):
         """Return a YOLO detection model."""
-        model = YOLOv10_3DDetectionModel(cfg, nc=self.data["nc"], verbose=verbose and RANK == -1)
+        from copy import deepcopy
+        backbone = YOLOv10.from_pretrained("jameslahm/" + self.model.split("_")[0])
+        model = YOLOv10_3DDetectionModel(self.model)
         if weights:
             model.load(weights)
+        else:
+             model_seq = deepcopy(model.model)
+            for i, module in enumerate(model_seq):
+                if not isinstance(module, v10Detect3d):
+                    model.model[i] = deepcopy(backbone.model.model[i])
         return model
 
     def preprocess_batch(self, batch):

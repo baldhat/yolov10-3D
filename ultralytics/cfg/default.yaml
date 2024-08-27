@@ -10,7 +10,7 @@ data: # (str, optional) path to data file, i.e. coco128.yaml
 epochs: 200 # (int) number of epochs to train for
 time: # (float, optional) number of hours to train for, overrides epochs if supplied
 patience: 100 # (int) epochs to wait for no observable improvement for early stopping of training
-batch: 16 # (int) number of images per batch (-1 for AutoBatch)
+batch: 32 # (int) number of images per batch (-1 for AutoBatch)
 imgsz: 1280 # (int | list) input images size as int for train and val modes, or list[w,h] for predict and export modes
 save: True # (bool) save train checkpoints and predict results
 save_period: -1 # (int) Save checkpoint every x epochs (disabled if < 1)
@@ -53,7 +53,7 @@ max_det: 50 # (int) maximum number of detections per image
 half: False # (bool) use half precision (FP16)
 dnn: False # (bool) use OpenCV DNN for ONNX inference
 plot_labels: False
-plots: True # (bool) save plots and images during train/val
+plots: False # (bool) save plots and images during train/val
 
 # Predict settings -----------------------------------------------------------------------------------------------------
 source: # (str, optional) source directory for images or videos
@@ -98,12 +98,12 @@ warmup_momentum: 0.8 # (float) warmup initial momentum
 warmup_bias_lr: 0.1 # (float) warmup initial bias lr
 box: 5 # (float) box loss gain
 
-loss2d: 2 # (float) box loss gain
-depth: 1 # (float) box loss gain
-offset3d: 10 # (float) box loss gain
-size3d: 1 # (float) box loss gain
-heading: 1 # (float) box loss gain
 cls: 2 # (float) cls loss gain (scale with pixels)
+loss2d: 2 # (float) box loss gain
+depth: 1 # (float) depth loss gain
+offset3d: 10 # (float) 3d pixel offset loss gain
+size3d: 1 # (float) 3d size loss gain
+heading: 1 # (float) 3d heading loss gain
 
 dfl: 1.5 # (float) dfl loss gain
 pose: 12.0 # (float) pose loss gain
@@ -137,3 +137,4 @@ cfg: # (str, optional) for overriding defaults.yaml
 tracker: botsort.yaml # (str) tracker type, choices=[botsort.yaml, bytetrack.yaml]
 
 save_dir:
+weights:

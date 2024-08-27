@@ -578,7 +578,7 @@ class v10Detect3d(nn.Module):
         self.nl = len(ch)  # number of detection layers
         self.no = nc + 2 + 2 + 2 + 3 + 24 + 1 + 1  # number of outputs per anchor
         self.stride = torch.zeros(self.nl)  # strides computed during build
-        cls_c, o2d_c, s2d_c, o3d_c, s3d_c, hd_c, dep_c, dep_un_c = 128, 128, 128, 128, 128, 128, 128, 128 #TODO: optimize
+        cls_c, o2d_c, s2d_c, o3d_c, s3d_c, hd_c, dep_c, dep_un_c = 128, 64, 64, 64, 64, 64, 128, 64 #TODO: optimize
 
         self.cls = nn.ModuleList(nn.Sequential(Conv(x, cls_c, 3),
                                               Conv(cls_c, cls_c, 3),
@@ -616,14 +616,6 @@ class v10Detect3d(nn.Module):
         bbox = torch.cat((xy1, xy2), dim=1)
 
         center3d = (pred_o3d + self.anchors) * self.strides
-
-        # cls_id = cls.argmax(dim=1).unsqueeze(1)
-        # pred_bin = pred_hd[:, :12, :]
-        # pred_res = pred_hd[:, 12:, :]
-        # bins = pred_bin.argmax(dim=1)
-        # idx = torch.nn.functional.one_hot(pred_bin.max(dim=1, keepdim=True)[1].permute(0, 2, 1), num_classes=12).squeeze(-2)
-        # res = pred_res[idx.bool().permute(0, 2, 1)].view(bins.shape)
-        # alpha = class2angle(bins, res)
 
         return torch.cat((cls, bbox, center3d, pred_s3d, pred_hd, pred_dep, pred_dep_un), dim=1)
 
