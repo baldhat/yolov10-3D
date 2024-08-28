@@ -7,7 +7,7 @@ mode: train # (str) YOLO mode, i.e. train, val, predict, export, track, benchmar
 # Train settings -------------------------------------------------------------------------------------------------------
 model: # (str, optional) path to model file, i.e. yolov8n.pt, yolov8n.yaml
 data: # (str, optional) path to data file, i.e. coco128.yaml
-epochs: 200 # (int) number of epochs to train for
+epochs: 300 # (int) number of epochs to train for
 time: # (float, optional) number of hours to train for, overrides epochs if supplied
 patience: 100 # (int) epochs to wait for no observable improvement for early stopping of training
 batch: 32 # (int) number of images per batch (-1 for AutoBatch)
@@ -22,7 +22,7 @@ project: # (str, optional) project name
 name: # (str, optional) experiment name, results saved to 'project/name' directory
 exist_ok: False # (bool) whether to overwrite existing experiment
 pretrained: True # (bool | str) whether to use a pretrained model (bool) or a model to load weights from (str)
-optimizer: auto # (str) optimizer to use, choices=[SGD, Adam, Adamax, AdamW, NAdam, RAdam, RMSProp, auto]
+optimizer: AdamW # (str) optimizer to use, choices=[SGD, Adam, Adamax, AdamW, NAdam, RAdam, RMSProp, auto]
 verbose: True # (bool) whether to print verbose output
 seed: 0 # (int) random seed for reproducibility
 deterministic: True # (bool) whether to enable deterministic mode
@@ -65,6 +65,7 @@ agnostic_nms: False # (bool) class-agnostic NMS
 classes: # (int | list[int], optional) filter results by class, i.e. classes=0, or classes=[0,2,3]
 retina_masks: False # (bool) use high-resolution segmentation masks
 embed: # (list[int], optional) return feature vectors/embeddings from given layers
+use_o2m_depth: False
 
 # Visualize settings ---------------------------------------------------------------------------------------------------
 show: False # (bool) show predicted images and videos if environment allows
@@ -89,7 +90,7 @@ workspace: 4 # (int) TensorRT: workspace size (GB)
 nms: False # (bool) CoreML: add NMS
 
 # Hyperparameters ------------------------------------------------------------------------------------------------------
-lr0: 0.01 # (float) initial learning rate (i.e. SGD=1E-2, Adam=1E-3)
+lr0: 0.001 # (float) initial learning rate (i.e. SGD=1E-2, Adam=1E-3)
 lrf: 0.01 # (float) final learning rate (lr0 * lrf)
 momentum: 0.937 # (float) SGD momentum/Adam beta1
 weight_decay: 0.0005 # (float) optimizer weight decay 5e-4
@@ -98,7 +99,7 @@ warmup_momentum: 0.8 # (float) warmup initial momentum
 warmup_bias_lr: 0.1 # (float) warmup initial bias lr
 box: 5 # (float) box loss gain
 
-cls: 2 # (float) cls loss gain (scale with pixels)
+cls: 2 # (float) cls l oss gain (scale with pixels)
 loss2d: 2 # (float) box loss gain
 depth: 1 # (float) depth loss gain
 offset3d: 10 # (float) 3d pixel offset loss gain

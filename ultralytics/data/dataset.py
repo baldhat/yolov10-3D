@@ -693,8 +693,8 @@ class KITTIDataset(data.Dataset):
 
                     # generate the center of gaussian heatmap [optional: 3d center or 2d center]
                     center_heatmap = center_3d.astype(np.int32)
-                    if center_heatmap[0] < 0 or center_heatmap[0] >= features_size[0]: continue
-                    if center_heatmap[1] < 0 or center_heatmap[1] >= features_size[1]: continue
+                    if center_heatmap[0] < 0 or center_heatmap[0] >= self.resolution[0]: continue
+                    if center_heatmap[1] < 0 or center_heatmap[1] >= self.resolution[1]: continue
 
                     cls_id = self.cls2id[objects[i].cls_type]
                     gt_cls.append([cls_id])

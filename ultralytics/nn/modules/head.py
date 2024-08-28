@@ -578,7 +578,7 @@ class v10Detect3d(nn.Module):
         self.nl = len(ch)  # number of detection layers
         self.no = nc + 2 + 2 + 2 + 3 + 24 + 1 + 1  # number of outputs per anchor
         self.stride = torch.zeros(self.nl)  # strides computed during build
-        cls_c, o2d_c, s2d_c, o3d_c, s3d_c, hd_c, dep_c, dep_un_c = 128, 64, 64, 64, 64, 64, 128, 64 #TODO: optimize
+        cls_c, o2d_c, s2d_c, o3d_c, s3d_c, hd_c, dep_c, dep_un_c = 128, 128, 128, 128, 128, 128, 128, 128 #TODO: optimize
 
         self.cls = nn.ModuleList(nn.Sequential(Conv(x, cls_c, 3),
                                               Conv(cls_c, cls_c, 3),

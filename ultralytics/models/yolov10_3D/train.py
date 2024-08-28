@@ -35,7 +35,7 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
         if weights:
             model.load(weights)
         else:
-             model_seq = deepcopy(model.model)
+            model_seq = deepcopy(model.model)
             for i, module in enumerate(model_seq):
                 if not isinstance(module, v10Detect3d):
                     model.model[i] = deepcopy(backbone.model.model[i])
@@ -44,7 +44,6 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
     def preprocess_batch(self, batch):
         """Allows custom preprocessing model inputs and ground truths depending on task type."""
         batch["calib"] = batch["calib"].to(self.device)
-        batch["coord_range"] = batch["coord_range"].to(self.device)
         batch["img"] = batch["img"].to(self.device)
         return batch
 

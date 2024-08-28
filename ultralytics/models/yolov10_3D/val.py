@@ -3,8 +3,8 @@ from ultralytics.utils import ops
 from ultralytics.data.dataset import KITTIDataset
 from ultralytics.utils.plotting import KITTIVisualizer
 from ultralytics.data.decode_helper import decode_batch, decode_preds
-from ultralytics.utils.metrics import ConfusionMatrix, DetMetrics, box_iou
-from ultralytics.utils import eval
+from ultralytics.utils.metrics import box_iou
+from ultralytics.utils.eval import eval_from_scrach
 
 import torch
 import numpy as np
@@ -26,20 +26,49 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
 
     def postprocess(self, preds):
         if isinstance(preds, dict):
-            preds = preds["one2one"]
+            predsO = preds["one2one"]
+            predsM = preds["one2many"]
 
-        if isinstance(preds, (list, tuple)):
-            preds = preds[0]
+        if isinstance(predsO, (list, tuple)):
+            predsO = predsO[0]
         
-        # Acknowledgement: Thanks to sanha9999 in #190 and #181!
-        if preds.shape[-1] == 6:
-            return preds
-        else:
-            preds = preds.transpose(-1, -2)
-            reg, scores, labels = ops.v10_3Dpostprocess(preds, self.args.max_det, self.nc)
-            # score (1), label (1), o2d(2), s2d(2), o3d(2), s3d(3), hd(24), dep(1), dep_un(1)
-            preds = torch.cat((reg, scores.unsqueeze(-1), labels.unsqueeze(-1)), dim=-1)
-            return preds
+        if isinstance(predsM, (list, tuple)):
+            predsM = predsM[0]
+        
+        predsO = predsO.transpose(-1, -2)
+        regO, scoresO, labelsO = ops.v10_3Dpostprocess(predsO, self.args.max_det, self.nc)
+        preds = torch.cat((regO, scoresO.unsqueeze(-1), labelsO.unsqueeze(-1)), dim=-1)
+        
+        if self.args.use_o2m_depth:
+            predsM = predsM.transpose(-1, -2)
+            regM, scoresM, labelsM = ops.v10_3Dpostprocess(predsM, self.args.max_det * 5, self.nc)
+            predsM = torch.cat((regM, scoresM.unsqueeze(-1), labelsM.unsqueeze(-1)), dim=-1)
+            
+            preds = self.aggregate_o2m_preds(preds, predsM)
+        
+        return preds
+    
+    def aggregate_o2m_preds(self, predsO, predsM, thres=0.3):
+        # bbox, pred_center3d, pred_s3d, pred_hd, pred_dep, pred_dep_un, scores, labels = preds.split((4, 2, 3, 24, 1, 1, 1, 1), dim=-1)
+        bboxO = predsO[:, :, 0:4] # format: xyxy
+        bboxM = predsM[:, :, 0:4]
+        
+        for i in range(predsO.shape[0]):
+            iou = box_iou(bboxO[i], bboxM[i])
+            for j in range(predsO.shape[1]):
+                matches = iou[j] > 0.9
+                depths = torch.cat((predsO[i, j, -4].unsqueeze(0), predsM[i, matches, -4]))
+                depth_uncerts = torch.cat((predsO[i, j, -3].unsqueeze(0), predsM[i, matches, -3]))
+                depth_scores = torch.exp(-depth_uncerts)
+                mask = depth_scores > thres
+                if mask.nonzero().numel():
+                    depth_scores = depth_scores[mask]
+                    depths = depths[mask] 
+                    weights = depth_scores / depth_scores.sum()
+                    predsO[i, j, -4] = weights @ depths
+                    predsO[i, j, -3] = depth_uncerts[mask].mean()
+        return predsO # lala
+        
 
     def preprocess(self, batch):
         batch["img"] = batch["img"].to(self.device, non_blocking=True)
@@ -118,16 +147,16 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
 
         self.save_results(self.results, output_dir=self.save_dir)
         self.results = {}
-        try:
-            result = eval.eval_from_scrach(
-                self.dataloader.dataset.label_dir,
-                os.path.join(self.save_dir, 'preds'),
-                ap_mode=40)
-            self.metrics.car3d = result
-            self.metrics.carAP3d = result["3d@0.70"][1]
-        except:
-            print("Failed to evaluate mAP")
-        return self.metrics.results_dict
+        #try:
+        result = eval_from_scrach(
+            self.dataloader.dataset.label_dir,
+            os.path.join(self.save_dir, 'preds'),
+            ap_mode=40)
+        self.metrics.car3d = result
+        self.metrics.carAP3d = result["3d@0.70"][1]
+        #except:
+#            print("Failed to evaluate mAP")
+ #       return self.metrics.results_dict
 
     def save_results(self, results, output_dir='./outputs'):
         output_dir = os.path.join(output_dir, 'preds')

@@ -818,7 +818,7 @@ class DDDetectionLoss():
         gts = torch.cat((batch["batch_idx"].view(-1, 1), batch["cls"].view(-1, 1),
                                 batch["bboxes"], batch["center_2d"], batch["size_2d"],
                                 batch["center_3d"], batch["size_3d"], batch["depth"].view(-1, 1),
-                                batch["heading_bin"], batch["heading_res"]), 1)
+                                batch["heading_bin"].view(-1, 1), batch["heading_res"].view(-1, 1)), 1)
         gts = self.preprocess(gts.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
         gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin, gt_heading_res = gts.split(
             (1, 4, 2, 2, 2, 3, 1, 1, 1), 2)
