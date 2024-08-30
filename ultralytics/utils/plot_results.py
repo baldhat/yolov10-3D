@@ -11,7 +11,7 @@ base_dir = "/home/stud/mijo/experiments/results"
 def annot_max(x,y, ax):
     xmax = x[np.argmax(y)]
     ymax = y.max()
-    text= f"epoch={xmax}, AP={ymax}".format(xmax, ymax)
+    text= f"{xmax}: {ymax}".format(xmax, ymax)
     bbox_props = dict(boxstyle="square,pad=0.3", fc="w", ec="k", lw=0.72)
     arrowprops=dict(arrowstyle="->",connectionstyle="angle,angleA=0,angleB=60")
     kw = dict(xycoords='data',textcoords="data",
