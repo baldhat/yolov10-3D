@@ -97,7 +97,7 @@ weight_decay: 0.0005 # (float) optimizer weight decay 5e-4
 warmup_epochs: 3.0 # (float) warmup epochs (fractions ok)
 warmup_momentum: 0.8 # (float) warmup initial momentum
 warmup_bias_lr: 0.1 # (float) warmup initial bias lr
-box: 5 # (float) box loss gain
+box: 5 # (float) 2dbox loss gain
 
 cls: 2 # (float) cls l oss gain (scale with pixels)
 loss2d: 2 # (float) box loss gain
@@ -105,6 +105,7 @@ depth: 1 # (float) depth loss gain
 offset3d: 10 # (float) 3d pixel offset loss gain
 size3d: 1 # (float) 3d size loss gain
 heading: 1 # (float) 3d heading loss gain
+tal_topk: 10 # (int) number of assignments per groundtruth for o2m head
 
 dfl: 1.5 # (float) dfl loss gain
 pose: 12.0 # (float) pose loss gain

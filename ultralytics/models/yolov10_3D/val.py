@@ -10,7 +10,7 @@ import torch
 import numpy as np
 from pathlib import Path
 import os
-import shutil
+from sklearn.neighbors import KernelDensity
 
 
 
@@ -48,7 +48,7 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
         
         return preds
     
-    def aggregate_o2m_preds(self, predsO, predsM, thres=0.3):
+    def aggregate_o2m_preds(self, predsO, predsM, thres=0.1):
         # bbox, pred_center3d, pred_s3d, pred_hd, pred_dep, pred_dep_un, scores, labels = preds.split((4, 2, 3, 24, 1, 1, 1, 1), dim=-1)
         bboxO = predsO[:, :, 0:4] # format: xyxy
         bboxM = predsM[:, :, 0:4]
@@ -59,14 +59,18 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
                 matches = iou[j] > 0.9
                 depths = torch.cat((predsO[i, j, -4].unsqueeze(0), predsM[i, matches, -4]))
                 depth_uncerts = torch.cat((predsO[i, j, -3].unsqueeze(0), predsM[i, matches, -3]))
+                cls = torch.cat((predsO[i, j, -1].unsqueeze(0), predsM[i, matches, -1]))
                 depth_scores = torch.exp(-depth_uncerts)
-                mask = depth_scores > thres
-                if mask.nonzero().numel():
+                mask = torch.logical_and(depth_scores > thres, cls == predsO[i, j, -1])
+                if mask.nonzero().numel() > 1:
                     depth_scores = depth_scores[mask]
-                    depths = depths[mask] 
+                    depths = depths[mask]
                     weights = depth_scores / depth_scores.sum()
-                    predsO[i, j, -4] = weights @ depths
-                    predsO[i, j, -3] = depth_uncerts[mask].mean()
+                    kde = KernelDensity(bandwidth="silverman", kernel='gaussian').fit(depths.unsqueeze(-1).cpu(), sample_weight=weights.cpu())
+                    logprob = torch.tensor(kde.score_samples(depths.unsqueeze(-1).cpu()))
+                    max_ind = torch.argmax(logprob)
+                    predsO[i, j, -4] = depths[max_ind]
+                    predsO[i, j, -3] = depth_uncerts[max_ind]
         return predsO # lala
         
 

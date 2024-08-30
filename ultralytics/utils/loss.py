@@ -734,7 +734,7 @@ class v10DetectLoss:
 
 class DetectLoss3d:
     def __init__(self, model):
-        self.one2many = DDDetectionLoss(model, tal_topk=10)
+        self.one2many = DDDetectionLoss(model, tal_topk=model.args.tal_topk)
         self.one2one = DDDetectionLoss(model, tal_topk=1)
 
     def __call__(self, preds, batch):
