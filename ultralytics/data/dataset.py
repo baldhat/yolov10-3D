@@ -398,14 +398,13 @@ class SemanticDataset(BaseDataset):
 class KITTIDataset(data.Dataset):
     def __init__(self, image_file_path, mode, args):
         # basic configuration
-        self.num_classes = 3
         self.max_objs = 50
-        self.class_name = ['Pedestrian', 'Car', 'Cyclist']
-        self.cls2id = {'Pedestrian': 0, 'Car': 1, 'Cyclist': 2}
+        self.class_name = ['Car', 'Pedestrian', 'Cyclist']
+        self.cls2id = {'Car': 0, 'Pedestrian': 1, 'Cyclist': 2}
         self.resolution = np.array([1280, 384])  # W * H
         self.use_3d_center = True  # cfg['use_3d_center']
         self.use_camera_dis = args.cam_dis
-        self.writelist = ['Car','Pedestrian','Cyclist']  # cfg['writelist']
+        self.writelist = ['Car','Pedestrian','Cyclist']  # FIXME
 
         '''    
         ['Car': np.array([3.88311640418,1.62856739989,1.52563191462]),
@@ -413,14 +412,15 @@ class KITTIDataset(data.Dataset):
          'Cyclist': np.array([1.76282397,0.59706367,1.73698127])] 
         '''
         ##l,w,h
-        self.cls_mean_size = np.array([[1.76255119, 0.66068622, 0.84422524],
-                                       [1.52563191462, 1.62856739989, 3.88311640418],
-                                       [1.73698127, 0.59706367, 1.76282397]])
+        self.cls_mean_size = np.array([
+            [1.52563191462, 1.62856739989, 3.88311640418],
+            [1.76255119, 0.66068622, 0.84422524],
+            [1.73698127, 0.59706367, 1.76282397]])
 
         # data split loading
         assert mode in ['train', 'val', 'trainval', 'test']
-        self.split = mode#"val" # FIXME
-        self.mode = mode #"val"  # FIXME
+        self.split = mode
+        self.mode = mode
         root_dir = pathlib.Path(image_file_path).parent.parent
         split_dir = image_file_path
         self.idx_list = [x.strip() for x in open(split_dir).readlines()]

@@ -151,16 +151,16 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
 
         self.save_results(self.results, output_dir=self.save_dir)
         self.results = {}
-        #try:
-        result = eval_from_scrach(
-            self.dataloader.dataset.label_dir,
-            os.path.join(self.save_dir, 'preds'),
-            ap_mode=40)
-        self.metrics.car3d = result
-        self.metrics.carAP3d = result["3d@0.70"][1]
-        #except:
-#            print("Failed to evaluate mAP")
- #       return self.metrics.results_dict
+        try:
+            result = eval_from_scrach(
+                self.dataloader.dataset.label_dir,
+                os.path.join(self.save_dir, 'preds'),
+                ap_mode=40)
+            self.metrics.car3d = result
+            self.metrics.carAP3d = result["3d@0.70"][1]
+        except:
+            print("Failed to evaluate mAP")
+        return self.metrics.results_dict
 
     def save_results(self, results, output_dir='./outputs'):
         output_dir = os.path.join(output_dir, 'preds')

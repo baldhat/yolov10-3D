@@ -864,7 +864,7 @@ def v10postprocess(preds, max_det, nc=80):
     return boxes, scores, labels
 
 def v10_3Dpostprocess(preds, max_det, nc=3):
-    assert(preds.shape[-1] == 38)
+    assert(preds.shape[-1] == nc+35)
     scores, reg = preds.split([nc, preds.shape[-1] - nc], dim=-1)
     max_scores = scores.amax(dim=-1)
     max_scores, index = torch.topk(max_scores, max_det, dim=-1)
