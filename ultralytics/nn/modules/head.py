@@ -603,7 +603,7 @@ class v10Detect3d(nn.Module):
                                               nn.Conv2d(dep_c, 1, 1)) for x in ch)
         self.dep_un = nn.ModuleList(nn.Sequential(Conv(x, dep_un_c, 3),
                                               Conv(dep_un_c, dep_un_c, 3),
-                                              nn.Conv2d(dep_un_c, 1, 1)) for x in ch)
+                                              nn.Conv2d(dep_un_c, 1, 1)) for x in ch) # TODO Add Relu?
 
         self.o2o_heads = nn.ModuleList([self.cls, self.o2d, self.s2d, self.o3d, self.s3d, self.hd, self.dep, self.dep_un])
         self.o2m_heads = copy.deepcopy(self.o2o_heads)
@@ -656,14 +656,14 @@ class v10Detect3d(nn.Module):
         y = []
         for i in range(self.nl):
             y.append(torch.cat([module[i](x[i]) for module in heads], 1))
-        return y
-
         # FIXME
         # GUPNet: https://github.com/SuperMHP/GUPNet/blob/main/code/lib/models/gupnet.py
         # depth_net_out = self.depth(roi_feature_masked)[:,:,0,0]
         # depth_geo_log_std = (h3d_log_std.squeeze()+2*(roi_calibs[:,0,0].log()-box2d_height.log())).unsqueeze(-1)
         # depth_net_log_std = torch.logsumexp(torch.cat([depth_net_out[:,1:2],depth_geo_log_std],-1),-1,keepdim=True)
         # depth_net_out = torch.cat([(1. / (depth_net_out[:,0:1].sigmoid() + 1e-6) - 1.)+depth_geo.unsqueeze(-1),depth_net_log_std],-1)
+        return y
+
 
     def _forward(self, x):
         """Concatenates and returns predicted bounding boxes and class probabilities."""

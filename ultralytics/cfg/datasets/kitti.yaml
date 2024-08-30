@@ -8,6 +8,6 @@ test: ImageSets/test.txt
 
 # Classes
 names:
-  0: Pedestrian
-  1: Car
-  2: Cyclist
+  0: Car
+  #1: Pedestrian #FIXME
+  #2: Cyclist
