@@ -676,20 +676,18 @@ class v10Detect3d(nn.Module):
 
     def forward(self, x):
         one2one = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
-        if not self.export:
+        if self.training:
             one2many = self._forward(x)
 
         if not self.training:
             one2one = self.inference(one2one)
-            if not self.export:
-                return {"one2many": one2many, "one2one": one2one}
-            else:
-                raise NotImplementedError("TODO")
-                assert(self.max_det != -1)
-                boxes, scores, labels = ops.v10postprocess(one2one.permute(0, 2, 1), self.max_det, self.nc)
-                return torch.cat([boxes, scores.unsqueeze(-1), labels.unsqueeze(-1).to(boxes.dtype)], dim=-1)
+            #if not self.export:
+            #    return {"one2many": one2many, "one2one": one2one}
+            #else:
+            return {"one2one": one2one}
         else:
             return {"one2many": one2many, "one2one": one2one}
+
 
     def decode_bboxes(self, bboxes, anchors):
         # anchor_points:
@@ -704,7 +702,7 @@ class v10Detect3d(nn.Module):
 
     def bias_init(self):
         # TODO: Better weight initialization
-        deps = [5, 15, 25]
+        deps = [8, 25, 40]
         for i in range(self.nl):
             self.cls[i][-1].bias.data[: self.nc] = math.log(5 / self.nc / ((1280 / self.stride[i]) * (384 / self.stride[i])))
             self.s2d[i][-1].bias.data.fill_(6)
