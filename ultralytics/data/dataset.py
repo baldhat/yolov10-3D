@@ -404,7 +404,7 @@ class KITTIDataset(data.Dataset):
         self.resolution = np.array([1280, 384])  # W * H
         self.use_3d_center = True  # cfg['use_3d_center']
         self.use_camera_dis = args.cam_dis
-        self.writelist = ['Car']#,'Pedestrian','Cyclist']  # FIXME
+        self.writelist = ['Car','Pedestrian','Cyclist']  # FIXME
 
         '''    
         ['Car': np.array([3.88311640418,1.62856739989,1.52563191462]),
