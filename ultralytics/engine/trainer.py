@@ -34,6 +34,7 @@ from ultralytics.utils import (
     colorstr,
     emojis,
     yaml_save,
+    htl
 )
 from ultralytics.utils.autobatch import check_train_batch_size
 from ultralytics.utils.checks import check_amp, check_file, check_imgsz, check_model_file_from_stem, print_args
@@ -343,9 +344,18 @@ class BaseTrainer:
             base_idx = (self.epochs - self.args.close_mosaic) * nb
             self.plot_idx.extend([base_idx, base_idx + 1, base_idx + 2])
         epoch = self.start_epoch
+
+        if self.args.htl:
+            ei_loss = self.compute_e0_loss()
+            loss_weightor = htl.Hierarchical_Task_Learning()
+
         while True:
             self.epoch = epoch
             self.run_callbacks("on_train_epoch_start")
+
+            if self.args.htl:
+                loss_weights = loss_weightor.compute_weight(ei_loss, self.epoch)
+
             self.model.train()
             if RANK != -1:
                 self.train_loader.sampler.set_epoch(epoch)
@@ -380,6 +390,9 @@ class BaseTrainer:
                 with torch.cuda.amp.autocast(self.amp):
                     batch = self.preprocess_batch(batch)
                     self.loss, self.loss_items = self.model(batch)
+                    ei_loss = self.loss_items
+                    if self.args.htl:
+                        self.loss = loss_weights @ self.loss_items
                     if RANK != -1:
                         self.loss *= world_size
                     self.tloss = (
@@ -474,6 +487,22 @@ class BaseTrainer:
             self.run_callbacks("on_train_end")
         torch.cuda.empty_cache()
         self.run_callbacks("teardown")
+
+    def compute_e0_loss(self):
+        self.model.train()
+        loss_sums = torch.empty(1)
+        counter = 0
+        with torch.no_grad():
+            for i, batch in TQDM(enumerate(self.train_loader),
+                                 total=math.ceil(len(self.train_loader.dataset) / self.args.batch)):
+                batch = self.preprocess_batch(batch)
+                _, loss_items = self.model(batch)
+                if loss_sums.numel() == 1:
+                    loss_sums = loss_items
+                else:
+                    loss_sums += loss_items
+                counter += 1
+        return loss_sums / counter
 
     def save_model(self):
         """Save model training checkpoints with additional metadata."""

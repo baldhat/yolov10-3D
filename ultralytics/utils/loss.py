@@ -852,10 +852,7 @@ class DDDetectionLoss():
         loss[2:6] = self.compute_box3d_loss(targets_3d, pred_3d, anchor_points, stride_tensor,
                                             fg_mask, target_scores_sum)
 
-        #weights = self.compute_loss_weights(loss)
-        #loss *= weights
-
-        return loss.sum() * batch_size, loss.detach()
+        return loss.sum() * batch_size, loss
 
     def compute_loss_weights(self, current_loss):
         weights = torch.ones(6, device=self.device)
