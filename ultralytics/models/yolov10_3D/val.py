@@ -27,13 +27,14 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
     def postprocess(self, preds):
         if isinstance(preds, dict):
             predsO = preds["one2one"]
-            predsM = preds["one2many"]
 
         if isinstance(predsO, (list, tuple)):
             predsO = predsO[0]
         
-        if isinstance(predsM, (list, tuple)):
-            predsM = predsM[0]
+        if self.args.use_o2m_depth:
+            predsM = preds["one2many"]
+            if isinstance(predsM, (list, tuple)):
+                predsM = predsM[0]
         
         predsO = predsO.transpose(-1, -2)
         regO, scoresO, labelsO = ops.v10_3Dpostprocess(predsO, self.args.max_det, self.nc)
