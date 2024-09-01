@@ -699,15 +699,18 @@ class v10Detect3d(nn.Module):
 
     def forward(self, x):
         one2one = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
-        if self.training:
+        if not self.export:
             one2many = self._forward(x)
 
         if not self.training:
             one2one = self.inference(one2one)
-            #if not self.export:
-            #    return {"one2many": one2many, "one2one": one2one}
-            #else:
-            return {"one2one": one2one}
+            if not self.export:
+                return {"one2many": one2many, "one2one": one2one}
+            else:
+                raise NotImplementedError("TODO")
+                assert(self.max_det != -1)
+                boxes, scores, labels = ops.v10postprocess(one2one.permute(0, 2, 1), self.max_det, self.nc)
+                return torch.cat([boxes, scores.unsqueeze(-1), labels.unsqueeze(-1).to(boxes.dtype)], dim=-1)
         else:
             return {"one2many": one2many, "one2one": one2one}
 
