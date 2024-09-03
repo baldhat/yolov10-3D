@@ -223,4 +223,8 @@ if __name__ == '__main__':
         if os.path.exists(arg):
             upload_to_notion(arg)
         else:
-            print(f"Path {arg} doesn't exist")
+            path = os.path.join(Path.home(),"experiments/results",arg)
+            if os.path.exists(path):
+                upload_to_notion(path)
+            else:
+                print(f"Unknown path {path} or {arg}!")
