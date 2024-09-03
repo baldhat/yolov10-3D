@@ -170,7 +170,7 @@ def upload_to_notion(run_dir):
         content = open(file_path, "r").readlines()
         page = content[0].strip()
         secret = content[1].strip()
-        run = Run(run_dir)
+        run = Run(str(run_dir))
 
         notion = Client(auth=secret)
 
