@@ -21,7 +21,9 @@ class Run:
                             'amp', 'exist_ok', 'show_conf', 'nbs', 'cache', 'overlap_mask', 'visualize', 'save_crop',
                             'show_labels', 'opset', 'show', 'augment', "auto_augment", "flipud"]
         self.args = self.get_args()
+        self.size = self.get_size()
         self.results = self.get_results()
+        self.arch = self.get_architecture()
 
 
     def toProperties(self, current_properties):
@@ -32,9 +34,16 @@ class Run:
                 dict.update({key: self.to_number_property(value)})
             else:
                 dict.update({key: self.to_text_property(value)})
+        for key, value in self.arch.items():
+            if (isinstance(value, numbers.Number) and not isinstance(value, bool)
+                and not current_properties.get(key, {}).get("type", "") == "rich_text"):
+                dict.update({key: self.to_number_property(value)})
+            else:
+                dict.update({key: self.to_text_property(value)})
         dict.update({
             "Name": {"title": [{"text": {"content": self.args["name"]}}]},
-            "AP@0.7": self.get_best_property()
+            "AP@0.7": self.get_best_property(),
+            "size": self.to_text_property(self.size)
         })
         return dict
 
@@ -53,56 +62,8 @@ class Run:
         ]'''
         return []
 
-
-
-    def create_data_table(self):
-        rows = []
-        for epoch, ap in zip(self.results["epoch"], self.results["metrics/Car3D@0.7"]):
-            rows.append( {"type": "table_row",
-                         "table_row": {
-                             "cells": [
-                                 [
-                                     {
-                                        "type": "text",
-                                        "text": {
-                                        "content": str(epoch),
-                                        "link": None
-                                        },
-                                        "annotations": {
-                                        "bold": False,
-                                        "italic": False,
-                                        "strikethrough": False,
-                                        "underline": False,
-                                        "code": False,
-                                        "color": "default"
-                                        },
-                                        "plain_text": "column 1 content",
-                                        "href": "null",
-                                     }
-                                 ],
-                                 [
-                                     {
-                                         "type": "text",
-                                         "text": {
-                                             "content": str(ap),
-                                             "link": None
-                                         },
-                                         "annotations": {
-                                             "bold": False,
-                                             "italic": False,
-                                             "strikethrough": False,
-                                             "underline": False,
-                                             "code": False,
-                                             "color": "default"
-                                         },
-                                         "plain_text": "column 1 content",
-                                         "href": "null",
-                                     }
-                                 ],
-                             ]
-                         }
-                         })
-        return rows
+    def get_size(self):
+        return self.args.get("model")[7]
 
     def get_name_property(self):
         return {"title": self.to_text_property(self.args.get("name", "Unknown"))}
@@ -144,6 +105,13 @@ class Run:
             args = yaml.safe_load(file)
         args = self.filter_args(args)
         return args
+    
+    def get_architecture(self):
+        with open(os.path.join(self.run_dir.replace("/results/", f"/code/"), f"yolov10-3D/ultralytics/cfg/models/v10-3D/{self.args['model']}")) as file:
+            arch = yaml.safe_load(file)
+        arch.pop("backbone")
+        arch.pop("head")
+        return arch
 
     def filter_args(self, args):
         new_args = {}
@@ -164,6 +132,13 @@ class Run:
             if key not in ["Name"]:
                 if (isinstance(value, numbers.Number) and not isinstance(value, bool)
                         and not current_properties.get(key, {}).get("type", "") == "rich_text"):
+                    dic.update({key: self.to_number_property_def(value)})
+                else:
+                    dic.update({key: self.to_text_property_def(value)})
+        for key, value in self.arch.items():
+            if key not in ["head", "backbone"]:
+                if (isinstance(value, numbers.Number) and not isinstance(value, bool)
+                    and not current_properties.get(key, {}).get("type", "") == "rich_text"):
                     dic.update({key: self.to_number_property_def(value)})
                 else:
                     dic.update({key: self.to_text_property_def(value)})
@@ -190,31 +165,34 @@ class Run:
         return img_plot
 
 def upload_to_notion(run_dir):
-    file_path = os.path.join(os.path.expanduser("~"), ".integrations/run_result_uploader")
-    content = open(file_path, "r").readlines()
-    page = content[0].strip()
-    secret = content[1].strip()
-    run = Run(run_dir)
+    try:
+        file_path = os.path.join(os.path.expanduser("~"), ".integrations/run_result_uploader")
+        content = open(file_path, "r").readlines()
+        page = content[0].strip()
+        secret = content[1].strip()
+        run = Run(run_dir)
 
-    notion = Client(auth=secret)
+        notion = Client(auth=secret)
 
-    database = notion.databases.retrieve(page)
-    current_properties = database["properties"]
-    props = run.toProperties(current_properties)
+        database = notion.databases.retrieve(page)
+        current_properties = database["properties"]
+        props = run.toProperties(current_properties)
 
-    notion.databases.update(page, properties=run.create_property_defs(current_properties))
+        notion.databases.update(page, properties=run.create_property_defs(current_properties))
 
-    filter = {"and": [{"property": "Name", "title": {"equals": run.args["name"]}}]}
-    runs = notion.databases.query(page, filter=filter)["results"]
-    if len(runs) > 0:
-        props = {"AP@0.7": run.get_best_property()}
-        notion.pages.update(runs[0]["id"], properties=props)
-    else:
-        notion.pages.create(
-            parent={"database_id": page},
-            properties=props,
-            children=run.getChildren()
-        )
+        filter = {"and": [{"property": "Name", "title": {"equals": run.args["name"]}}]}
+        runs = notion.databases.query(page, filter=filter)["results"]
+        if len(runs) > 0:
+            props = {"AP@0.7": run.get_best_property()}
+            notion.pages.update(runs[0]["id"], properties=props)
+        else:
+            notion.pages.create(
+                parent={"database_id": page},
+                properties=props,
+                children=run.getChildren()
+            )
+    except Exception as e:
+        print(f"Failed to upload to notion: {e}")
 
 
 if __name__ == '__main__':
