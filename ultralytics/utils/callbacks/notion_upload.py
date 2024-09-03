@@ -5,6 +5,8 @@ import yaml
 import numpy as np
 import numbers
 import sys
+from pathlib import Path
+import matplotlib.pyplot as plt
 
 
 class Run:
@@ -167,6 +169,26 @@ class Run:
                     dic.update({key: self.to_text_property_def(value)})
         return dic
 
+    def annot_max(self, x, y, ax):
+        xmax = x[np.argmax(y)]
+        ymax = y.max()
+        text = f"{xmax}: {ymax}".format(xmax, ymax)
+        bbox_props = dict(boxstyle="square,pad=0.3", fc="w", ec="k", lw=0.72)
+        arrowprops = dict(arrowstyle="->", connectionstyle="angle,angleA=0,angleB=60")
+        kw = dict(xycoords='data', textcoords="data",
+                  arrowprops=arrowprops, ha="left", va="top")
+        ax.annotate(text, xy=(xmax, ymax), xytext=(xmax + 1, ymax + 1), **kw)
+
+    def get_plot(self):
+        fig, ax = plt.subplots(1, 1, figsize=(16, 16))
+        x = self.results["epoch"]
+        y = self.results["metrics/Car3D@0.7"]
+        ax.plot(x, y)
+        self.annot_max(x, y, ax)
+        fig.canvas.draw()
+        img_plot = np.array(fig.canvas.renderer.buffer_rgba())
+        return img_plot
+
 def upload_to_notion(run_dir):
     file_path = os.path.join(os.path.expanduser("~"), ".integrations/run_result_uploader")
     content = open(file_path, "r").readlines()
@@ -182,11 +204,17 @@ def upload_to_notion(run_dir):
 
     notion.databases.update(page, properties=run.create_property_defs(current_properties))
 
-    notion.pages.create(
-        parent={"database_id": page},
-        properties=props,
-        children=run.getChildren()
-    )
+    filter = {"and": [{"property": "Name", "title": {"equals": run.args["name"]}}]}
+    runs = notion.databases.query(page, filter=filter)["results"]
+    if len(runs) > 0:
+        props = {"AP@0.7": run.get_best_property()}
+        notion.pages.update(runs[0]["id"], properties=props)
+    else:
+        notion.pages.create(
+            parent={"database_id": page},
+            properties=props,
+            children=run.getChildren()
+        )
 
 
 if __name__ == '__main__':

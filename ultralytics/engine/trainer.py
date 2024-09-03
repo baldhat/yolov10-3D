@@ -19,6 +19,7 @@ import numpy as np
 import torch
 from torch import distributed as dist
 from torch import nn, optim
+from ultralytics.utils.callbacks.notion_upload import upload_to_notion
 
 from ultralytics.cfg import get_cfg, get_save_dir
 from ultralytics.data.utils import check_cls_dataset, check_det_dataset
@@ -464,6 +465,8 @@ class BaseTrainer:
                     self.stop |= epoch >= self.epochs  # stop if exceeded epochs
                 self.scheduler.step()
             self.run_callbacks("on_fit_epoch_end")
+            upload_to_notion(self.save_dir)
+
             torch.cuda.empty_cache()  # clear GPU memory at end of epoch, may help reduce CUDA out of memory errors
 
             # Early Stopping
