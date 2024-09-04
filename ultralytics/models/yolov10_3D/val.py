@@ -65,13 +65,14 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
                 mask = torch.logical_and(depth_scores > thres, cls == predsO[i, j, -1])
                 if mask.nonzero().numel() > 1:
                     depth_scores = depth_scores[mask]
-                    depths = depths[mask]
+                    depths = depths[mask].cpu()
                     weights = depth_scores / depth_scores.sum()
-                    kde = KernelDensity(bandwidth="silverman", kernel='gaussian').fit(depths.unsqueeze(-1).cpu(), sample_weight=weights.cpu())
-                    logprob = torch.tensor(kde.score_samples(depths.unsqueeze(-1).cpu()))
+                    kde = KernelDensity(bandwidth="silverman", kernel='gaussian').fit(depths.unsqueeze(-1), sample_weight=weights.cpu())
+                    proposals = np.expand_dims(np.linspace(depths.min(), depths.max(), 500), -1)
+                    logprob = torch.tensor(kde.score_samples(proposals))
                     max_ind = torch.argmax(logprob)
-                    predsO[i, j, -4] = depths[max_ind]
-                    predsO[i, j, -3] = depth_uncerts[max_ind]
+                    predsO[i, j, -4] = torch.tensor(proposals[max_ind])#depths[max_ind]
+                    predsO[i, j, -3] = depth_uncerts[0]#logprob[max_ind]#depth_uncerts[max_ind]
         return predsO # lala
         
 

@@ -580,69 +580,36 @@ class v10Detect3d(nn.Module):
         self.nl = len(ch)  # number of detection layers
         self.no = nc + 2 + 2 + 2 + 3 + 24 + 1 + 1  # number of outputs per anchor
         self.stride = torch.zeros(self.nl)  # strides computed during build
-        cls_c = channels["cls_c"]
-        o2d_c = channels["o2d_c"]
-        s2d_c = channels["s2d_c"]
-        o3d_c = channels["o3d_c"]
-        s3d_c = channels["s3d_c"]
-        hd_c = channels["hd_c"]
-        dep_c = channels["dep_c"]
-        dep_un_c = channels["dep_un_c"]
 
-        if self.dsconv:
-            self.cls = nn.ModuleList(nn.Sequential(nn.Sequential(Conv(x, x, 3, g=x), Conv(x, cls_c, 1)), \
-                                                    nn.Sequential(Conv(cls_c, cls_c, 3, g=cls_c), Conv(cls_c, cls_c, 1)), \
-                                                    nn.Conv2d(cls_c, self.nc, 1)) for i, x in enumerate(ch))
-            self.o2d = nn.ModuleList(nn.Sequential(nn.Sequential(Conv(x, x, 3, g=x), Conv(x, o2d_c, 1)), \
-                                                   nn.Sequential(Conv(o2d_c, o2d_c, 3, g=o2d_c), Conv(o2d_c, o2d_c, 1)), \
-                                                   nn.Conv2d(o2d_c, 2, 1)) for i, x in enumerate(ch))
-            self.s2d = nn.ModuleList(nn.Sequential(nn.Sequential(Conv(x, x, 3, g=x), Conv(x, s2d_c, 1)), \
-                                                   nn.Sequential(Conv(s2d_c, s2d_c, 3, g=s2d_c), Conv(s2d_c, s2d_c, 1)), \
-                                                   nn.Conv2d(s2d_c, 2, 1)) for i, x in enumerate(ch))
-            self.o3d = nn.ModuleList(nn.Sequential(nn.Sequential(Conv(x, x, 3, g=x), Conv(x, o3d_c, 1)), \
-                                                   nn.Sequential(Conv(o3d_c, o3d_c, 3, g=o3d_c), Conv(o3d_c, o3d_c, 1)), \
-                                                   nn.Conv2d(o3d_c, 2, 1)) for i, x in enumerate(ch))
-            self.s3d = nn.ModuleList(nn.Sequential(nn.Sequential(Conv(x, x, 3, g=x), Conv(x, s3d_c, 1)), \
-                                                   nn.Sequential(Conv(s3d_c, s3d_c, 3, g=s3d_c), Conv(s3d_c, s3d_c, 1)), \
-                                                   nn.Conv2d(s3d_c, 3, 1)) for i, x in enumerate(ch))
-            self.hd = nn.ModuleList(nn.Sequential(nn.Sequential(Conv(x, x, 3, g=x), Conv(x, hd_c, 1)), \
-                                                   nn.Sequential(Conv(hd_c, hd_c, 3, g=hd_c), Conv(hd_c, hd_c, 1)), \
-                                                   nn.Conv2d(hd_c, 24, 1)) for i, x in enumerate(ch))
-            self.dep = nn.ModuleList(nn.Sequential(nn.Sequential(Conv(x, x, 3, g=x), Conv(x, dep_c, 1)), \
-                                                   nn.Sequential(Conv(dep_c, dep_c, 3, g=dep_c), Conv(dep_c, dep_c, 1)), \
-                                                   nn.Conv2d(dep_c, 1, 1)) for i, x in enumerate(ch))
-            self.dep_un = nn.ModuleList(nn.Sequential(nn.Sequential(Conv(x, x, 3, g=x), Conv(x, dep_un_c, 1)), \
-                                                   nn.Sequential(Conv(dep_un_c, dep_un_c, 3, g=dep_un_c), Conv(dep_un_c, dep_un_c, 1)), \
-                                                   nn.Conv2d(dep_un_c, 1, 1)) for i, x in enumerate(ch))
-        else:
-            self.cls = nn.ModuleList(nn.Sequential(Conv(x, cls_c, 3),
-                                                  Conv(cls_c, cls_c, 3),
-                                                  nn.Conv2d(cls_c, self.nc, 1)) for x in ch)
-            self.o2d = nn.ModuleList(nn.Sequential(Conv(x, o2d_c, 3),
-                                                  Conv(o2d_c, o2d_c, 3),
-                                                  nn.Conv2d(o2d_c, 2, 1)) for x in ch)
-            self.s2d = nn.ModuleList(nn.Sequential(Conv(x, s2d_c, 3),
-                                                  Conv(s2d_c, s2d_c, 3),
-                                                  nn.Conv2d(s2d_c, 2, 1)) for x in ch)
-            self.o3d = nn.ModuleList(nn.Sequential(Conv(x, o3d_c, 3),
-                                                  Conv(o3d_c, o3d_c, 3),
-                                                  nn.Conv2d(o3d_c, 2, 1)) for x in ch)
-            self.s3d = nn.ModuleList(nn.Sequential(Conv(x, s3d_c, 3),
-                                                  Conv(s3d_c, s3d_c, 3),
-                                                  nn.Conv2d(s3d_c, 3, 1)) for x in ch)
-            self.hd = nn.ModuleList(nn.Sequential(Conv(x, hd_c, 3),
-                                                  Conv(hd_c, hd_c, 3),
-                                                  nn.Conv2d(hd_c, 24, 1)) for x in ch)
-            self.dep = nn.ModuleList(nn.Sequential(Conv(x, dep_c, 3),
-                                                  Conv(dep_c, dep_c, 3),
-                                                  nn.Conv2d(dep_c, 1, 1)) for x in ch)
-            self.dep_un = nn.ModuleList(nn.Sequential(Conv(x, dep_un_c, 3),
-                                                  Conv(dep_un_c, dep_un_c, 3),
-                                                  nn.Conv2d(dep_un_c, 1, 1)) for x in ch)
+        self.cls = self.build_head(ch, channels["cls_c"], self.nc, self.dsconv)
+        self.o2d = self.build_head(ch, channels["o2d_c"], 2, self.dsconv)
+        self.s2d = self.build_head(ch, channels["s2d_c"], 2, self.dsconv)
+        self.o3d = self.build_head(ch, channels["o3d_c"], 2, self.dsconv)
+        self.s3d = self.build_head(ch, channels["s3d_c"], 3, self.dsconv)
+        self.hd = self.build_head(ch, channels["hd_c"], 24, self.dsconv)
+        self.dep = self.build_head(ch, channels["dep_c"], 1, self.dsconv)
+        self.dep_un = self.build_head(ch, channels["dep_un_c"], 1, self.dsconv)
 
         self.o2o_heads = nn.ModuleList(
             [self.cls, self.o2d, self.s2d, self.o3d, self.s3d, self.hd, self.dep, self.dep_un])
         self.o2m_heads = copy.deepcopy(self.o2o_heads)
+
+    @staticmethod
+    def build_head(in_channels, mid_channels, output_channels, dsconv):
+        if dsconv:
+            return nn.ModuleList(nn.Sequential(Conv(x, x, 3, g=x),
+                                               Conv(x, mid_channels, 1),
+                                               Conv(mid_channels, mid_channels, 3, g=mid_channels),
+                                               Conv(mid_channels, mid_channels, 1),
+                                               nn.Conv2d(mid_channels, output_channels, 1))
+                                 for x in in_channels
+            )
+        else:
+            return nn.ModuleList(nn.Sequential(Conv(x, mid_channels, 3),
+                                               Conv(mid_channels, mid_channels, 3),
+                                               nn.Conv2d(mid_channels, output_channels, 1))
+                                 for x in in_channels
+            )
 
     def decode(self, cls, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un):
         s2d = pred_s2d * self.strides

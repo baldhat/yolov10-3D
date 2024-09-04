@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 
 
 class Run:
-    def __init__(self, run_dir):
+    def __init__(self, run_dir, model=None):
         self.run_dir = run_dir
         self.ignore_list = ['dfl', 'mode', 'agnostic_nms', 'warmup_momentum', 'close_mosaic', 'save_conf', 'cfg',
                             'half', 'workspace', 'crop_fraction', 'rect', 'copy_paste', 'multi_scale', 'profile',
@@ -24,7 +24,7 @@ class Run:
         self.size = self.get_size()
         self.results = self.get_results()
         self.arch = self.get_architecture()
-
+        self.model = model
 
     def toProperties(self, current_properties):
         dict = {}
@@ -43,7 +43,8 @@ class Run:
         dict.update({
             "Name": {"title": [{"text": {"content": self.args["name"]}}]},
             "AP@0.7": self.get_best_property(),
-            "size": self.to_text_property(self.size)
+            "size": self.to_text_property(self.size),
+            "GFLOPs": self.get_flops()
         })
         return dict
 
@@ -60,6 +61,11 @@ class Run:
         }
         }
         ]'''
+        #import torch
+        #from torchviz import make_dot, make_dot_from_trace
+        #x = torch.rand(1, 3, 640, 640, device="cpu")
+        #y = self.model.model(x)
+        #dot = make_dot_from_trace(y["one2one"][0], params=dict(self.model.model.named_parameters())).source
         return []
 
     def get_size(self):
@@ -100,6 +106,24 @@ class Run:
             "number": float(np.max(self.results["metrics/Car3D@0.7"]))
         }
 
+    @staticmethod
+    def get_flops_(model, imgsz=[1280, 384]):
+        try:
+            import torch
+            from copy import deepcopy
+            import thop
+            p = next(model.parameters())
+            im = torch.empty((1, p.shape[1], *imgsz), device=p.device)  # input image in BCHW format
+            flops = thop.profile(deepcopy(model), inputs=[im], verbose=False)[0] / 1e9 * 2  # imgsz GFLOPs
+            return flops
+        except Exception as e:
+            print(f"Failed to calculate flops: {e}")
+
+    def get_flops(self):
+        return {
+            "number": float(self.get_flops_(self.model))
+        }
+
     def get_args(self):
         with open(os.path.join(self.run_dir, "args.yaml")) as file:
             args = yaml.safe_load(file)
@@ -107,11 +131,15 @@ class Run:
         return args
     
     def get_architecture(self):
-        with open(os.path.join(self.run_dir.replace("/results/", f"/code/"), f"yolov10-3D/ultralytics/cfg/models/v10-3D/{self.args['model']}")) as file:
-            arch = yaml.safe_load(file)
-        arch.pop("backbone")
-        arch.pop("head")
-        return arch
+        path = os.path.join(self.run_dir.replace("/results/", "/code/"), f"yolov10-3D/ultralytics/cfg/models/v10-3D/{self.args['model']}")
+        if os.path.exists(path):
+            with open(path) as file:
+                arch = yaml.safe_load(file)
+            arch.pop("backbone")
+            arch.pop("head")
+            return arch
+        else:
+            return {}
 
     def filter_args(self, args):
         new_args = {}
@@ -164,13 +192,20 @@ class Run:
         img_plot = np.array(fig.canvas.renderer.buffer_rgba())
         return img_plot
 
-def upload_to_notion(run_dir):
+def upload_to_notion(run_dir, model=None):
+
     try:
         file_path = os.path.join(os.path.expanduser("~"), ".integrations/run_result_uploader")
         content = open(file_path, "r").readlines()
         page = content[0].strip()
         secret = content[1].strip()
-        run = Run(run_dir)
+
+        if not model:
+            from ultralytics import YOLOv10_3D
+            model = YOLOv10_3D()
+            model = model.load(os.path.join(run_dir, "weights", "best.pt"))
+
+        run = Run(str(run_dir), model)
 
         notion = Client(auth=secret)
 
@@ -184,7 +219,7 @@ def upload_to_notion(run_dir):
         runs = notion.databases.query(page, filter=filter)["results"]
         if len(runs) > 0:
             props = {"AP@0.7": run.get_best_property()}
-            notion.pages.update(runs[0]["id"], properties=props)
+            notion.pages.update(runs[0]["id"], properties=props, children=run.getChildren())
         else:
             notion.pages.create(
                 parent={"database_id": page},

@@ -465,7 +465,7 @@ class BaseTrainer:
                     self.stop |= epoch >= self.epochs  # stop if exceeded epochs
                 self.scheduler.step()
             self.run_callbacks("on_fit_epoch_end")
-            upload_to_notion(self.save_dir)
+            upload_to_notion(self.save_dir, self.model)
 
             torch.cuda.empty_cache()  # clear GPU memory at end of epoch, may help reduce CUDA out of memory errors
 
