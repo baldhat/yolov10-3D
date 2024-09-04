@@ -1,6 +1,6 @@
 import numpy as np
 import cv2
-import pdb
+import torch
 
 
 ################  Object3D  ##################
@@ -205,6 +205,21 @@ class Calibration(object):
         y = ((v - self.cv) * depth_rect) / self.fv + self.ty
         pts_rect = np.concatenate((x.reshape(-1, 1), y.reshape(-1, 1), depth_rect.reshape(-1, 1)), axis=1)
         return pts_rect
+
+    def im_to_rect(self, center2d, depth_rect):
+        """
+        :param center2d: tensor(B,
+        Args:
+            center2d:
+            depth_rect:
+
+        Returns:
+        x = ((center2d[] - self.cu) * depth_rect) / self.fu + self.tx
+        y = ((v - self.cv) * depth_rect) / self.fv + self.ty
+        pts_rect = torch.cat((x.reshape(-1, 1), y.reshape(-1, 1), depth_rect.reshape(-1, 1)), axis=1)
+        """
+        raise NotImplementedError()
+
 
     def depthmap_to_rect(self, depth_map):
         """

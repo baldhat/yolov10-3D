@@ -820,6 +820,8 @@ class DDDetectionLoss():
                                 batch["center_3d"], batch["size_3d"], batch["depth"].view(-1, 1),
                                 batch["heading_bin"].view(-1, 1), batch["heading_res"].view(-1, 1)), 1)
         gts = self.preprocess(gts.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
+        calibs = batch["calib"]
+        mean_sizes = batch["mean_sizes"]
         gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin, gt_heading_res = gts.split(
             (1, 4, 2, 2, 2, 3, 1, 1, 1), 2)
         mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0)
@@ -830,9 +832,13 @@ class DDDetectionLoss():
         targets, fg_mask, target_gt_idx = self.assigner(
             pred_scores.detach().sigmoid(),
             pred_bboxes.detach().type(gt_bboxes.dtype),
+            pred_3d.detach(),
             anchor_points * stride_tensor,
             (gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin, gt_heading_res),
             mask_gt,
+            stride_tensor,
+            calibs,
+            mean_sizes
         )
         (_, target_scores, target_center_2d, target_size_2d, target_center_3d,
          target_size_3d, target_depth, target_heading_bin, target_heading_res) = targets

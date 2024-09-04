@@ -411,7 +411,7 @@ class KITTIDataset(data.Dataset):
          'Pedestrian': np.array([0.84422524,0.66068622,1.76255119]),
          'Cyclist': np.array([1.76282397,0.59706367,1.73698127])] 
         '''
-        ##l,w,h
+        ##h,l,w
         self.cls_mean_size = np.array([
             [1.52563191462, 1.62856739989, 3.88311640418],
             [1.76255119, 0.66068622, 0.84422524],
@@ -740,11 +740,14 @@ class KITTIDataset(data.Dataset):
         else:
             bboxes = torch.empty(0)
         ratio_pad = np.array([self.resolution/img_size, np.array([0, 0])])
+        calib = torch.tensor(np.array([calib.cu * ratio_pad[0, 0], calib.cv * ratio_pad[0, 1],
+                                       calib.fu * ratio_pad[0, 0], calib.fv * ratio_pad[0, 1],
+                                       calib.tx * ratio_pad[0, 0], calib.ty * ratio_pad[0, 1]]))
 
         return {
             "img": inputs,
             "ori_img": ori_img,
-            "calib": torch.tensor(calib.P2),
+            "calib": calib,
             "info": info,
             "cls": torch.tensor(np.array(gt_cls)),
             "bboxes": bboxes,
@@ -757,6 +760,7 @@ class KITTIDataset(data.Dataset):
             "size_2d": torch.tensor(np.array(gt_size_2d)),
             "size_3d": torch.tensor(np.array(gt_size_3d)),
             "depth": torch.tensor(np.array(gt_depth)),
+            "mean_sizes": torch.tensor(self.cls_mean_size),
             "heading_bin": torch.tensor(np.array(gt_heading_bin)),
             "heading_res": torch.tensor(np.array(gt_heading_res)),
         }
@@ -769,12 +773,15 @@ class KITTIDataset(data.Dataset):
         values = list(zip(*[list(b.values()) for b in batch]))
         for i, k in enumerate(keys):
             value = values[i]
-            if k in ["img", "calib", "coord_range", "ratio_pad"]:
+            if k in ["img", "coord_range", "ratio_pad", "calib"]:
                 value = torch.stack(value, 0)
             if k in ["bboxes", "cls", "depth", "center_3d", "center_2d", "size_2d", "heading_bin",
                      "heading_res", "size_3d"]:
                 value = torch.cat(value, 0)
-            new_batch[k] = value
+            if k not in ["mean_sizes"]:
+                new_batch[k] = value
+            else:
+                new_batch[k] = batch[0][k]
         new_batch["batch_idx"] = list(new_batch["batch_idx"])
         for j in range(len(new_batch["batch_idx"])):
             new_batch["batch_idx"][j] += j  # add target image index for build_targets()

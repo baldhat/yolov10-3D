@@ -596,20 +596,18 @@ class v10Detect3d(nn.Module):
 
     @staticmethod
     def build_head(in_channels, mid_channels, output_channels, dsconv):
+        return nn.ModuleList(nn.Sequential(v10Detect3d.build_conv(x, mid_channels, 3, dsconv),
+                                           v10Detect3d.build_conv(mid_channels, mid_channels, 3, dsconv),
+                                           nn.Conv2d(mid_channels, output_channels, 1))
+                             for x in in_channels
+        )
+
+    @staticmethod
+    def build_conv(in_channels, out_channels, kernel_size, dsconv):
         if dsconv:
-            return nn.ModuleList(nn.Sequential(Conv(x, x, 3, g=x),
-                                               Conv(x, mid_channels, 1),
-                                               Conv(mid_channels, mid_channels, 3, g=mid_channels),
-                                               Conv(mid_channels, mid_channels, 1),
-                                               nn.Conv2d(mid_channels, output_channels, 1))
-                                 for x in in_channels
-            )
+            return nn.Sequential(Conv(in_channels, in_channels, kernel_size, g=in_channels), Conv(in_channels, out_channels, 1))
         else:
-            return nn.ModuleList(nn.Sequential(Conv(x, mid_channels, 3),
-                                               Conv(mid_channels, mid_channels, 3),
-                                               nn.Conv2d(mid_channels, output_channels, 1))
-                                 for x in in_channels
-            )
+            return Conv(in_channels, out_channels, kernel_size)
 
     def decode(self, cls, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un):
         s2d = pred_s2d * self.strides
@@ -652,19 +650,13 @@ class v10Detect3d(nn.Module):
         #
         #     dbox = self.decode_bboxes(box, self.anchors.unsqueeze(0)) * self.strides
 
-        y = preds#torch.cat((cls, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un), 1)
+        y = preds
         return y if self.export else (y, x)
 
     def forward_feat(self, x, heads):
         y = []
         for i in range(self.nl):
             y.append(torch.cat([module[i](x[i]) for module in heads], 1))
-        # FIXME
-        # GUPNet: https://github.com/SuperMHP/GUPNet/blob/main/code/lib/models/gupnet.py
-        # depth_net_out = self.depth(roi_feature_masked)[:,:,0,0]
-        # depth_geo_log_std = (h3d_log_std.squeeze()+2*(roi_calibs[:,0,0].log()-box2d_height.log())).unsqueeze(-1)
-        # depth_net_log_std = torch.logsumexp(torch.cat([depth_net_out[:,1:2],depth_geo_log_std],-1),-1,keepdim=True)
-        # depth_net_out = torch.cat([(1. / (depth_net_out[:,0:1].sigmoid() + 1e-6) - 1.)+depth_geo.unsqueeze(-1),depth_net_log_std],-1)
         return y
 
 

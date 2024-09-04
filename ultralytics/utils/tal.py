@@ -7,6 +7,8 @@ from .checks import check_version
 from .metrics import bbox_iou, probiou
 from .ops import xywhr2xyxyxyxy
 
+import numpy as np
+
 TORCH_1_10 = check_version(torch.__version__, "1.10.0")
 
 
@@ -361,7 +363,7 @@ class TaskAlignedAssigner3d(nn.Module):
         eps (float): A small value to prevent division by zero.
     """
 
-    def __init__(self, topk=13, num_classes=80, alpha=1.0, beta=6.0, eps=1e-9):
+    def __init__(self, topk=13, num_classes=80, alpha=1.0, beta=6.0, eps=1e-9, use_3d=True):
         """Initialize a TaskAlignedAssigner object with customizable hyperparameters."""
         super().__init__()
         self.topk = topk
@@ -370,9 +372,10 @@ class TaskAlignedAssigner3d(nn.Module):
         self.alpha = alpha
         self.beta = beta
         self.eps = eps
+        self.use_3d = use_3d
 
     @torch.no_grad()
-    def forward(self, pd_scores, pd_bboxes, anc_points, gts, mask_gt):
+    def forward(self, pd_scores, pd_bboxes, pd_3d, anc_points, gts, mask_gt, stride_tensor, calibs, mean_sizes):
         """
         Compute the task-aligned assignment. Reference code is available at
         https://github.com/Nioolek/PPYOLOE_pytorch/blob/master/ppyoloe/assigner/tal_assigner.py.
@@ -392,9 +395,11 @@ class TaskAlignedAssigner3d(nn.Module):
             target_gt_idx (Tensor): shape(bs, num_total_anchors)
         """
         gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin, gt_heading_res = gts
+        pd_o3d, pd_s3d, pd_hd, pd_dep, _ = pd_3d.split((2, 3, 24, 1, 1), dim=-1)
 
         self.bs = pd_scores.shape[0]
         self.n_max_boxes = gt_bboxes.shape[1]
+        self.num_anchors = anc_points.shape[0]
 
         if self.n_max_boxes == 0:
             device = gt_bboxes.device
@@ -406,8 +411,16 @@ class TaskAlignedAssigner3d(nn.Module):
                 torch.zeros_like(pd_scores[..., 0]).to(device),
             )
 
+        pd_center_3d = self.decode_3d_center(pd_o3d, anc_points, stride_tensor)
+        pd_size3d = self.decode_3d_size(pd_s3d, pd_scores, mean_sizes)
+        pd_heading_bin, pd_heading_res = pd_hd.split((12, 12), dim=-1)
+        gt_size_3d = self.add_cls_mean_size(gt_size_3d, gt_labels, mean_sizes)
+
+        gt_keypoints = self.get_3d_keypoints(gt_center_3d, gt_depth, gt_size_3d, gt_heading_bin, gt_heading_res, calibs)
+        pd_keypoints = self.get_3d_keypoints(pd_center_3d, pd_dep, pd_size3d, pd_heading_bin, pd_heading_res, calibs)
+
         mask_pos, align_metric, overlaps = self.get_pos_mask(
-            pd_scores, pd_bboxes, gt_labels, gt_bboxes, anc_points, mask_gt
+            pd_scores, pd_bboxes, pd_keypoints, gt_labels, gt_bboxes, gt_keypoints, anc_points, mask_gt
         )
 
         target_gt_idx, fg_mask, mask_pos = self.select_highest_overlaps(mask_pos, overlaps, self.n_max_boxes)
@@ -424,11 +437,134 @@ class TaskAlignedAssigner3d(nn.Module):
 
         return targets, fg_mask.bool(), target_gt_idx
 
-    def get_pos_mask(self, pd_scores, pd_bboxes, gt_labels, gt_bboxes, anc_points, mask_gt):
+    def decode_3d_center(self, pd_o3d, anc_points, stride_tensor):
+        center3d = anc_points + (pd_o3d * stride_tensor)
+        return center3d
+
+    def decode_3d_size(self, pd_s3d, pd_scores, mean_sizes):
+        """
+        TODO: Is this the correct way?
+        """
+        pred_class_ind = nn.functional.one_hot(pd_scores.argmax(dim=-1), num_classes=self.num_classes)
+        mean_sizes = mean_sizes.unsqueeze(0).unsqueeze(0).repeat(self.bs, self.num_anchors, 1, 1).to(pred_class_ind.device)
+        s3d = mean_sizes[pred_class_ind.bool()].reshape(pd_s3d.shape) + pd_s3d
+        return s3d
+
+    def get_3d_keypoints(self, center_3d, dep, size3d, heading_bin, heading_res, calibs):
+        calibs = calibs.unsqueeze(1).repeat(1, center_3d.shape[1], 1)
+        locations = self.img_to_rect(center_3d, dep, calibs)
+        boxes_object_frame = self.get_box_corners(size3d)
+        rotations = self.get_roty(center_3d, heading_bin, heading_res, calibs)
+        boxes_camera_frame = self.transform_to_camera(boxes_object_frame, locations, rotations)
+        return boxes_camera_frame
+
+    def get_box_corners(self, size3d):
+        hl, hw, hh = (size3d[..., 2].unsqueeze(-1)/2, size3d[..., 1].unsqueeze(-1)/2, size3d[..., 0].unsqueeze(-1)/2)
+        corners_x = torch.cat((hl, hl, -hl, -hl, hl, hl, -hl, -hl), dim=-1)
+        corners_y = torch.cat((hw, -hw, hw, -hw, hw, -hw, hw, -hw), dim=-1)
+        corners_z = torch.cat((-hh, -hh, -hh, -hh, hh, hh, hh, hh), dim=-1)
+        box_corners = torch.cat((corners_x.unsqueeze(-1), corners_y.unsqueeze(-1), corners_z.unsqueeze(-1)), dim=-1)
+        return box_corners
+
+    def get_roty(self, center_3d, heading_bin, heading_res, calibs):
+        if heading_bin.shape[-1] > 1:
+            heading_bin = heading_bin.argmax(dim=-1)
+
+        idx = torch.nn.functional.one_hot(heading_bin.long(), num_classes=12)
+
+        if heading_res.shape[-1] > 1:
+            heading_res = heading_res[idx.bool()].view(heading_bin.shape)
+        alpha = self.class2angle(heading_bin, heading_res)
+        ry = self.alpha2ry(alpha, center_3d[..., 0], calibs)
+        return ry
+
+    def class2angle(self, cls, residual, num_heading_bin = 12.0):
+        angle_per_class = 2 * np.pi / num_heading_bin
+        angle_center = cls * angle_per_class
+        angle = angle_center + residual
+        angle[angle > np.pi] = angle[angle > np.pi] - 2 * np.pi
+        return angle
+
+
+    # From pytorch3d.transforms.rotation_conversions
+    @staticmethod
+    def _axis_angle_rotation(axis: str, angle: torch.Tensor) -> torch.Tensor:
+        cos = torch.cos(angle)
+        sin = torch.sin(angle)
+        one = torch.ones_like(angle)
+        zero = torch.zeros_like(angle)
+
+        if axis == "X":
+            R_flat = (one, zero, zero, zero, cos, -sin, zero, sin, cos)
+        elif axis == "Y":
+            R_flat = (cos, zero, sin, zero, one, zero, -sin, zero, cos)
+        elif axis == "Z":
+            R_flat = (cos, -sin, zero, sin, cos, zero, zero, zero, one)
+        else:
+            raise ValueError("letter must be either X, Y or Z.")
+
+        return torch.stack(R_flat, -1).reshape(angle.shape + (3, 3))
+
+
+    # From pytorch3d.transforms.rotation_conversions
+    @staticmethod
+    def euler_angles_to_matrix(euler_angles: torch.Tensor, convention: str) -> torch.Tensor:
+        if euler_angles.dim() == 0 or euler_angles.shape[-1] != 3:
+            raise ValueError("Invalid input euler angles.")
+        if len(convention) != 3:
+            raise ValueError("Convention must have 3 letters.")
+        if convention[1] in (convention[0], convention[2]):
+            raise ValueError(f"Invalid convention {convention}.")
+        for letter in convention:
+            if letter not in ("X", "Y", "Z"):
+                raise ValueError(f"Invalid letter {letter} in convention string.")
+        matrices = [
+            TaskAlignedAssigner3d._axis_angle_rotation(c, e)
+            for c, e in zip(convention, torch.unbind(euler_angles, -1))
+        ]
+        return torch.matmul(torch.matmul(matrices[0], matrices[1]), matrices[2])
+
+
+    def to_egoc_rot_mat(self, ry):
+        rx = torch.full_like(ry, torch.pi / 2, device=ry.device)
+        rz = torch.zeros_like(ry, device=ry.device)
+        angles = torch.cat((rx, ry, rz), dim=-1)
+        return self.euler_angles_to_matrix(angles, convention="XYZ")
+
+    def alpha2ry(self, alpha, xs, calibs):
+        cu, _, fu, _ = calibs.split((1, 1, 1, 3), dim=-1)
+        if alpha.shape[-1] != 1:
+            alpha = alpha.unsqueeze(-1)
+        ry = alpha + torch.arctan2(xs.unsqueeze(-1) - cu, fu)
+        ry[ry > torch.pi] = ry[ry > torch.pi] - 2 * torch.pi
+        ry[ry < -torch.pi] = ry[ry < -torch.pi] + 2 * torch.pi
+        return ry
+
+    def transform_to_camera(self, boxes_object_frame, locations, ry):
+        rot_mat = self.to_egoc_rot_mat(ry)
+        boxes = torch.einsum("bnji,bnkj->bnki", rot_mat, boxes_object_frame) + locations.unsqueeze(-2)
+        return boxes
+
+    def img_to_rect(self, center_3d, dep, calibs):
+        cu, cv, fu, fv, tx, ty = calibs.split((1, 1, 1, 1, 1, 1), dim=-1)
+
+        x = ((center_3d[..., 0].unsqueeze(-1) - cu) * dep) / fu + tx
+        y = ((center_3d[..., 1].unsqueeze(-1) - cv) * dep) / fv + ty
+        locations = torch.cat((x, y, dep), dim=-1)
+        return locations
+
+    def keypoint_distance_3d(self, gt_kps, pd_kps):
+        dist = nn.functional.mse_loss(pd_kps, gt_kps, reduction='none').sum(dim=(-1, -2)) / 24
+        return 1 / torch.exp(0.5*dist)
+
+    def get_pos_mask(self, pd_scores, pd_bboxes, pd_keypoints, gt_labels, gt_bboxes, gt_keypoints, anc_points, mask_gt):
         """Get in_gts mask, (b, max_num_obj, h*w)."""
         mask_in_gts = self.select_candidates_in_gts(anc_points, gt_bboxes)
         # Get anchor_align metric, (b, max_num_obj, h*w)
-        align_metric, overlaps = self.get_box_metrics(pd_scores, pd_bboxes, gt_labels, gt_bboxes, mask_in_gts * mask_gt)
+        if self.use_3d:
+            align_metric, overlaps = self.get_keypoint_metrics(pd_scores, pd_keypoints, gt_labels, gt_keypoints, mask_in_gts * mask_gt)
+        else:
+            align_metric, overlaps = self.get_box_metrics(pd_scores, pd_bboxes, gt_labels, gt_bboxes, mask_in_gts * mask_gt)
         # Get topk_metric mask, (b, max_num_obj, h*w)
         mask_topk = self.select_topk_candidates(align_metric, topk_mask=mask_gt.expand(-1, -1, self.topk).bool())
         # Merge all mask to a final mask, (b, max_num_obj, h*w)
@@ -456,6 +592,33 @@ class TaskAlignedAssigner3d(nn.Module):
 
         align_metric = bbox_scores.pow(self.alpha) * overlaps.pow(self.beta)
         return align_metric, overlaps
+
+    def get_keypoint_metrics(self, pd_scores, pd_keypoints, gt_labels, gt_keypoints, mask_gt):
+        num_anchors = pd_keypoints.shape[-3]
+        mask_gt = mask_gt.bool()  # b, max_num_obj, h*w
+        similarities = torch.zeros([self.bs, self.n_max_boxes, num_anchors], dtype=pd_keypoints.dtype, device=pd_keypoints.device)
+        bbox_scores = torch.zeros([self.bs, self.n_max_boxes, num_anchors], dtype=pd_scores.dtype, device=pd_scores.device)
+
+        ind = torch.zeros([2, self.bs, self.n_max_boxes], dtype=torch.long)  # 2, b, max_num_obj
+        ind[0] = torch.arange(end=self.bs).view(-1, 1).expand(-1, self.n_max_boxes)  # b, max_num_obj
+        ind[1] = gt_labels.squeeze(-1)  # b, max_num_obj
+        # Get the scores of each grid for each gt cls
+        bbox_scores[mask_gt] = pd_scores[ind[0], :, ind[1]][mask_gt]  # b, max_num_obj, h*w
+
+        # (b, max_num_obj, 1, 4), (b, 1, h*w, 4)
+        pd_kps = pd_keypoints.unsqueeze(1).expand(-1, self.n_max_boxes, -1, -1, -1)[mask_gt]
+        gt_kps = gt_keypoints.unsqueeze(2).expand(-1, -1, num_anchors, -1, -1)[mask_gt]
+        similarities[mask_gt] = self.keypoint_distance_3d(gt_kps, pd_kps)
+
+        # distances need to be between 0 (infinitely far) and 1 (same)
+        align_metric = bbox_scores.pow(self.alpha) * similarities.pow(self.beta)
+        return align_metric, similarities
+
+    def add_cls_mean_size(self, gt_size_3d, gt_labels, mean_sizes):
+        cls_idx = nn.functional.one_hot(gt_labels.squeeze(-1).long(), num_classes=self.num_classes).bool().to(gt_labels.device)
+        mean_sizes = mean_sizes.unsqueeze(0).unsqueeze(0).repeat(self.bs, self.n_max_boxes, 1, 1).to(gt_labels.device)
+        s3d = mean_sizes[cls_idx.bool()].reshape(gt_size_3d.shape) + gt_size_3d
+        return s3d
 
     def iou_calculation(self, gt_bboxes, pd_bboxes):
         """IoU calculation for horizontal bounding boxes."""
