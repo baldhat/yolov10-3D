@@ -106,6 +106,8 @@ offset3d: 10 # (float) 3d pixel offset loss gain
 size3d: 1 # (float) 3d size loss gain
 heading: 1 # (float) 3d heading loss gain
 tal_topk: 8 # (int) number of assignments per groundtruth for o2m head
+tal_alpha: 0.5
+tal_beta: 2.0
 htl: False
 
 dfl: 1.5 # (float) dfl loss gain
