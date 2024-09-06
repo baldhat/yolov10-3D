@@ -435,7 +435,7 @@ class TaskAlignedAssigner3d(nn.Module):
         norm_align_metric = (align_metric * pos_overlaps / (pos_align_metrics + self.eps)).amax(-2).unsqueeze(-1)
         targets[1] = targets[1] * norm_align_metric
 
-        return targets, fg_mask.bool(), target_gt_idx
+        return targets, fg_mask.bool(), target_gt_idx, pd_keypoints
 
     def decode_3d_center(self, pd_o3d, anc_points, stride_tensor):
         center3d = anc_points + (pd_o3d * stride_tensor)
@@ -554,8 +554,8 @@ class TaskAlignedAssigner3d(nn.Module):
         return locations
 
     def keypoint_distance_3d(self, gt_kps, pd_kps):
-        dist = nn.functional.mse_loss(pd_kps, gt_kps, reduction='none').sum(dim=(-1, -2)) / 24
-        return 1 / torch.exp(0.5*dist)
+        dist = nn.functional.l1_loss(pd_kps, gt_kps, reduction='none').sum(dim=(-1, -2)) / 24
+        return 1 / torch.exp(dist)
 
     def get_pos_mask(self, pd_scores, pd_bboxes, pd_keypoints, gt_labels, gt_bboxes, gt_keypoints, anc_points, mask_gt):
         """Get in_gts mask, (b, max_num_obj, h*w)."""

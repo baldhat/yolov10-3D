@@ -830,7 +830,7 @@ class DDDetectionLoss():
         # Pboxes
         pred_bboxes = self.bbox_decode(anchor_points, pred_2d, stride_tensor)
 
-        targets, fg_mask, target_gt_idx = self.assigner(
+        targets, fg_mask, target_gt_idx, pred_kps = self.assigner(
             pred_scores.detach().sigmoid(),
             pred_bboxes.detach().type(gt_bboxes.dtype),
             pred_3d.detach(),
@@ -850,7 +850,7 @@ class DDDetectionLoss():
         targets_3d = targets[4:9] # center, size, depth, head_bin, head_res
 
         #self.debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor)
-        #self.debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_bboxes, stride_tensor)
+        #self.debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps)
 
         loss[0] = (self.compute_box2d_loss(targets_2d, pred_2d, anchor_points, stride_tensor, fg_mask, target_scores_sum)
                    * self.hyp.loss2d)
@@ -926,8 +926,6 @@ class DDDetectionLoss():
 
         plt.clf()
         color = {8: (255, 255, 0), 16: (0, 255, 255), 32: (255, 0, 255)}
-        #mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-        #std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
         mean = 0
         std = 1
         fig, axes = plt.subplots(2, 2, figsize=(36, 12), gridspec_kw={'wspace': 0, 'hspace': 0},
@@ -956,28 +954,58 @@ class DDDetectionLoss():
             ax.imshow(img)
             ax.axis("off")
         plt.show()
+        print()
 
-    def debug_show_assigned_targets3d(self, batch, targets_3d, fg_mask, pred3d, stride_tensor):
+    def debug_show_assigned_targets3d(self, batch, targets_3d, fg_mask, pred3d):
         target_center_3d, _, _, _, _ = targets_3d
         plt.clf()
-        color = {8: (255, 255, 0), 16: (0, 255, 255), 32: (255, 0, 255)}
-        #mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-        #std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-        mean = 0
-        std = 1
+        box_idxs = [0, 1, 2, 3, 0,  # base
+                    4, 7, 3, 7,  # right
+                    6, 2, 6,  # back
+                    5,  # left
+                    4, 1, 5, 0]  # front
+        color_none_bottom, color_bottom = ((255, 0, 0), (255, 0, 0))
         fig, axes = plt.subplots(2, 2, figsize=(36, 12), gridspec_kw={'wspace': 0, 'hspace': 0},
                                  constrained_layout=True)
         for i, ax in enumerate(np.ravel(axes)):
             img = batch["img"][i].detach().cpu().numpy().transpose(1, 2, 0).copy()
-            img = np.clip((img * std + mean) * 255, 0, 255).astype(np.uint8)
+            img = np.clip((img) * 255, 0, 255).astype(np.uint8)
 
             t_center_3d = target_center_3d[i][fg_mask[i]].int().cpu()
+            kps = self.project_to_image(pred3d[i][fg_mask[i]], batch["calib"][i]).int().cpu()
             for center_3d in t_center_3d:
                 cv2.circle(img, center_3d.numpy(), 5, (0, 0, 255), -1)
+            for kp in kps:
+                cv2.polylines(img, [kp[box_idxs[:5]].numpy().astype(np.int32).reshape((-1, 1, 2))], isClosed=False,
+                              color=color_none_bottom, thickness=1, lineType=cv2.LINE_AA)
+                cv2.polylines(img, [kp[box_idxs[5:]].numpy().astype(np.int32).reshape((-1, 1, 2))], isClosed=True,
+                              color=color_bottom, thickness=1, lineType=cv2.LINE_AA)
 
             ax.imshow(img)
             ax.axis("off")
         plt.show()
+        print()
+
+    def project_to_image(self, kps, calib):
+        sample_num = kps.shape[0]
+        corners3d_hom = torch.cat((kps, torch.ones((sample_num, 8, 1), device=calib.device)), axis=2)  # (N, 8, 4)
+
+        mat = self.get_mat(calib)
+        img_pts = torch.matmul(corners3d_hom, mat.T.double()) # (N, 8, 3)
+        x, y = img_pts[:, :, 0] / img_pts[:, :, 2], img_pts[:, :, 1] / img_pts[:, :, 2]
+        boxes_corner = torch.cat((x.reshape(-1, 8, 1), y.reshape(-1, 8, 1)), axis=2)
+        return boxes_corner
+
+    def get_mat(self, calib):
+        mat = torch.eye(4, device=calib.device)[:3]
+        cu, cv, fu, fv, tx, ty = calib.split((1, 1, 1, 1, 1, 1), dim=-1)
+        mat[0, 2] = cu
+        mat[1, 2] = cv
+        mat[0, 0] = fu
+        mat[1, 1] = fv
+        mat[0, 3] = tx * (-fu)
+        mat[1, 3] = ty * (-fv)
+        return mat
 
 def laplacian_aleatoric_uncertainty_loss_new(input, target, log_variance):
     '''
