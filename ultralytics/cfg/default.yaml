@@ -99,7 +99,7 @@ warmup_momentum: 0.8 # (float) warmup initial momentum
 warmup_bias_lr: 0.1 # (float) warmup initial bias lr
 box: 5 # (float) 2dbox loss gain
 
-cls: 2 # (float) cls l oss gain (scale with pixels)
+cls: 1 # (float) cls l oss gain (scale with pixels)
 loss2d: 2 # (float) box loss gain
 depth: 1 # (float) depth loss gain
 offset3d: 10 # (float) 3d pixel offset loss gain
@@ -107,7 +107,7 @@ size3d: 1 # (float) 3d size loss gain
 heading: 1 # (float) 3d heading loss gain
 tal_topk: 8 # (int) number of assignments per groundtruth for o2m head
 tal_alpha: 0.5
-tal_beta: 2.0
+tal_beta: 1.0
 tal_3d: True
 kps_dist_metric: l2
 htl: False
