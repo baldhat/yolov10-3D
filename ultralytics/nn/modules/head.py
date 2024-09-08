@@ -542,26 +542,6 @@ class v10Detect(Detect):
             a[-1].bias.data[:] = 1.0  # box
             b[-1].bias.data[: m.nc] = math.log(5 / m.nc / (640 / s) ** 2)  # cls (.01 objects, 80 classes, 640 img)
 
-
-def weights_init_xavier(m):
-    classname = m.__class__.__name__
-    if classname.find('Linear') != -1:
-        nn.init.xavier_uniform_(m.weight)
-        if m.bias is not None:
-            nn.init.constant_(m.bias, 0.0)
-    elif classname.find('Conv2d') != -1:
-        nn.init.xavier_uniform_(m.weight)
-        if m.bias is not None:
-            nn.init.constant_(m.bias, 0.0)
-    elif classname.find('Conv') != -1:
-        nn.init.xavier_uniform_(m.conv.weight)
-        if m.conv.bias is not None:
-            nn.init.constant_(m.conv.bias, 0.0)
-    elif classname.find('BatchNorm') != -1:
-        if m.affine:
-            nn.init.constant_(m.weight, 1.0)
-            nn.init.constant_(m.bias, 0.0)
-
 class v10Detect3d(nn.Module):
     max_det = 50
 
@@ -571,24 +551,54 @@ class v10Detect3d(nn.Module):
     anchors = torch.empty(0)  # init
     strides = torch.empty(0)  # init
 
-    def __init__(self, nc=80, ch=(), dsconv=True, channels=None):
-        """Initializes the YOLOv8 detection layer with specified number of classes and channels."""
+    def __init__(self, nc=80, ch=(), dsconv=True, channels=None, use_predecessors=True):
         super().__init__()
         assert (channels is not None)
         self.nc = nc  # number of classes
         self.dsconv = dsconv
         self.nl = len(ch)  # number of detection layers
-        self.no = nc + 2 + 2 + 2 + 3 + 24 + 1 + 1  # number of outputs per anchor
+        self.output_channels = {
+            "cls": self.nc,
+            "o2d": 2,
+            "s2d": 2,
+            "o3d": 2,
+            "s3d": 3,
+            "hd": 24,
+            "dep": 1,
+            "dep_un": 1
+        }
+        self.no = sum(self.output_channels.values())
         self.stride = torch.zeros(self.nl)  # strides computed during build
 
-        self.cls = self.build_head(ch, channels["cls_c"], self.nc, self.dsconv)
-        self.o2d = self.build_head(ch, channels["o2d_c"], 2, self.dsconv)
-        self.s2d = self.build_head(ch, channels["s2d_c"], 2, self.dsconv)
-        self.o3d = self.build_head(ch, channels["o3d_c"], 2, self.dsconv)
-        self.s3d = self.build_head(ch, channels["s3d_c"], 3, self.dsconv)
-        self.hd = self.build_head(ch, channels["hd_c"], 24, self.dsconv)
-        self.dep = self.build_head(ch, channels["dep_c"], 1, self.dsconv)
-        self.dep_un = self.build_head(ch, channels["dep_un_c"], 1, self.dsconv)
+        self.use_predecessors = use_predecessors
+        self.predecessors = {
+            "cls": [],
+            "o2d": [],
+            "s2d": [],
+            "o3d": ["cls"],
+            "s3d": ["cls"],
+            "hd": ["cls"],
+            "dep": ["cls", "s3d"],
+            "dep_un": ["cls", "s3d", "dep"]
+        }
+
+        self.cls_in_ch = [ch_ + self.sum_predecessor_chs(self.predecessors["cls"]) if self.use_predecessors else ch_ for ch_ in ch]
+        self.o2d_in_ch = [ch_ + self.sum_predecessor_chs(self.predecessors["o2d"]) if self.use_predecessors else ch_ for ch_ in ch]
+        self.s2d_in_ch = [ch_ + self.sum_predecessor_chs(self.predecessors["s2d"]) if self.use_predecessors else ch_ for ch_ in ch]
+        self.o3d_in_ch = [ch_ + self.sum_predecessor_chs(self.predecessors["o3d"]) if self.use_predecessors else ch_ for ch_ in ch]
+        self.s3d_in_ch = [ch_ + self.sum_predecessor_chs(self.predecessors["s3d"]) if self.use_predecessors else ch_ for ch_ in ch]
+        self.hd_in_ch = [ch_ + self.sum_predecessor_chs(self.predecessors["hd"]) if self.use_predecessors else ch_ for ch_ in ch]
+        self.dep_in_ch = [ch_ + self.sum_predecessor_chs(self.predecessors["dep"]) if self.use_predecessors else ch_ for ch_ in ch]
+        self.dep_un_in_ch = [ch_ + self.sum_predecessor_chs(self.predecessors["dep_un"]) if self.use_predecessors else ch_ for ch_ in ch]
+
+        self.cls = self.build_head(self.cls_in_ch, channels["cls_c"], self.nc, self.dsconv)
+        self.o2d = self.build_head(self.o2d_in_ch, channels["o2d_c"], 2, self.dsconv)
+        self.s2d = self.build_head(self.s2d_in_ch, channels["s2d_c"], 2, self.dsconv)
+        self.o3d = self.build_head(self.o3d_in_ch, channels["o3d_c"], 2, self.dsconv)
+        self.s3d = self.build_head(self.s3d_in_ch, channels["s3d_c"], 3, self.dsconv)
+        self.hd = self.build_head(self.hd_in_ch, channels["hd_c"], 24, self.dsconv)
+        self.dep = self.build_head(self.dep_in_ch, channels["dep_c"], 1, self.dsconv)
+        self.dep_un = self.build_head(self.dep_un_in_ch, channels["dep_un_c"], 1, self.dsconv)
 
         self.o2o_heads = nn.ModuleList(
             [self.cls, self.o2d, self.s2d, self.o3d, self.s3d, self.hd, self.dep, self.dep_un])
@@ -608,6 +618,9 @@ class v10Detect3d(nn.Module):
             return nn.Sequential(Conv(in_channels, in_channels, kernel_size, g=in_channels), Conv(in_channels, out_channels, 1))
         else:
             return Conv(in_channels, out_channels, kernel_size)
+
+    def sum_predecessor_chs(self, predecessors):
+        return sum([self.output_channels[predecessor] for predecessor in predecessors]) if len(predecessors) > 1 else 0
 
     def decode(self, cls, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un):
         s2d = pred_s2d * self.strides
@@ -655,8 +668,17 @@ class v10Detect3d(nn.Module):
 
     def forward_feat(self, x, heads):
         y = []
+        head_names = list(self.output_channels.keys())
         for i in range(self.nl):
-            y.append(torch.cat([module[i](x[i]) for module in heads], 1))
+            outputs = {}
+            for j, module in enumerate(heads):
+                if self.use_predecessors and len(self.predecessors[head_names[j]]) > 1:
+                    inputs = [x[i]]
+                    inputs.extend([outputs[key] for key in self.predecessors[head_names[j]]])
+                    outputs[head_names[j]] = module[i](torch.cat(inputs, dim=1))
+                else:
+                    outputs[head_names[j]] = module[i](x[i])
+            y.append(torch.cat(list(outputs.values()), 1))
         return y
 
 

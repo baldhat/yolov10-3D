@@ -930,6 +930,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             if m is v10Detect3d:
                 args.append(d.get("dsconv"))
                 args.append(d.get("channels"))
+                args.append(d.get("use_predecessors"))
         elif m is RTDETRDecoder:  # special case, channels arg must be passed in index 1
             args.insert(1, [ch[x] for x in f])
         elif m is CBLinear:
