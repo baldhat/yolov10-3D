@@ -363,7 +363,7 @@ class TaskAlignedAssigner3d(nn.Module):
         eps (float): A small value to prevent division by zero.
     """
 
-    def __init__(self, topk=13, num_classes=80, alpha=1.0, beta=6.0, eps=1e-9, use_3d=True):
+    def __init__(self, topk=13, num_classes=80, alpha=1.0, beta=6.0, eps=1e-9, use_3d=True, kps_dist_metric="l2"):
         """Initialize a TaskAlignedAssigner object with customizable hyperparameters."""
         super().__init__()
         self.topk = topk
@@ -373,6 +373,7 @@ class TaskAlignedAssigner3d(nn.Module):
         self.beta = beta
         self.eps = eps
         self.use_3d = use_3d
+        self.kps_dist_metric = kps_dist_metric
 
     @torch.no_grad()
     def forward(self, pd_scores, pd_bboxes, pd_3d, anc_points, gts, mask_gt, stride_tensor, calibs, mean_sizes):
@@ -554,8 +555,12 @@ class TaskAlignedAssigner3d(nn.Module):
         return locations
 
     def keypoint_distance_3d(self, gt_kps, pd_kps):
-        dist = nn.functional.l1_loss(pd_kps, gt_kps, reduction='none').sum(dim=(-1, -2)) / 24
-        return 1 / torch.exp(dist)
+        if self.kps_dist_metric == "l1":
+            dist = nn.functional.l1_loss(pd_kps, gt_kps, reduction='none').sum(dim=(-1, -2)) / 24
+            return 1 / torch.exp(dist)
+        elif self.kps_dist_metric == "l2":
+            dist = nn.functional.mse_loss(pd_kps, gt_kps, reduction='none').sum(dim=(-1, -2)) / 24
+            return 1 / torch.exp(0.5 * dist)
 
     def get_pos_mask(self, pd_scores, pd_bboxes, pd_keypoints, gt_labels, gt_bboxes, gt_keypoints, anc_points, mask_gt):
         """Get in_gts mask, (b, max_num_obj, h*w)."""

@@ -761,7 +761,8 @@ class DDDetectionLoss():
         self.use_dfl = False
 
         self.assigner = TaskAlignedAssigner3d(topk=tal_topk, num_classes=self.nc,
-                                              alpha=model.args.tal_alpha, beta=model.args.tal_beta)
+                                              alpha=model.args.tal_alpha, beta=model.args.tal_beta,
+                                              use_3d=model.args.tal_3d, kps_dist_metric=model.args.kps_dist_metric)
 
     def preprocess(self, targets, batch_size, scale_tensor):
         """Preprocesses the target counts and matches with the input batch size to output a tensor."""
