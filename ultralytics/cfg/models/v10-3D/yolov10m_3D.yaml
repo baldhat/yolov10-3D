@@ -6,7 +6,8 @@ nc: 3 # number of classes
 scales: # model compound scaling constants, i.e. 'model=yolov8n.yaml' will call yolov8.yaml with scale 'n'
   # [depth, width, max_channels]
   m: [0.67, 0.75, 768] # YOLOv8m summary: 295 layers, 25902640 parameters, 25902624 gradients,  79.3 GFLOPs
-dsconv: True
+dsconv: False
+use_predecessors: False
 channels:
   cls_c: 128
   o2d_c: 128
