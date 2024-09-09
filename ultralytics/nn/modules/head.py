@@ -581,6 +581,7 @@ class v10Detect3d(nn.Module):
             "dep": ["cls", "s3d"],
             "dep_un": ["cls", "s3d", "dep"]
         }
+        self.dep_norm = 60.0
 
         self.cls_in_ch = [ch_ + self.sum_predecessor_chs(self.predecessors["cls"]) if self.use_predecessors else ch_ for ch_ in ch]
         self.o2d_in_ch = [ch_ + self.sum_predecessor_chs(self.predecessors["o2d"]) if self.use_predecessors else ch_ for ch_ in ch]
@@ -674,7 +675,9 @@ class v10Detect3d(nn.Module):
             for j, module in enumerate(heads):
                 if self.use_predecessors and len(self.predecessors[head_names[j]]) > 1:
                     inputs = [x[i]]
-                    inputs.extend([outputs[key] for key in self.predecessors[head_names[j]]])
+                    inputs.extend([outputs[key] if key != "dep"
+                                                else outputs[key] / self.dep_norm
+                                   for key in self.predecessors[head_names[j]]])
                     outputs[head_names[j]] = module[i](torch.cat(inputs, dim=1))
                 else:
                     outputs[head_names[j]] = module[i](x[i])
