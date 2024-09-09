@@ -363,7 +363,7 @@ class TaskAlignedAssigner3d(nn.Module):
         eps (float): A small value to prevent division by zero.
     """
 
-    def __init__(self, topk=13, num_classes=80, alpha=1.0, beta=6.0, eps=1e-9, use_3d=True):
+    def __init__(self, topk=8, num_classes=3, alpha=0.5, beta=3.0, gamma=3.0, eps=1e-9, use_3d=True):
         """Initialize a TaskAlignedAssigner object with customizable hyperparameters."""
         super().__init__()
         self.topk = topk
@@ -371,6 +371,7 @@ class TaskAlignedAssigner3d(nn.Module):
         self.bg_idx = num_classes
         self.alpha = alpha
         self.beta = beta
+        self.gamma = gamma
         self.eps = eps
         self.use_3d = use_3d
 
@@ -562,7 +563,8 @@ class TaskAlignedAssigner3d(nn.Module):
         mask_in_gts = self.select_candidates_in_gts(anc_points, gt_bboxes)
         # Get anchor_align metric, (b, max_num_obj, h*w)
         if self.use_3d:
-            align_metric, overlaps = self.get_keypoint_metrics(pd_scores, pd_keypoints, gt_labels, gt_keypoints, mask_in_gts * mask_gt)
+            #align_metric, overlaps = self.get_keypoint_metrics(pd_scores, pd_keypoints, gt_labels, gt_keypoints, mask_in_gts * mask_gt)
+            align_metric, overlaps = self.get_box_kp_metrics(pd_scores, pd_bboxes, pd_keypoints, gt_labels, gt_bboxes, gt_keypoints,mask_in_gts *  mask_gt)
         else:
             align_metric, overlaps = self.get_box_metrics(pd_scores, pd_bboxes, gt_labels, gt_bboxes, mask_in_gts * mask_gt)
         # Get topk_metric mask, (b, max_num_obj, h*w)
@@ -612,6 +614,33 @@ class TaskAlignedAssigner3d(nn.Module):
 
         # distances need to be between 0 (infinitely far) and 1 (same)
         align_metric = bbox_scores.pow(self.alpha) * similarities.pow(self.beta)
+        return align_metric, similarities
+
+    def get_box_kp_metrics(self, pd_scores, pd_bboxes, pd_keypoints, gt_labels, gt_bboxes, gt_keypoints, mask_gt):
+        """Compute alignment metric given predicted and ground truth bounding boxes."""
+        na = pd_bboxes.shape[-2]
+        mask_gt = mask_gt.bool()  # b, max_num_obj, h*w
+        bbox_scores = torch.zeros([self.bs, self.n_max_boxes, na], dtype=pd_scores.dtype, device=pd_scores.device)
+        overlaps = torch.zeros([self.bs, self.n_max_boxes, na], dtype=pd_bboxes.dtype, device=pd_bboxes.device)
+        similarities = torch.zeros([self.bs, self.n_max_boxes, na], dtype=pd_keypoints.dtype, device=pd_keypoints.device)
+
+        ind = torch.zeros([2, self.bs, self.n_max_boxes], dtype=torch.long)  # 2, b, max_num_obj
+        ind[0] = torch.arange(end=self.bs).view(-1, 1).expand(-1, self.n_max_boxes)  # b, max_num_obj
+        ind[1] = gt_labels.squeeze(-1)  # b, max_num_obj
+        # Get the scores of each grid for each gt cls
+        bbox_scores[mask_gt] = pd_scores[ind[0], :, ind[1]][mask_gt]  # b, max_num_obj, h*w
+
+        # (b, max_num_obj, 1, 4), (b, 1, h*w, 4)
+        pd_kps = pd_keypoints.unsqueeze(1).expand(-1, self.n_max_boxes, -1, -1, -1)[mask_gt]
+        gt_kps = gt_keypoints.unsqueeze(2).expand(-1, -1, na, -1, -1)[mask_gt]
+        similarities[mask_gt] = self.keypoint_distance_3d(gt_kps, pd_kps)
+
+        # (b, max_num_obj, 1, 4), (b, 1, h*w, 4)
+        pd_boxes = pd_bboxes.unsqueeze(1).expand(-1, self.n_max_boxes, -1, -1)[mask_gt]
+        gt_boxes = gt_bboxes.unsqueeze(2).expand(-1, -1, na, -1)[mask_gt]
+        overlaps[mask_gt] = self.iou_calculation(gt_boxes, pd_boxes)
+
+        align_metric = bbox_scores.pow(self.alpha) * overlaps.pow(self.beta) * similarities.pow(self.gamma)
         return align_metric, similarities
 
     def add_cls_mean_size(self, gt_size_3d, gt_labels, mean_sizes):
