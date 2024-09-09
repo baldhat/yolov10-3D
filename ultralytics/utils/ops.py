@@ -175,6 +175,7 @@ def non_max_suppression(
     max_wh=7680,
     in_place=True,
     rotated=False,
+    xyxy=False
 ):
     """
     Perform non-maximum suppression (NMS) on a set of boxes, with support for masks and multiple labels per box.
@@ -225,7 +226,7 @@ def non_max_suppression(
     multi_label &= nc > 1  # multiple labels per box (adds 0.5ms/img)
 
     prediction = prediction.transpose(-1, -2)  # shape(1,84,6300) to shape(1,6300,84)
-    if not rotated:
+    if not rotated and not xyxy:
         if in_place:
             prediction[..., :4] = xywh2xyxy(prediction[..., :4])  # xywh to xyxy
         else:
