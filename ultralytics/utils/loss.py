@@ -1,5 +1,5 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
-import matplotlib.pyplot as plt
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -762,7 +762,7 @@ class DDDetectionLoss():
 
         self.assigner = TaskAlignedAssigner3d(topk=tal_topk, num_classes=self.nc,
                                               alpha=model.args.tal_alpha, beta=model.args.tal_beta,
-                                              gamma=model.args.tal_gamma,
+                                              gamma=model.args.tal_gamma, use_2d=model.args.tal_2d,
                                               use_3d=model.args.tal_3d, kps_dist_metric=model.args.kps_dist_metric)
 
     def preprocess(self, targets, batch_size, scale_tensor):
@@ -832,7 +832,7 @@ class DDDetectionLoss():
         # Pboxes
         pred_bboxes = self.bbox_decode(anchor_points, pred_2d, stride_tensor)
 
-        targets, fg_mask, target_gt_idx, pred_kps = self.assigner(
+        targets, fg_mask, target_gt_idx, pred_kps, gt_kps = self.assigner(
             pred_scores.detach().sigmoid(),
             pred_bboxes.detach().type(gt_bboxes.dtype),
             pred_3d.detach(),
@@ -851,8 +851,7 @@ class DDDetectionLoss():
         targets_2d = targets[2:4]
         targets_3d = targets[4:9] # center, size, depth, head_bin, head_res
 
-        #self.debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor)
-        #self.debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps)
+        #self.plot_assignments(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt)
 
         loss[0] = (self.compute_box2d_loss(targets_2d, pred_2d, anchor_points, stride_tensor, fg_mask, target_scores_sum)
                    * self.hyp.loss2d)
@@ -862,6 +861,11 @@ class DDDetectionLoss():
                                             fg_mask, target_scores_sum)
 
         return loss.sum() * batch_size, loss
+
+    def plot_assignments(self, batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt):
+        self.debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor)
+        self.debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt)
+        self.debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt)
 
     def compute_loss_weights(self, current_loss):
         weights = torch.ones(6, device=self.device)
@@ -958,7 +962,7 @@ class DDDetectionLoss():
         plt.show()
         print()
 
-    def debug_show_assigned_targets3d(self, batch, targets_3d, fg_mask, pred3d):
+    def debug_show_assigned_targets3d(self, batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt):
         target_center_3d, _, _, _, _ = targets_3d
         plt.clf()
         box_idxs = [0, 1, 2, 3, 0,  # base
@@ -967,6 +971,7 @@ class DDDetectionLoss():
                     5,  # left
                     4, 1, 5, 0]  # front
         color_none_bottom, color_bottom = ((255, 0, 0), (255, 0, 0))
+        color_gt_none_bot, color_gt_bot = ((0, 255, 0), (0, 0, 255))
         fig, axes = plt.subplots(2, 2, figsize=(36, 12), gridspec_kw={'wspace': 0, 'hspace': 0},
                                  constrained_layout=True)
         for i, ax in enumerate(np.ravel(axes)):
@@ -974,17 +979,76 @@ class DDDetectionLoss():
             img = np.clip((img) * 255, 0, 255).astype(np.uint8)
 
             t_center_3d = target_center_3d[i][fg_mask[i]].int().cpu()
-            kps = self.project_to_image(pred3d[i][fg_mask[i]], batch["calib"][i]).int().cpu()
+            pd_kps = self.project_to_image(pred_kps[i][fg_mask[i]], batch["calib"][i]).int().cpu()
+            gr_kps = self.project_to_image(gt_kps[i][mask_gt[i].bool().squeeze(-1)], batch["calib"][i]).int().cpu()
             for center_3d in t_center_3d:
                 cv2.circle(img, center_3d.numpy(), 5, (0, 0, 255), -1)
-            for kp in kps:
+            for kp in pd_kps:
                 cv2.polylines(img, [kp[box_idxs[:5]].numpy().astype(np.int32).reshape((-1, 1, 2))], isClosed=False,
                               color=color_none_bottom, thickness=1, lineType=cv2.LINE_AA)
                 cv2.polylines(img, [kp[box_idxs[5:]].numpy().astype(np.int32).reshape((-1, 1, 2))], isClosed=True,
                               color=color_bottom, thickness=1, lineType=cv2.LINE_AA)
+            for kp in gr_kps:
+                cv2.polylines(img, [kp[box_idxs[:5]].numpy().astype(np.int32).reshape((-1, 1, 2))], isClosed=False,
+                              color=color_gt_none_bot, thickness=1, lineType=cv2.LINE_AA)
+                cv2.polylines(img, [kp[box_idxs[5:]].numpy().astype(np.int32).reshape((-1, 1, 2))], isClosed=True,
+                              color=color_gt_bot, thickness=1, lineType=cv2.LINE_AA)
 
             ax.imshow(img)
             ax.axis("off")
+        plt.show()
+        print()
+
+    def debug_show_pred_bevs(self, pred_kps, gt_kps, fg_mask, mask_gt):
+        plt.clf()
+        max_imgs = 4
+        fig, ax = plt.subplots(math.ceil(max_imgs ** 0.5), math.ceil(max_imgs ** 0.5),
+                               figsize=(36, 18), gridspec_kw={'wspace': 0, 'hspace': 0}, constrained_layout=True)
+        ax = ax.ravel()
+
+        for i, anchors in enumerate(pred_kps):
+            if i >= max_imgs:
+                break
+            MAX_DIST = 70
+            SCALE = 30
+
+            # Create BEV Space
+            R = (MAX_DIST * SCALE)
+            space = np.zeros((R * 2, R * 2, 3), dtype=np.uint8)
+
+            for theta in np.linspace(0, np.pi, 7):
+                space = cv2.line(space, pt1=(int(R - R * np.cos(theta)), int(R - R * np.sin(theta))), pt2=(R, R),
+                                 color=(255, 255, 255), thickness=2, lineType=cv2.LINE_AA)
+            for radius in np.linspace(0, R, 5):
+                if radius == 0:
+                    continue
+                space = cv2.circle(space, center=(R, R), radius=int(radius), color=(255, 255, 255), thickness=2,
+                                   lineType=cv2.LINE_AA)
+            space = space[:R, :, :]
+
+            for anchor in anchors[torch.logical_not(fg_mask[i])].cpu().numpy():
+                bottom_corners = (anchor[:4] * SCALE)
+                x = bottom_corners[:, 0] + R
+                y = -bottom_corners[:, 2] + R
+                pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1).astype(np.int32)[[0, 1, 3, 2]]
+                space = cv2.polylines(space, pts=[pts], isClosed=True, color=(255, 0, 0))
+            for assigned in anchors[fg_mask[i]].cpu().numpy():
+                bottom_corners = (assigned[:4] * SCALE)
+                x = bottom_corners[:, 0] + R
+                y = -bottom_corners[:, 2] + R
+                pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1).astype(np.int32)[
+                    [0, 1, 3, 2]]
+                space = cv2.polylines(space, pts=[pts], isClosed=True, color=(0, 0, 255))
+            for gt in gt_kps[i][mask_gt[i].bool().squeeze(-1)].cpu().numpy():
+                bottom_corners = (gt[:4] * SCALE)
+                x = bottom_corners[:, 0] + R
+                y = -bottom_corners[:, 2] + R
+                pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1).astype(np.int32)[
+                    [0, 1, 3, 2]]
+                space = cv2.polylines(space, pts=[pts], isClosed=True, color=(0, 255, 0))
+
+            ax[i].imshow(space)
+            ax[i].axis("off")
         plt.show()
         print()
 
