@@ -851,7 +851,7 @@ class DDDetectionLoss():
         targets_2d = targets[2:4]
         targets_3d = targets[4:9] # center, size, depth, head_bin, head_res
 
-        #self.plot_assignments(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt)
+        self.plot_assignments(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt)
 
         loss[0] = (self.compute_box2d_loss(targets_2d, pred_2d, anchor_points, stride_tensor, fg_mask, target_scores_sum)
                    * self.hyp.loss2d)
@@ -863,9 +863,9 @@ class DDDetectionLoss():
         return loss.sum() * batch_size, loss
 
     def plot_assignments(self, batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt):
-        self.debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor)
-        self.debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt)
-        self.debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt)
+        #self.debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor)
+        #self.debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt)
+        self.debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor)
 
     def compute_loss_weights(self, current_loss):
         weights = torch.ones(6, device=self.device)
@@ -930,7 +930,6 @@ class DDDetectionLoss():
         target_bboxes = torch.cat(
             (target_center_2d - target_size_2d / 2, target_center_2d + target_size_2d / 2), dim=-1)
 
-        plt.clf()
         color = {8: (255, 255, 0), 16: (0, 255, 255), 32: (255, 0, 255)}
         mean = 0
         std = 1
@@ -964,7 +963,6 @@ class DDDetectionLoss():
 
     def debug_show_assigned_targets3d(self, batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt):
         target_center_3d, _, _, _, _ = targets_3d
-        plt.clf()
         box_idxs = [0, 1, 2, 3, 0,  # base
                     4, 7, 3, 7,  # right
                     6, 2, 6,  # back
@@ -999,12 +997,12 @@ class DDDetectionLoss():
         plt.show()
         print()
 
-    def debug_show_pred_bevs(self, pred_kps, gt_kps, fg_mask, mask_gt):
-        plt.clf()
+    def debug_show_pred_bevs(self, pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor):
         max_imgs = 4
         fig, ax = plt.subplots(math.ceil(max_imgs ** 0.5), math.ceil(max_imgs ** 0.5),
                                figsize=(36, 18), gridspec_kw={'wspace': 0, 'hspace': 0}, constrained_layout=True)
         ax = ax.ravel()
+        color = {8: (255, 255, 0), 16: (0, 255, 255), 32: (255, 0, 255)}
 
         for i, anchors in enumerate(pred_kps):
             if i >= max_imgs:
@@ -1026,26 +1024,27 @@ class DDDetectionLoss():
                                    lineType=cv2.LINE_AA)
             space = space[:R, :, :]
 
-            for anchor in anchors[torch.logical_not(fg_mask[i])].cpu().numpy():
+            for j, anchor in enumerate(anchors[torch.logical_not(fg_mask[i])].cpu().numpy()):
+                c = color[stride_tensor[j].item()]
                 bottom_corners = (anchor[:4] * SCALE)
                 x = bottom_corners[:, 0] + R
                 y = -bottom_corners[:, 2] + R
                 pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1).astype(np.int32)[[0, 1, 3, 2]]
-                space = cv2.polylines(space, pts=[pts], isClosed=True, color=(255, 0, 0))
+                space = cv2.polylines(space, pts=[pts], isClosed=True, color=c)
             for assigned in anchors[fg_mask[i]].cpu().numpy():
                 bottom_corners = (assigned[:4] * SCALE)
                 x = bottom_corners[:, 0] + R
                 y = -bottom_corners[:, 2] + R
                 pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1).astype(np.int32)[
                     [0, 1, 3, 2]]
-                space = cv2.polylines(space, pts=[pts], isClosed=True, color=(0, 0, 255))
+                space = cv2.polylines(space, pts=[pts], isClosed=True, color=(0, 0, 255), thickness=2)
             for gt in gt_kps[i][mask_gt[i].bool().squeeze(-1)].cpu().numpy():
                 bottom_corners = (gt[:4] * SCALE)
                 x = bottom_corners[:, 0] + R
                 y = -bottom_corners[:, 2] + R
                 pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1).astype(np.int32)[
                     [0, 1, 3, 2]]
-                space = cv2.polylines(space, pts=[pts], isClosed=True, color=(0, 255, 0))
+                space = cv2.polylines(space, pts=[pts], isClosed=True, color=(0, 255, 0), thickness=2)
 
             ax[i].imshow(space)
             ax[i].axis("off")

@@ -30,11 +30,11 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
     def get_model(self, cfg=None, weights=None, verbose=True):
         """Return a YOLO detection model."""
         from copy import deepcopy
-        backbone = YOLOv10.from_pretrained("jameslahm/" + self.model.split("_")[0])
-        model = YOLOv10_3DDetectionModel(self.model)
+        model = YOLOv10_3DDetectionModel(cfg)
         if weights:
             model.load(weights)
         else:
+            backbone = YOLOv10.from_pretrained("jameslahm/" + self.model.split("_")[0])
             model_seq = deepcopy(model.model)
             for i, module in enumerate(model_seq):
                 if not isinstance(module, v10Detect3d):

@@ -725,7 +725,8 @@ class v10Detect3d(nn.Module):
 
     def bias_init(self):
         # TODO: Better weight initialization
-        deps = [10, 30, 50]
+        deps = [50, 30, 15]
+        ranges = [[-2, 2], [-1.5, 1.5], [-1, 1]]
         for i in range(self.nl):
             self.cls[i][-1].bias.data[: self.nc] = math.log(5 / self.nc / ((1280 / self.stride[i]) * (384 / self.stride[i])))
             self.s2d[i][-1].bias.data.fill_(6)
@@ -734,7 +735,7 @@ class v10Detect3d(nn.Module):
             self.s3d[i][-1].bias.data.fill_(0.0)
             nn.init.normal_(self.s3d[i][-1].weight, std=0.05)
             self.dep[i][-1].bias.data.fill_(deps[i])
-            nn.init.uniform_(self.dep[i][-1].weight, a=-10, b=10)
+            nn.init.uniform_(self.dep[i][-1].weight, a=ranges[i][0], b=ranges[i][1])
 
             # self.s3d[i].apply(weights_init_xavier)
             # self.hd[i].apply(weights_init_xavier)
