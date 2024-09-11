@@ -576,7 +576,7 @@ class TaskAlignedAssigner3d(nn.Module):
         # Get topk_metric mask, (b, max_num_obj, h*w)
         mask_topk = self.select_topk_candidates(align_metric, topk_mask=mask_gt.expand(-1, -1, self.topk).bool())
         # Merge all mask to a final mask, (b, max_num_obj, h*w)
-        if not self.use_3d and self.use_2d:
+        if (not self.use_3d) and self.use_2d:
             mask_gt = mask_in_gts * mask_gt
         mask_pos = mask_topk * mask_gt
 

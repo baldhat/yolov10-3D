@@ -70,7 +70,7 @@ def decode_batch(batch, calibs, cls_mean_size, use_camera_dis=False, undo_augmen
 
 
 
-def decode_preds(preds, calibs, cls_mean_size, im_files, inv_trans, use_camera_dis, undo_augment=True, threshold=0.001, nms=False):
+def decode_preds(preds, calibs, cls_mean_size, im_files, inv_trans, use_camera_dis, undo_augment=True, threshold=0.001):
     preds = preds.detach().cpu()
     bbox, pred_center3d, pred_s3d, pred_hd, pred_dep, pred_dep_un, scores, labels = preds.split(
         (4, 2, 3, 24, 1, 1, 1, 1), dim=-1)
@@ -85,99 +85,48 @@ def decode_preds(preds, calibs, cls_mean_size, im_files, inv_trans, use_camera_d
 
     scores = scores.sigmoid()
 
-    if nms:
-        preds = ops.non_max_suppression(torch.cat((bbox, scores,
-                                                 torch.cat((pred_center3d, pred_s3d, alphas.unsqueeze(-1), pred_dep, pred_dep_un, labels), dim=-1)),
-                                                dim=-1).permute(0, 2, 1),
-                                  xyxy=True, iou_thres=0.8, conf_thres=0.001, agnostic=True, nc=1)
-
     results = {}
     for i, img in enumerate(preds):
-        if nms:
-            bbox, scores, _, pred_center3d, pred_s3d, alphas, pred_dep, pred_dep_un, labels = preds[i].split((4, 1, 1, 2, 3, 1, 1, 1, 1),
-                                                                                             dim=-1)
-            targets = []
-            for j, pred in enumerate(img):
-                cls_id = labels[j].item()
+        targets = []
+        for j, pred in enumerate(img):
+            cls_id = labels[i, j].item()
 
-                bbox_ = (bbox[j].numpy() * np.array([1242 / 1280.0, 375 / 384.0, 1242 / 1280.0,
-                                                        375 / 384.0])).tolist()  # TODO fixme? Shouldn't this be inverse transform?
-                x = (bbox_[0] + bbox_[2]) / 2
+            bbox_ = (bbox[i, j].numpy() * np.array([1242/1280.0, 375/384.0, 1242/1280.0, 375/384.0])).tolist() #TODO fixme? Shouldn't this be inverse transform?
+            x = (bbox_[0] + bbox_[2]) / 2
 
-                dimensions = pred_s3d[j].numpy()
-                dimensions += cls_mean_size[int(cls_id)]
+            dimensions = pred_s3d[i, j].numpy()
+            dimensions += cls_mean_size[int(cls_id)]
 
-                depth = pred_dep[j].numpy()
-                sigma = torch.exp(-pred_dep_un[j])
+            depth = pred_dep[i, j].numpy()
+            sigma = torch.exp(-pred_dep_un[i, j])
 
-                if undo_augment:
-                    x3d = pred_center3d[j, 0].numpy()
-                    y3d = pred_center3d[j, 1].numpy()
-                    c3d = affine_transform(np.array([x3d, y3d]), np.array(inv_trans[i]))
-                    if use_camera_dis:
-                        locations = calibs[i].camera_dis_to_rect(c3d[0], c3d[1], depth).reshape(-1)
-                    else:
-                        locations = calibs[i].img_to_rect(c3d[0], c3d[1], depth).reshape(-1)
+            if undo_augment:
+                x3d = pred_center3d[i, j, 0].numpy()
+                y3d = pred_center3d[i, j, 1].numpy()
+                c3d = affine_transform(np.array([x3d, y3d]), np.array(inv_trans[i]))
+                if use_camera_dis:
+                    locations = calibs[i].camera_dis_to_rect(c3d[0], c3d[1], depth).reshape(-1)
                 else:
-                    x3d = pred_center3d[j, 0].numpy() * 1242 / 1280.0
-                    y3d = pred_center3d[j, 1].numpy() * 375 / 384.0
-                    if use_camera_dis:
-                        locations = calibs[i].camera_dis_to_rect(x3d, y3d, depth).reshape(-1)
-                    else:
-                        locations = calibs[i].img_to_rect(x3d, y3d, depth).reshape(-1)
-                locations[1] += dimensions[0] / 2
-
-                alpha = alphas[j].item()
-                ry = calibs[i].alpha2ry(alpha, x)
-
-                score = scores[j].item() * sigma.item()
-                if score < threshold:
-                    continue
-
-                targets.append([cls_id, alpha] + bbox_ + dimensions.tolist() + locations.tolist() + [ry, score])
-
-            results[im_files[i]] = targets
-        else:
-            targets = []
-            for j, pred in enumerate(img):
-                cls_id = labels[i, j].item()
-
-                bbox_ = (bbox[i, j].numpy() * np.array([1242/1280.0, 375/384.0, 1242/1280.0, 375/384.0])).tolist() #TODO fixme? Shouldn't this be inverse transform?
-                x = (bbox_[0] + bbox_[2]) / 2
-
-                dimensions = pred_s3d[i, j].numpy()
-                dimensions += cls_mean_size[int(cls_id)]
-
-                depth = pred_dep[i, j].numpy()
-                sigma = torch.exp(-pred_dep_un[i, j])
-
-                if undo_augment:
-                    x3d = pred_center3d[i, j, 0].numpy()
-                    y3d = pred_center3d[i, j, 1].numpy()
-                    c3d = affine_transform(np.array([x3d, y3d]), np.array(inv_trans[i]))
-                    if use_camera_dis:
-                        locations = calibs[i].camera_dis_to_rect(c3d[0], c3d[1], depth).reshape(-1)
-                    else:
-                        locations = calibs[i].img_to_rect(c3d[0], c3d[1], depth).reshape(-1)
+                    locations = calibs[i].img_to_rect(c3d[0], c3d[1], depth).reshape(-1)
+            else:
+                x3d = pred_center3d[i, j, 0].numpy() * 1242/1280.0
+                y3d = pred_center3d[i, j, 1].numpy() * 375/384.0
+                if use_camera_dis:
+                    locations = calibs[i].camera_dis_to_rect(x3d, y3d, depth).reshape(-1)
                 else:
-                    x3d = pred_center3d[i, j, 0].numpy() * 1242/1280.0
-                    y3d = pred_center3d[i, j, 1].numpy() * 375/384.0
-                    if use_camera_dis:
-                        locations = calibs[i].camera_dis_to_rect(x3d, y3d, depth).reshape(-1)
-                    else:
-                        locations = calibs[i].img_to_rect(x3d, y3d, depth).reshape(-1)
-                locations[1] += dimensions[0] / 2
+                    locations = calibs[i].img_to_rect(x3d, y3d, depth).reshape(-1)
+            locations[1] += dimensions[0] / 2
 
-                alpha = alphas[i, j].item()
-                ry = calibs[i].alpha2ry(alpha, x)
+            alpha = alphas[i, j].item()
+            ry = calibs[i].alpha2ry(alpha, x)
 
-                score = scores[i, j].item() * sigma.item()
-                if score < threshold:
-                    continue
+            score = scores[i, j].item() * sigma.item()
+            if score < threshold:
+                continue
 
-                targets.append([cls_id, alpha] + bbox_ + dimensions.tolist() + locations.tolist() + [ry, score])
+            targets.append([cls_id, alpha] + bbox_ + dimensions.tolist() + locations.tolist() + [ry, score])
 
-            results[im_files[i]] = targets
+        results[im_files[i]] = targets
     return results
 
 def get_heading_angle(heading):

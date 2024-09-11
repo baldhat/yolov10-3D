@@ -551,7 +551,7 @@ class v10Detect3d(nn.Module):
     anchors = torch.empty(0)  # init
     strides = torch.empty(0)  # init
 
-    def __init__(self, nc=80, ch=(), dsconv=True, channels=None, use_predecessors=True):
+    def __init__(self, nc=80, ch=(), dsconv=False, channels=None, use_predecessors=False):
         super().__init__()
         assert (channels is not None)
         self.nc = nc  # number of classes
@@ -681,7 +681,7 @@ class v10Detect3d(nn.Module):
                     outputs[head_names[j]] = module[i](torch.cat(inputs, dim=1))
                 else:
                     outputs[head_names[j]] = module[i](x[i])
-            y.append(torch.cat(list(outputs.values()), 1))
+            y.append(torch.cat(list(outputs.values()), dim=1))
         return y
 
 
