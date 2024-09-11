@@ -99,21 +99,25 @@ warmup_momentum: 0.8 # (float) warmup initial momentum
 warmup_bias_lr: 0.1 # (float) warmup initial bias lr
 box: 5 # (float) 2dbox loss gain
 
+# Losses
 cls: 2 # (float) cls l oss gain (scale with pixels)
 loss2d: 2 # (float) box loss gain
 depth: 1 # (float) depth loss gain
 offset3d: 10 # (float) 3d pixel offset loss gain
 size3d: 1 # (float) 3d size loss gain
 heading: 1 # (float) 3d heading loss gain
+# Task aligned learning
 tal_topk: 8 # (int) number of assignments per groundtruth for o2m head
 tal_alpha: 0.5 # class assignemnt score exponent
-tal_beta: 3.0 # 2D assignment score exponent
-tal_gamma: 3.0 # 3D assignment score exponent
+tal_beta: 0.0 # 2D assignment score exponent
+tal_gamma: 6.0 # 3D assignment score exponent
 tal_3d: True
 tal_2d: True
 kps_dist_metric: l1
 constrain_anchors: True
+# Training
 htl: False
+close_mixup: 150 # Epochs before the end to stop mixup augmentation
 
 dfl: 1.5 # (float) dfl loss gain
 pose: 12.0 # (float) pose loss gain

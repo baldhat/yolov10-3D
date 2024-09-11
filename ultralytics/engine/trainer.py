@@ -365,6 +365,10 @@ class BaseTrainer:
             if epoch == (self.epochs - self.args.close_mosaic):
                 self._close_dataloader_mosaic()
                 self.train_loader.reset()
+            if epoch == (self.epochs - self.args.close_mixup):
+                self._close_dataloader_mixup()
+                self.train_loader.reset()
+                print("Disabled mixup on dataset")
 
             if RANK in (-1, 0):
                 LOGGER.info(self.progress_string())
@@ -722,6 +726,10 @@ class BaseTrainer:
         if hasattr(self.train_loader.dataset, "close_mosaic"):
             LOGGER.info("Closing dataloader mosaic")
             self.train_loader.dataset.close_mosaic(hyp=self.args)
+
+    def _close_dataloader_mixup(self):
+        if hasattr(self.train_loader.dataset, "mixup"):
+            self.train_loader.dataset.mixup = 0.0
 
     def build_optimizer(self, model, name="auto", lr=0.001, momentum=0.9, decay=1e-5, iterations=1e5):
         """
