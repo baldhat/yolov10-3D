@@ -397,6 +397,7 @@ class SemanticDataset(BaseDataset):
 
 class KITTIDataset(data.Dataset):
     def __init__(self, image_file_path, mode, args):
+        np.random.seed(args.seed)
         # basic configuration
         self.max_objs = 50
         self.class_name = ['Car', 'Pedestrian', 'Cyclist']
@@ -442,6 +443,7 @@ class KITTIDataset(data.Dataset):
         self.scale = args.scale
         self.shift = args.translate
         self.mixup = args.mixup
+        self.max_depth_threshold = args.max_depth_threshold
 
         # statistics
         #self.mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
@@ -612,6 +614,15 @@ class KITTIDataset(data.Dataset):
                 if center_heatmap[0] < 0 or center_heatmap[0] >= self.resolution[0]: continue
                 if center_heatmap[1] < 0 or center_heatmap[1] >= self.resolution[1]: continue
 
+                # encoding depth
+                depth = objects[i].pos[-1]
+                depth *= scale
+                # encoding depth
+                depth = objects[i].pos[-1]
+                depth *= scale
+                if depth > self.max_depth_threshold:
+                    continue
+
                 cls_id = self.cls2id[objects[i].cls_type]
                 gt_cls.append([cls_id])
                 gt_boxes_2d.append(bbox_2d_)
@@ -619,9 +630,6 @@ class KITTIDataset(data.Dataset):
                 gt_center_2d.append(center_2d)
                 gt_size_2d.append(gt_size_2d_)
 
-                # encoding depth
-                depth = objects[i].pos[-1]
-                depth *= scale
 
                 # encoding heading angle
                 # heading_angle = objects[i].alpha
@@ -695,6 +703,11 @@ class KITTIDataset(data.Dataset):
                     center_heatmap = center_3d.astype(np.int32)
                     if center_heatmap[0] < 0 or center_heatmap[0] >= self.resolution[0]: continue
                     if center_heatmap[1] < 0 or center_heatmap[1] >= self.resolution[1]: continue
+                    # encoding depth
+                    depth = objects[i].pos[-1]
+                    depth *= scale
+                    if depth > self.max_depth_threshold:
+                        continue
 
                     cls_id = self.cls2id[objects[i].cls_type]
                     gt_cls.append([cls_id])
@@ -702,10 +715,6 @@ class KITTIDataset(data.Dataset):
                     gt_center_3d.append(center_3d)
                     gt_center_2d.append(center_2d)
                     gt_size_2d.append(gt_size_2d_)
-
-                    # encoding depth
-                    depth = objects[i].pos[-1]
-                    depth *= scale
 
                     # encoding heading angle
                     heading_angle = calib.ry2alpha(objects[i].ry, (objects[i].box2d[0] + objects[i].box2d[2]) / 2)

@@ -725,7 +725,7 @@ class v10Detect3d(nn.Module):
 
     def bias_init(self):
         # TODO: Better weight initialization
-        deps = [50, 30, 15]
+        deps = [45, 25, 10]
         ranges = [[-2, 2], [-1.5, 1.5], [-1, 1]]
         for i in range(self.nl):
             self.cls[i][-1].bias.data[: self.nc] = math.log(5 / self.nc / ((1280 / self.stride[i]) * (384 / self.stride[i])))
