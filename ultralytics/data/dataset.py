@@ -444,6 +444,7 @@ class KITTIDataset(data.Dataset):
         self.shift = args.translate
         self.mixup = args.mixup
         self.max_depth_threshold = args.max_depth_threshold
+        self.min_depth_thres = args.min_depth_threshold
 
         # statistics
         #self.mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
@@ -581,7 +582,7 @@ class KITTIDataset(data.Dataset):
                     continue
 
                 # filter inappropriate samples by difficulty
-                if objects[i].level_str == 'UnKnown' or objects[i].pos[-1] < 2:
+                if objects[i].level_str == 'UnKnown' or (objects[i].pos[-1] < self.min_depth_thres):
                     continue
 
                 if objects[i].trucation > 0.5 or objects[i].occlusion > 2:
@@ -640,9 +641,6 @@ class KITTIDataset(data.Dataset):
                 gt_heading_bin.append(heading_bin)
                 gt_heading_res.append(heading_res)
 
-                src_size_3d = np.array([objects[i].h, objects[i].w, objects[i].l], dtype=np.float32)
-                mean_size = self.cls_mean_size[self.cls2id[objects[i].cls_type]]
-                size_3d = src_size_3d - mean_size
                 s3d = (np.array([objects[i].h, objects[i].w, objects[i].l], dtype=np.float32)
                        - self.cls_mean_size[self.cls2id[objects[i].cls_type]])
                 gt_size_3d.append(s3d)
@@ -672,7 +670,7 @@ class KITTIDataset(data.Dataset):
                     if objects[i].cls_type not in self.writelist:
                         continue
 
-                    if objects[i].level_str == 'UnKnown' or objects[i].pos[-1] < 2:
+                    if objects[i].level_str == 'UnKnown' or (objects[i].pos[-1] < self.min_depth_thres):
                         continue
 
                     if objects[i].trucation > 0.5 or objects[i].occlusion > 2:
@@ -724,9 +722,6 @@ class KITTIDataset(data.Dataset):
                     gt_heading_bin.append(heading_bin)
                     gt_heading_res.append(heading_res)
 
-                    src_size_3d = np.array([objects[i].h, objects[i].w, objects[i].l], dtype=np.float32)
-                    mean_size = self.cls_mean_size[self.cls2id[objects[i].cls_type]]
-                    size_3d = src_size_3d - mean_size
                     s3d = (np.array([objects[i].h, objects[i].w, objects[i].l], dtype=np.float32)
                            - self.cls_mean_size[self.cls2id[objects[i].cls_type]])
                     gt_size_3d.append(s3d)
