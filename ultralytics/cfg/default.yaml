@@ -109,15 +109,15 @@ heading: 1 # (float) 3d heading loss gain
 # Task aligned learning
 tal_topk: 8 # (int) number of assignments per groundtruth for o2m head
 tal_alpha: 0.5 # class assignemnt score exponent
-tal_beta: 0.0 # 2D assignment score exponent
-tal_gamma: 6.0 # 3D assignment score exponent
+tal_beta: 3.0 # 2D assignment score exponent
+tal_gamma: 3.0 # 3D assignment score exponent
 tal_3d: True
 tal_2d: True
 kps_dist_metric: l1
 constrain_anchors: True
 # Training
 htl: False
-close_mixup: 150 # Epochs before the end to stop mixup augmentation
+close_mixup: 0 # Epochs before the end to stop mixup augmentation
 max_depth_threshold: 65
 
 dfl: 1.5 # (float) dfl loss gain
