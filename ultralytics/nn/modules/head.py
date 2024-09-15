@@ -601,17 +601,18 @@ class v10Detect3d(nn.Module):
         self.s3d = self.build_head(self.s3d_in_ch, channels["s3d_c"], 3, self.dsconv, self.deform)
         self.hd = self.build_head(self.hd_in_ch, channels["hd_c"], 24, self.dsconv, self.deform)
         self.dep = self.build_head(self.dep_in_ch, channels["dep_c"], 1, self.dsconv, self.deform)
-        self.dep_un = self.build_head(self.dep_un_in_ch, channels["dep_un_c"], 1, self.dsconv, self.deform)
+        self.dep_un = self.build_head(self.dep_un_in_ch, channels["dep_un_c"], 1, self.dsconv, self.deform, activation=True)
 
         self.o2o_heads = nn.ModuleList(
             [self.cls, self.o2d, self.s2d, self.o3d, self.s3d, self.hd, self.dep, self.dep_un])
         self.o2m_heads = copy.deepcopy(self.o2o_heads)
 
     @staticmethod
-    def build_head(in_channels, mid_channels, output_channels, dsconv, deform):
+    def build_head(in_channels, mid_channels, output_channels, dsconv, deform, activation=False):
         return nn.ModuleList(nn.Sequential(v10Detect3d.build_conv(x, mid_channels, 3, dsconv,  deform=deform),
                                            v10Detect3d.build_conv(mid_channels, mid_channels, 3, dsconv),
-                                           nn.Conv2d(mid_channels, output_channels, 1))
+                                           nn.Conv2d(mid_channels, output_channels, 1),
+                                           nn.ReLU if activation else nn.Identity())
                              for x in in_channels
         )
 
