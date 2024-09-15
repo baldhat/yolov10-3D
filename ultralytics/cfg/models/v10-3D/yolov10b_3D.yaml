@@ -5,6 +5,8 @@ scales: # model compound scaling constants, i.e. 'model=yolov8n.yaml' will call 
   b: [0.67, 1.00, 512]
 dsconv: False
 use_predecessors: False
+detach_predecessors: False
+deform: False
 channels:
   cls_c: 128
   o2d_c: 128
