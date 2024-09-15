@@ -801,8 +801,6 @@ class DDDetectionLoss():
             (self.nc, 2, 2, 2, 3, 24, 1, 1), 1
         ))
 
-        pred_dep_un = 1 / (1 + torch.exp(-pred_dep_un)) # FIXME
-
         # num classes
         pred_scores = pred_scores.permute(0, 2, 1).contiguous()
         # offset 2d (2), size 2d (2) = 4
