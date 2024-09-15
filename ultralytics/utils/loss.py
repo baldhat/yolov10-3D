@@ -801,6 +801,8 @@ class DDDetectionLoss():
             (self.nc, 2, 2, 2, 3, 24, 1, 1), 1
         ))
 
+        pred_dep_un = 1 / (1 + torch.exp(-pred_dep_un)) # FIXME
+
         # num classes
         pred_scores = pred_scores.permute(0, 2, 1).contiguous()
         # offset 2d (2), size 2d (2) = 4
@@ -860,6 +862,7 @@ class DDDetectionLoss():
 
         loss[2:6] = self.compute_box3d_loss(targets_3d, pred_3d, anchor_points, stride_tensor,
                                             fg_mask, target_scores_sum)
+        #kps_loss = self.compute_keypoint_loss()
 
         return loss.sum() * batch_size, loss
 
