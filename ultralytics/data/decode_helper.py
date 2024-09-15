@@ -98,8 +98,7 @@ def decode_preds(preds, calibs, cls_mean_size, im_files, inv_trans, use_camera_d
             dimensions += cls_mean_size[int(cls_id)]
 
             depth = pred_dep[i, j].numpy()
-            sigma = (1 / (1 + torch.exp(-pred_dep_un[i, j]))).item()
-            conf = 1 - min(sigma*sigma, 1)
+            sigma = torch.exp(-pred_dep_un[i, j]).item()
 
             if undo_augment:
                 x3d = pred_center3d[i, j, 0].numpy()
@@ -121,7 +120,7 @@ def decode_preds(preds, calibs, cls_mean_size, im_files, inv_trans, use_camera_d
             alpha = alphas[i, j].item()
             ry = calibs[i].alpha2ry(alpha, x)
 
-            score = scores[i, j].item() * conf
+            score = scores[i, j].item() * sigma
             if score < threshold:
                 continue
 
