@@ -582,7 +582,7 @@ class KITTIDataset(data.Dataset):
                     continue
 
                 # filter inappropriate samples by difficulty
-                if objects[i].level_str == 'UnKnown' or (objects[i].pos[-1] < self.min_depth_thres):
+                if objects[i].level_str == 'UnKnown' or (objects[i].pos[-1] * scale < self.min_depth_thres):
                     continue
 
                 if objects[i].trucation > 0.5 or objects[i].occlusion > 2:
@@ -670,7 +670,7 @@ class KITTIDataset(data.Dataset):
                     if objects[i].cls_type not in self.writelist:
                         continue
 
-                    if objects[i].level_str == 'UnKnown' or (objects[i].pos[-1] < self.min_depth_thres):
+                    if objects[i].level_str == 'UnKnown' or (objects[i].pos[-1] * scale < self.min_depth_thres):
                         continue
 
                     if objects[i].trucation > 0.5 or objects[i].occlusion > 2:
