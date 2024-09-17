@@ -611,8 +611,7 @@ class v10Detect3d(nn.Module):
     def build_head(in_channels, mid_channels, output_channels, dsconv, deform, activation=False):
         return nn.ModuleList(nn.Sequential(v10Detect3d.build_conv(x, mid_channels, 3, dsconv,  deform=deform),
                                            v10Detect3d.build_conv(mid_channels, mid_channels, 3, dsconv),
-                                           nn.Conv2d(mid_channels, output_channels, 1),
-                                           #nn.ReLU() if activation else nn.Identity()
+                                           nn.Conv2d(mid_channels, output_channels, 1)
                                            )
                              for x in in_channels
         )

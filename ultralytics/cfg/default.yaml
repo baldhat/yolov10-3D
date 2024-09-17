@@ -118,8 +118,10 @@ constrain_anchors: True
 # Training
 htl: False
 close_mixup: 0 # Epochs before the end to stop mixup augmentation
-max_depth_threshold: 120
-min_depth_threshold: 2
+max_depth_threshold: 65
+min_depth_threshold: 0.5
+min_scale: 0.9
+max_scale: 2.0
 
 dfl: 1.5 # (float) dfl loss gain
 pose: 12.0 # (float) pose loss gain

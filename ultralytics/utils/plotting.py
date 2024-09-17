@@ -6,6 +6,7 @@ import warnings
 from pathlib import Path
 from typing import Tuple, Dict, Any, Optional, List
 from scipy.spatial.transform import Rotation
+from tqdm import tqdm
 
 
 import cv2
@@ -739,6 +740,18 @@ def plot_labels_3D(labels_: [Object3d], class2id={}, save_dir=Path(""), img_size
 
         plot_labels_2D(boxes2d, classes, class2id, save_dir, img_size, type_)
         _plot_labels_3D(sizes3d, pos3d, occlusions, truncations, levels, save_dir, type_)
+
+def plot_training_depth_dist(dataset, save_dir):
+    print("Plotting training depth distribution...")
+    depths = []
+    for i in range(3):
+        for item in tqdm(dataset, total=len(dataset)):
+            depths.extend(item["depth"].numpy().tolist())
+
+    plt.hist(depths, bins=np.linspace(0, 90, 90))
+    plt.savefig(save_dir / f"training_depth_dist.jpg", dpi=200)
+
+    print("Finished: Plotting training depth distribution.")
 
 def save_one_box(xyxy, im, file=Path("im.jpg"), gain=1.02, pad=10, square=False, BGR=False, save=True):
     """

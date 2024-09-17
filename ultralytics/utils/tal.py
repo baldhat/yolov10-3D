@@ -582,6 +582,9 @@ class TaskAlignedAssigner3d(nn.Module):
             raise RuntimeError("Either 2D or 3D assignment or both has to be selected!")
         # Get topk_metric mask, (b, max_num_obj, h*w)
         mask_topk = self.select_topk_candidates(align_metric, topk_mask=mask_gt.expand(-1, -1, self.topk).bool())
+        if mask_topk.nonzero().shape[0] < mask_gt.nonzero().shape[0] * self.topk:
+            print(f"Could not find enough predictions inside 2D bbox. Expected {mask_gt.nonzero().shape[0] * self.topk}, got {mask_gt.nonzero().shape[0] * self.topk}")
+
         # Merge all mask to a final mask, (b, max_num_obj, h*w)
         if self.constrain_anchors:
             mask_gt = mask_in_gts * mask_gt

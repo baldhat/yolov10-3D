@@ -441,6 +441,8 @@ class KITTIDataset(data.Dataset):
         self.random_flip = args.fliplr
         self.random_crop = args.random_crop
         self.scale = args.scale
+        self.min_scale = args.min_scale
+        self.max_scale = args.max_scale
         self.shift = args.translate
         self.mixup = args.mixup
         self.max_depth_threshold = args.max_depth_threshold
@@ -506,7 +508,10 @@ class KITTIDataset(data.Dataset):
 
             if np.random.random() < self.random_crop:
                 random_crop_flag = True
-                scale = np.clip(np.random.randn() * self.scale + 1, 1 - self.scale, 1 + self.scale)
+                #scale = np.clip(np.random.randn() * self.scale + 1, 1 - self.scale, 1 + self.scale)
+                scale_variance = (self.max_scale - self.min_scale) / 2
+                scale_mean = (self.max_scale + self.min_scale) / 2
+                scale = np.clip(np.random.randn() * scale_variance + scale_mean, self.min_scale, self.max_scale)
                 crop_size = img_size * scale
                 shift_0 = img_size[0] * np.clip(np.random.randn() * self.shift, -2 * self.shift, 2 * self.shift)
                 shift_1 = img_size[1] * np.clip(np.random.randn() * self.shift, -2 * self.shift, 2 * self.shift)

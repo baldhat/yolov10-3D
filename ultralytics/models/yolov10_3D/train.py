@@ -7,7 +7,7 @@ from copy import copy
 from ultralytics.utils import RANK
 from ultralytics.data.dataset import KITTIDataset
 from ultralytics.utils.torch_utils import de_parallel
-from ultralytics.utils.plotting import plot_labels_3D, KITTIVisualizer, plot_images
+from ultralytics.utils.plotting import plot_labels_3D, KITTIVisualizer, plot_images, plot_training_depth_dist
 import numpy as np
 
 class YOLOv10_3DDetectionTrainer(DetectionTrainer):
@@ -51,6 +51,7 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
         """Create a labeled training plot of the YOLO model."""
         labels = self.train_loader.dataset.labels
         plot_labels_3D(labels, class2id=self.train_loader.dataset.cls2id, save_dir=self.save_dir, on_plot=self.on_plot)
+        plot_training_depth_dist(self.train_loader.dataset, save_dir=self.save_dir)
 
     def plot_training_samples(self, batch, ni):
         plot_images(
