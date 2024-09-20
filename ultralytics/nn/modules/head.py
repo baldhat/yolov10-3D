@@ -551,7 +551,7 @@ class v10Detect3d(nn.Module):
     anchors = torch.empty(0)  # init
     strides = torch.empty(0)  # init
 
-    def __init__(self, nc=80, ch=(), dsconv=False, channels=None, use_predecessors=False, detach_predecessors=True, deform=False):
+    def __init__(self, nc=80, ch=(), dsconv=False, channels=None, use_predecessors=False, detach_predecessors=True, deform=False, common_head=False):
         super().__init__()
         assert (channels is not None)
         self.nc = nc  # number of classes
@@ -570,6 +570,7 @@ class v10Detect3d(nn.Module):
         self.no = sum(self.output_channels.values())
         self.stride = torch.zeros(self.nl)  # strides computed during build
         self.deform = deform
+        self.common_head = common_head
 
         self.use_predecessors = use_predecessors
         self.detach_predecessors = detach_predecessors
@@ -594,14 +595,25 @@ class v10Detect3d(nn.Module):
         self.dep_in_ch = [ch_ + self.sum_predecessor_chs(self.predecessors["dep"]) if self.use_predecessors else ch_ for ch_ in ch]
         self.dep_un_in_ch = [ch_ + self.sum_predecessor_chs(self.predecessors["dep_un"]) if self.use_predecessors else ch_ for ch_ in ch]
 
-        self.cls = self.build_head(self.cls_in_ch, channels["cls_c"], self.nc, self.dsconv, self.deform)
-        self.o2d = self.build_head(self.o2d_in_ch, channels["o2d_c"], 2, self.dsconv, self.deform)
-        self.s2d = self.build_head(self.s2d_in_ch, channels["s2d_c"], 2, self.dsconv, self.deform)
-        self.o3d = self.build_head(self.o3d_in_ch, channels["o3d_c"], 2, self.dsconv, self.deform)
-        self.s3d = self.build_head(self.s3d_in_ch, channels["s3d_c"], 3, self.dsconv, self.deform)
-        self.hd = self.build_head(self.hd_in_ch, channels["hd_c"], 24, self.dsconv, self.deform)
-        self.dep = self.build_head(self.dep_in_ch, channels["dep_c"], 1, self.dsconv, self.deform)
-        self.dep_un = self.build_head(self.dep_un_in_ch, channels["dep_un_c"], 1, self.dsconv, self.deform, activation=False)
+        if self.common_head:
+            self.common = nn.ModuleList(v10Detect3d.build_conv(ch_, ch_, 3, dsconv) for ch_ in ch)
+            self.cls = self.build_small_head(ch, channels["cls_c"], self.nc, self.dsconv)
+            self.o2d = self.build_small_head(ch, channels["o2d_c"], 2, self.dsconv)
+            self.s2d = self.build_small_head(ch, channels["s2d_c"], 2, self.dsconv)
+            self.o3d = self.build_small_head(ch, channels["o3d_c"], 2, self.dsconv)
+            self.s3d = self.build_small_head(ch, channels["s3d_c"], 3, self.dsconv)
+            self.hd = self.build_small_head(ch, channels["hd_c"], 24, self.dsconv)
+            self.dep = self.build_small_head(ch, channels["dep_c"], 1, self.dsconv)
+            self.dep_un = self.build_small_head(ch, channels["dep_un_c"], 1, self.dsconv)
+        else:
+            self.cls = self.build_head(self.cls_in_ch, channels["cls_c"], self.nc, self.dsconv, self.deform)
+            self.o2d = self.build_head(self.o2d_in_ch, channels["o2d_c"], 2, self.dsconv, self.deform)
+            self.s2d = self.build_head(self.s2d_in_ch, channels["s2d_c"], 2, self.dsconv, self.deform)
+            self.o3d = self.build_head(self.o3d_in_ch, channels["o3d_c"], 2, self.dsconv, self.deform)
+            self.s3d = self.build_head(self.s3d_in_ch, channels["s3d_c"], 3, self.dsconv, self.deform)
+            self.hd = self.build_head(self.hd_in_ch, channels["hd_c"], 24, self.dsconv, self.deform)
+            self.dep = self.build_head(self.dep_in_ch, channels["dep_c"], 1, self.dsconv, self.deform)
+            self.dep_un = self.build_head(self.dep_un_in_ch, channels["dep_un_c"], 1, self.dsconv, self.deform, activation=False)
 
         self.o2o_heads = nn.ModuleList(
             [self.cls, self.o2d, self.s2d, self.o3d, self.s3d, self.hd, self.dep, self.dep_un])
@@ -617,11 +629,39 @@ class v10Detect3d(nn.Module):
         )
 
     @staticmethod
+    def build_small_head(in_channels, mid_channels, output_channels, dsconv):
+        return nn.ModuleList(nn.Sequential(v10Detect3d.build_conv(x, mid_channels, 3, dsconv),
+                                           nn.Conv2d(mid_channels, output_channels, 1)
+                                           )
+                             for x in in_channels
+         )
+
+    @staticmethod
     def build_conv(in_channels, out_channels, kernel_size, dsconv, deform=False):
         if dsconv:
             return nn.Sequential(Conv(in_channels, in_channels, kernel_size, g=in_channels, deform=deform), Conv(in_channels, out_channels, 1))
         else:
             return Conv(in_channels, out_channels, kernel_size,  deform=deform)
+
+    def forward_feat(self, x, heads):
+        y = []
+        head_names = list(self.output_channels.keys())
+        for i in range(self.nl):
+            outputs = {}
+            if self.common_head:
+                x[i] = self.common[i](x[i])
+            for j, module in enumerate(heads):
+                if self.use_predecessors and len(self.predecessors[head_names[j]]) > 0:
+                    inputs = [x[i]]
+                    predecessors = [outputs[key] if key != "dep"
+                                                else outputs[key] / self.dep_norm
+                                   for key in self.predecessors[head_names[j]]]
+                    inputs.extend([predecessor.detach() for predecessor in predecessors])
+                    outputs[head_names[j]] = module[i](torch.cat(inputs, dim=1))
+                else:
+                    outputs[head_names[j]] = module[i](x[i])
+            y.append(torch.cat(list(outputs.values()), dim=1))
+        return y
 
     def sum_predecessor_chs(self, predecessors):
         return sum([self.output_channels[predecessor] for predecessor in predecessors]) if len(predecessors) > 0 else 0
@@ -669,24 +709,6 @@ class v10Detect3d(nn.Module):
 
         y = preds
         return y if self.export else (y, x)
-
-    def forward_feat(self, x, heads):
-        y = []
-        head_names = list(self.output_channels.keys())
-        for i in range(self.nl):
-            outputs = {}
-            for j, module in enumerate(heads):
-                if self.use_predecessors and len(self.predecessors[head_names[j]]) > 0:
-                    inputs = [x[i]]
-                    predecessors = [outputs[key] if key != "dep"
-                                                else outputs[key] / self.dep_norm
-                                   for key in self.predecessors[head_names[j]]]
-                    inputs.extend([predecessor.detach() for predecessor in predecessors])
-                    outputs[head_names[j]] = module[i](torch.cat(inputs, dim=1))
-                else:
-                    outputs[head_names[j]] = module[i](x[i])
-            y.append(torch.cat(list(outputs.values()), dim=1))
-        return y
 
 
     def _forward(self, x):
