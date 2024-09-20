@@ -2,12 +2,16 @@
 
 import torch
 import torch.nn as nn
+from matplotlib import pyplot as plt
+from sklearn.cluster import mean_shift
 
 from .checks import check_version
 from .metrics import bbox_iou, probiou
 from .ops import xywhr2xyxyxyxy
 
 import numpy as np
+
+import sklearn.linear_model as lm
 
 TORCH_1_10 = check_version(torch.__version__, "1.10.0")
 
@@ -379,6 +383,11 @@ class TaskAlignedAssigner3d(nn.Module):
         self.kps_dist_metric = kps_dist_metric
         self.constrain_anchors = constrain_anchors
 
+        self.mean_overlap = []
+        self.mean_align_metric = []
+        self.dist = []
+        self.missing = 0
+
     @torch.no_grad()
     def forward(self, pd_scores, pd_bboxes, pd_3d, anc_points, gts, mask_gt, stride_tensor, calibs, mean_sizes):
         """
@@ -582,15 +591,50 @@ class TaskAlignedAssigner3d(nn.Module):
             raise RuntimeError("Either 2D or 3D assignment or both has to be selected!")
         # Get topk_metric mask, (b, max_num_obj, h*w)
         mask_topk = self.select_topk_candidates(align_metric, topk_mask=mask_gt.expand(-1, -1, self.topk).bool())
-        if mask_topk.nonzero().shape[0] < mask_gt.nonzero().shape[0] * self.topk:
-            print(f"Could not find enough predictions inside 2D bbox. Expected {mask_gt.nonzero().shape[0] * self.topk}, got {mask_gt.nonzero().shape[0] * self.topk}")
 
         # Merge all mask to a final mask, (b, max_num_obj, h*w)
         if self.constrain_anchors:
-            mask_gt = mask_in_gts * mask_gt
-        mask_pos = mask_topk * mask_gt
+            mask_gt_ = mask_in_gts * mask_gt
+        else:
+            mask_gt_ = mask_gt
+        mask_pos = mask_topk * mask_gt_
 
+        '''
+        if mask_pos.nonzero().shape[0] < mask_gt.nonzero().shape[0] * self.topk:
+            self.missing += (mask_gt.nonzero().shape[0] * self.topk - mask_pos.nonzero().shape[0])
+        
+        if self.topk > 1:
+            self.plot_overlaps_vs_dist(overlaps[mask_topk.bool()], align_metric[mask_topk.bool()], gt_keypoints[mask_gt.squeeze(-1).bool()])
+        '''
         return mask_pos, align_metric, overlaps
+
+    def plot_overlaps_vs_dist(self, overlaps, align_metric, gt_keypoints):
+        for i, gt_kp in enumerate(gt_keypoints):
+            self.dist.append(gt_kp[:, 2].mean().item())
+            self.mean_overlap.append(overlaps.reshape(-1, self.topk)[i].mean().item())
+            self.mean_align_metric.append(align_metric.reshape(-1, self.topk)[i].mean().item())
+        if len(self.dist) > 19000:
+            fig, ax = plt.subplots(2, 1, figsize=(24, 24))
+            ax = ax.ravel()
+            ax[0].scatter(self.dist, self.mean_overlap)
+            ax[1].scatter(self.dist, self.mean_align_metric)
+            overlap_model = lm.LinearRegression()
+            overlap_model.fit(np.array(self.dist).reshape(-1, 1), np.array(self.mean_overlap).reshape(-1, 1))
+            overlap_line = np.array([0, 65]),np.array([overlap_model.intercept_, overlap_model.intercept_[0] + overlap_model.coef_[0]*65])
+            ax[0].plot(overlap_line[0], overlap_line[1], color='red')
+            ax[0].text(0, 0, f"Coefficient: {overlap_model.coef_[0]}")
+            align_model = lm.LinearRegression()
+            align_model.fit(np.array(self.dist).reshape(-1, 1), np.array(self.mean_align_metric).reshape(-1, 1))
+            metric_line = np.array([0, 65]), np.array(
+                [align_model.intercept_, align_model.intercept_[0] + align_model.coef_[0] * 65])
+            ax[1].plot(metric_line[0], metric_line[1], color='red')
+            ax[1].text(0, 0, f"Coefficient: {align_model.coef_[0]}")
+            plt.show()
+            print("Number of missing assignments during last interval:", self.missing)
+            self.missing = 0
+            self.dist = []
+            self.mean_overlap = []
+            self.mean_align_metric = []
 
     def get_box_metrics(self, pd_scores, pd_bboxes, gt_labels, gt_bboxes, mask_gt):
         """Compute alignment metric given predicted and ground truth bounding boxes."""

@@ -110,9 +110,9 @@ heading: 1 # (float) 3d heading loss gain
 tal_topk: 8 # (int) number of assignments per groundtruth for o2m head
 tal_alpha: 0.5 # class assignemnt score exponent
 tal_beta: 3.0 # 2D assignment score exponent
-tal_gamma: 3.0 # 3D assignment score exponent
+tal_gamma: 6.0 # 3D assignment score exponent
 tal_3d: True
-tal_2d: True
+tal_2d: False
 kps_dist_metric: l1
 constrain_anchors: True
 # Training
