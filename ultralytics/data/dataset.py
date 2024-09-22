@@ -623,9 +623,6 @@ class KITTIDataset(data.Dataset):
                 # encoding depth
                 depth = objects[i].pos[-1]
                 depth *= scale
-                # encoding depth
-                depth = objects[i].pos[-1]
-                depth *= scale
                 if depth > self.max_depth_threshold:
                     continue
 
@@ -796,3 +793,13 @@ class KITTIDataset(data.Dataset):
             new_batch["batch_idx"][j] += j  # add target image index for build_targets()
         new_batch["batch_idx"] = torch.cat(new_batch["batch_idx"], 0)
         return new_batch
+    
+
+class WaymoDataset(data.Dataset):
+    def __init__(self, img_path, mode, args):
+        self.args = args
+        self.path = img_path
+        self.mode = mode
+    
+    def __getitem__(self, i):
+        pass

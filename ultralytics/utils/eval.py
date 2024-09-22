@@ -246,7 +246,7 @@ def inter(rbbox1, rbbox2):
 
 
 @cuda.jit('(float32[:], float32[:], int32)', device=True, inline=True)
-def devRotateIoUEval(rbox1, rbox2, criterion=-1):
+,def devRotateIoUEval(rbox1, rbox2, criterion=-1):
     area1 = rbox1[2] * rbox1[3]
     area2 = rbox2[2] * rbox2[3]
     area_inter = inter(rbox1, rbox2)
