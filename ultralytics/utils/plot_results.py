@@ -34,7 +34,7 @@ def main():
         df = pd.read_csv(fullpath, header=0)
         df = df.rename(columns=lambda x: x.strip())
         x = df["epoch"]
-        y = df["metrics/Car3D@0.7"]
+        y = df["metrics/3D"]
         ax.plot(x, y, label=f)
         annot_max(x, y, ax)
     ax.legend(loc="upper left")

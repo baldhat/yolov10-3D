@@ -9,5 +9,5 @@ test: ImageSets/test.txt
 # Classes
 names:
   0: Car
-  1: Pedestrian #FIXME
+  1: Pedestrian
   2: Cyclist

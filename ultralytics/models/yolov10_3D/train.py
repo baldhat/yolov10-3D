@@ -5,7 +5,8 @@ from ultralytics.models.yolov10 import YOLOv10
 from ultralytics.nn.modules.head import v10Detect3d
 from copy import copy
 from ultralytics.utils import RANK
-from ultralytics.data.dataset import KITTIDataset, WaymoDataset
+from ultralytics.data.datasets.kitti import KITTIDataset
+from ultralytics.data.datasets.waymo import WaymoDataset
 from ultralytics.utils.torch_utils import de_parallel
 from ultralytics.utils.plotting import plot_labels_3D, KITTIVisualizer, plot_images, plot_training_depth_dist
 import numpy as np
@@ -17,9 +18,10 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
         self.visualizer = KITTIVisualizer()
 
     def build_dataset(self, img_path, mode="train", batch=None):
-        if self.args.data == "kitti.yaml":
+        dataset_yaml = self.args.data.split("/")[-1]
+        if dataset_yaml == "kitti.yaml":
             return KITTIDataset(img_path, mode, self.args)
-        elif self.args.data == "waymo.yaml":
+        elif dataset_yaml == "waymo.yaml":
             return WaymoDataset(img_path, mode, self.args)
         else:
             raise NotImplemented("Yolov10_3D only support Kitti and Waymo datasets")
@@ -55,7 +57,7 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
     def plot_training_labels(self):
         """Create a labeled training plot of the YOLO model."""
         labels = self.train_loader.dataset.labels
-        plot_labels_3D(labels, class2id=self.train_loader.dataset.cls2id, save_dir=self.save_dir, on_plot=self.on_plot)
+        plot_labels_3D(labels, class2id=self.train_loader.dataset.cls2train_id, save_dir=self.save_dir, on_plot=self.on_plot)
         plot_training_depth_dist(self.train_loader.dataset, save_dir=self.save_dir)
 
     def plot_training_samples(self, batch, ni):

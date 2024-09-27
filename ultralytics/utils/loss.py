@@ -844,8 +844,11 @@ class DDDetectionLoss():
             calibs,
             mean_sizes
         )
-        (_, target_scores, target_center_2d, target_size_2d, target_center_3d,
-         target_size_3d, target_depth, target_heading_bin, target_heading_res) = targets
+        try:
+            (_, target_scores, target_center_2d, target_size_2d, target_center_3d,
+             target_size_3d, target_depth, target_heading_bin, target_heading_res) = targets
+        except Exception as e:
+            return loss.sum() * batch_size, loss
 
         target_scores_sum = max(target_scores.sum(), 1)
 
@@ -935,7 +938,7 @@ class DDDetectionLoss():
         color = {8: (255, 255, 0), 16: (0, 255, 255), 32: (255, 0, 255)}
         mean = 0
         std = 1
-        fig, axes = plt.subplots(2, 2, figsize=(36, 12), gridspec_kw={'wspace': 0, 'hspace': 0},
+        fig, axes = plt.subplots(2, 2, figsize=(18, 12), gridspec_kw={'wspace': 0, 'hspace': 0},
                                  constrained_layout=True)
         for i, ax in enumerate(np.ravel(axes)):
             img = batch["img"][i].detach().cpu().numpy().transpose(1, 2, 0).copy()
@@ -972,7 +975,7 @@ class DDDetectionLoss():
                     4, 1, 5, 0]  # front
         color_none_bottom, color_bottom = ((255, 0, 0), (255, 0, 0))
         color_gt_none_bot, color_gt_bot = ((0, 255, 0), (0, 0, 255))
-        fig, axes = plt.subplots(2, 2, figsize=(36, 12), gridspec_kw={'wspace': 0, 'hspace': 0},
+        fig, axes = plt.subplots(2, 2, figsize=(18, 12), gridspec_kw={'wspace': 0, 'hspace': 0},
                                  constrained_layout=True)
         for i, ax in enumerate(np.ravel(axes)):
             img = batch["img"][i].detach().cpu().numpy().transpose(1, 2, 0).copy()

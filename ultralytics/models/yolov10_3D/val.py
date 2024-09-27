@@ -1,18 +1,14 @@
 from ultralytics.models.yolo.detect import DetectionValidator
 from ultralytics.utils import ops
-from ultralytics.data.dataset import KITTIDataset
+from ultralytics.data.datasets.kitti import KITTIDataset
+from ultralytics.data.datasets.waymo import WaymoDataset
 from ultralytics.utils.plotting import KITTIVisualizer
-from ultralytics.data.decode_helper import decode_batch, decode_preds
 from ultralytics.utils.metrics import box_iou
-from ultralytics.utils.eval import eval_from_scrach
 
 import torch
 import numpy as np
 from pathlib import Path
-import os
 from sklearn.neighbors import KernelDensity
-
-
 
 class YOLOv10_3DDetectionValidator(DetectionValidator):
     def __init__(self, *args, **kwargs):
@@ -22,7 +18,13 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
         self.results = {}
 
     def build_dataset(self, img_path, mode="val", batch=None):
-        return KITTIDataset(img_path, mode, self.args)
+        dataset_yaml = self.args.data.split("/")[-1]
+        if dataset_yaml == "kitti.yaml":
+            return KITTIDataset(img_path, mode, self.args)
+        elif dataset_yaml == "waymo.yaml":
+            return WaymoDataset(img_path, mode, self.args)
+        else:
+            raise NotImplemented("Yolov10_3D only supports Kitti and Waymo datasets")
 
     def postprocess(self, preds):
         if isinstance(preds, dict):
@@ -151,34 +153,13 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
             stats["target_cls"].astype(int), minlength=self.nc
         )  # number of targets per class
 
-        self.save_results(self.results, output_dir=self.save_dir)
-        self.results = {}
+
         try:
-            result = eval_from_scrach(
-                self.dataloader.dataset.label_dir,
-                os.path.join(self.save_dir, 'preds'),
-                ap_mode=40)
-            self.metrics.car3d = result
-            self.metrics.carAP3d = result["3d@0.70"][1]
-        except:
-            print("Failed to evaluate mAP")
+            self.metrics.metric3d = self.dataloader.dataset.get_stats(self.results, self.save_dir)
+            self.results = {}
+        except Exception as e:
+            print(f"Failed to evaluate mAP: {e}")
         return self.metrics.results_dict
-
-    def save_results(self, results, output_dir='./outputs'):
-        output_dir = os.path.join(output_dir, 'preds')
-        os.makedirs(output_dir, exist_ok=True)
-        for img_file in results.keys():
-            out_path = os.path.join(output_dir, img_file)
-            f = open(out_path, 'w')
-            for i in range(len(results[img_file])):
-                class_name = self.dataloader.dataset.class_name[int(results[img_file][i][0])]
-                f.write('{} 0.0 0'.format(class_name))
-                for j in range(1, len(results[img_file][i])):
-                    f.write(' {:.2f}'.format(results[img_file][i][j]))
-                f.write('\n')
-            f.close()
-
-
 
     def _process_batch(self, detections, gt_bboxes, gt_cls):
         """
@@ -199,14 +180,13 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
     def _prepare_batch(self, batch):
         infos_ = self.collate_infos(batch)
         calibs = [self.dataloader.dataset.get_calib(info) for info in infos_['img_id']]
-        return decode_batch(batch, calibs, self.dataloader.dataset.cls_mean_size, use_camera_dis=self.dataloader.dataset.use_camera_dis)
+        return self.dataloader.dataset.decode_batch_eval(batch, calibs)
 
     def _prepare_preds(self, preds, batch):
         infos_ = self.collate_infos(batch)
         calibs = [self.dataloader.dataset.get_calib(info) for info in infos_['img_id']]
         inv_trans = [inv for inv in infos_["trans_inv"]]
-        return decode_preds(preds, calibs, self.dataloader.dataset.cls_mean_size, batch["im_file"], inv_trans,
-                            use_camera_dis=self.dataloader.dataset.use_camera_dis)
+        return self.dataloader.dataset.decode_preds_eval(preds, calibs, batch["im_file"], batch["ratio_pad"], inv_trans)
 
     def plot_predictions(self, batch, preds, ni):
         self.visualizer.plot_preds(

@@ -103,7 +103,7 @@ class Run:
 
     def get_best_property(self):
         return {
-            "number": float(np.max(self.results["metrics/Car3D@0.7"]))
+            "number": float(np.max(self.results["metrics/3D"]))
         }
 
     @staticmethod
@@ -185,7 +185,7 @@ class Run:
     def get_plot(self):
         fig, ax = plt.subplots(1, 1, figsize=(16, 16))
         x = self.results["epoch"]
-        y = self.results["metrics/Car3D@0.7"]
+        y = self.results["metrics/3D"]
         ax.plot(x, y)
         self.annot_max(x, y, ax)
         fig.canvas.draw()

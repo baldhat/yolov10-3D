@@ -22,8 +22,7 @@ import seaborn as sn
 from ultralytics.utils import LOGGER, TryExcept, ops, plt_settings, threaded
 from .checks import check_font, check_version, is_ascii
 from .files import increment_path
-from ultralytics.data.kitti_utils import Object3d
-from ultralytics.data.decode_helper import decode_batch, decode_preds
+from ultralytics.data.datasets.kitti_utils import Object3d
 from ultralytics.data.raycasting import project_to_image
 
 
@@ -1226,19 +1225,19 @@ def get_transform(translation: np.ndarray, rotation: np.ndarray) -> np.ndarray:
 
 class KITTIVisualizer():
 
-    def __init__(self, classes=["Pedestrian", "Car", "Cyclist"]):
+    def __init__(self, classes=["Car", "Pedestrian", "Cyclist"]):
         self.classes = classes
         self.max_imgs = 9
 
     def plot_batch(self, batch, dataset, filename):
         infos_ = self.collate_infos(batch)
         calibs = [dataset.get_calib(info) for info in infos_['img_id']]
-        targets = decode_batch(batch, calibs, dataset.cls_mean_size, use_camera_dis=dataset.use_camera_dis, undo_augment=False)
+        targets = dataset.decode_batch(batch, calibs, undo_augment=False)
         images, infos = batch["img"], batch["info"]
 
         plt.clf()
         fig, ax = plt.subplots(math.ceil(self.max_imgs**0.5), math.ceil(self.max_imgs**0.5),
-                               figsize=(36, 12), gridspec_kw = {'wspace':0, 'hspace':0}, constrained_layout=True)
+                               figsize=(18, 12), gridspec_kw = {'wspace':0, 'hspace':0}, constrained_layout=True)
         ax = ax.ravel()
 
         for i, (image, calib, (img_id, result), info) in enumerate(zip(images, calibs, targets.items(), infos)):
@@ -1269,10 +1268,9 @@ class KITTIVisualizer():
     def plot_preds(self, batch, preds, dataset, paths, fname, names, threshold=0.1):
         infos_ = self.collate_infos(batch)
         calibs = [dataset.get_calib(info) for info in infos_['img_id']]
-        preds = decode_preds(preds, calibs, dataset.cls_mean_size, batch["im_file"], infos_['trans_inv'],
-                             use_camera_dis=dataset.use_camera_dis, threshold=threshold, undo_augment=False)
-        targets = decode_batch(batch, calibs, dataset.cls_mean_size, use_camera_dis=dataset.use_camera_dis,
-                               undo_augment=False)
+        preds = dataset.decode_preds(preds, calibs,  batch["im_file"], batch["ratio_pad"], infos_['trans_inv'],
+                             threshold=threshold, undo_augment=False)
+        targets = dataset.decode_batch(batch, calibs, undo_augment=False)
         images, infos = batch["img"], batch["info"]
 
         plt.clf()
@@ -1322,10 +1320,9 @@ class KITTIVisualizer():
     def plot_bev(self, batch, preds, dataset, paths, fname, names, threshold=0.1):
         infos_ = self.collate_infos(batch)
         calibs = [dataset.get_calib(info) for info in infos_['img_id']]
-        preds = decode_preds(preds, calibs, dataset.cls_mean_size, batch["im_file"], infos_['trans_inv'],
-                             use_camera_dis=dataset.use_camera_dis, threshold=threshold, undo_augment=False)
-        targets = decode_batch(batch, calibs, dataset.cls_mean_size, use_camera_dis=dataset.use_camera_dis,
-                               undo_augment=False)
+        preds = dataset.decode_preds(preds, calibs, batch["im_file"], batch["ratio_pad"],
+                                     infos_['trans_inv'], threshold=threshold, undo_augment=False)
+        targets = dataset.decode_batch(batch, calibs, undo_augment=False)
         images, infos = batch["img"], batch["info"]
 
         plt.clf()
