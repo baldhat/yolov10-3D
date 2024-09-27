@@ -399,7 +399,7 @@ class WaymoDataset(data.Dataset):
 
         python = os.path.join(Path.home(), "anaconda3/envs/py36_waymo_tf/bin/python")
         if not os.path.exists(python):
-            python = os.path.join(Path.home(), "miniconda/envs/py36_waymo_tf/bin/python")
+            python = os.path.join(Path.home(), "miniconda3/envs/py36_waymo_tf/bin/python")
         command = f"{python} -u ultralytics/data/datasets/waymo_eval.py --iou 0.7 --pred {file_path}"
         lines = subprocess.check_output(command, shell= True, text= True, env={})
 
