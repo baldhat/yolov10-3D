@@ -38,9 +38,9 @@ class WaymoDataset(data.Dataset):
         self.imgs = {img['id']: img for img in sorted(self.raw_split['images'], key=lambda img: img['id'])}
         self.idx_to_img_id = {idx: img_id for idx, img_id in enumerate(self.imgs)}
 
-        self.cls2data_id = {"Car": 1, "Pedestrian": 2, "Cyclist": 3}
+        self.cls2data_id = {"Sign": 0, "Car": 1, "Pedestrian": 2, "Cyclist": 3}
         self.cls2train_id = {"Car": 0, "Pedestrian": 1, "Cyclist": 2}
-        self.data_id2cls = {1: "Car", 2: "Pedestrian", 3: "Cyclist"}
+        self.data_id2cls = {0: "Sign", 1: "Car", 2: "Pedestrian", 3: "Cyclist"}
         self.train_id2cls = {0: "Car", 1: "Pedestrian", 2: "Cyclist"}
 
         self.anns_by_img = defaultdict(list)
@@ -397,11 +397,14 @@ class WaymoDataset(data.Dataset):
                 "gt": gt_annos
             }, f)
 
-        command = os.path.join(Path.home(), f"anaconda3/envs/py36_waymo_tf/bin/python -u ultralytics/data/datasets/waymo_eval.py --iou 0.7 --pred {file_path}")
+        python = os.path.join(Path.home(), "anaconda3/envs/py36_waymo_tf/bin/python")
+        if not os.path.exists(python):
+            python = os.path.join(Path.home(), "miniconda/envs/py36_waymo_tf/bin/python")
+        command = f"{python} -u ultralytics/data/datasets/waymo_eval.py --iou 0.7 --pred {file_path}"
         lines = subprocess.check_output(command, shell= True, text= True, env={})
 
         print(lines)
-        metric3d = float(lines[5].split("|")[2].strip().split(" ")[0])
+        metric3d = float(lines.split("\n")[5].split("|")[2].strip().split(" ")[0])
         return metric3d
 
     def decode_preds_eval(self, preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=True, threshold=0.001):
