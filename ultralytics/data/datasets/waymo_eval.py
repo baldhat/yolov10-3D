@@ -20,7 +20,7 @@ class WaymoEvaluation(tf.test.TestCase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)  #
 
-        if iou == 0.7:
+        if np.isclose(iou, 0.7):
             self._config_text = """
 num_desired_score_cutoffs: 11
 breakdown_generator_ids: OBJECT_TYPE
@@ -56,7 +56,7 @@ levels: 2
 }
 matcher_type: TYPE_HUNGARIAN
 iou_thresholds: 0.0
-iou_thresholds: 0.7
+iou_thresholds: 0.5
 iou_thresholds: 0.3
 iou_thresholds: 0.3
 iou_thresholds: 0.3

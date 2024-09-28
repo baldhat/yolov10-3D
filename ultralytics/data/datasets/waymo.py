@@ -38,9 +38,9 @@ class WaymoDataset(data.Dataset):
         self.imgs = {img['id']: img for img in sorted(self.raw_split['images'], key=lambda img: img['id'])}
         self.idx_to_img_id = {idx: img_id for idx, img_id in enumerate(self.imgs)}
 
-        self.cls2data_id = {"Sign": 0, "Car": 1, "Pedestrian": 2, "Cyclist": 3}
+        self.cls2data_id = {"unknown": 0, "Car": 1, "Pedestrian": 2, "Sign": 3, "Cyclist": 4}
         self.cls2train_id = {"Car": 0, "Pedestrian": 1, "Cyclist": 2}
-        self.data_id2cls = {0: "Sign", 1: "Car", 2: "Pedestrian", 3: "Cyclist"}
+        self.data_id2cls = {0: "unknown", 1: "Car", 2: "Pedestrian", 3: "Sign", 4: "Cyclist"}
         self.train_id2cls = {0: "Car", 1: "Pedestrian", 2: "Cyclist"}
 
         self.anns_by_img = defaultdict(list)
@@ -362,9 +362,9 @@ class WaymoDataset(data.Dataset):
             frame_id = int(key.split(".")[0])
 
             for pred in results[key]:
-                # FIXME: Filter by car only?
                 cls = self.cls2data_id[self.train_id2cls[int(pred[0])]]
-                dim = pred[6:9]
+                dim = pred[6:9][::-1] # h,w,l -> l,w,h
+                #dim = pred[6:9] # has to be length, width, height according to https://github.com/waymo-research/waymo-open-dataset/blob/master/src/waymo_open_dataset/metrics/python/detection_metrics.py
                 location = pred[9:12]
                 ry = [pred[12]]
                 score = float(pred[13])
@@ -378,8 +378,9 @@ class WaymoDataset(data.Dataset):
                 dim = gt["dim"]
                 location = gt["translation"]
                 ry = [gt["rotation_y"]]
-                score = 1.0
-                gt_annos["bbox"].append(location + dim + ry)
+                score = "1.0"
+                gt_annos["bbox"].append(location + dim[::-1] + ry) # h,w,l -> l,w,h
+                #gt_annos["bbox"].append(location + dim + ry)  FIXME
                 gt_annos["type"].append(cls)
                 gt_annos["frame_id"].append(frame_id)
                 gt_annos["score"].append(score)
@@ -482,7 +483,7 @@ class WaymoDataset(data.Dataset):
 
                 bbox_ = (bbox[i, j].numpy() / np.array([ratio_pad[i][0, 0], ratio_pad[i][0, 1], ratio_pad[i][0, 0],
                                                         ratio_pad[i]
-                                                            [0, 1]])).tolist()  # TODO fixme? Shouldn't this be inverse transform?
+                                                            [0, 1]])).tolist()
                 x = (bbox_[0] + bbox_[2]) / 2
 
                 dimensions = pred_s3d[i, j].numpy()
