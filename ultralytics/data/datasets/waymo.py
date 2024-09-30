@@ -38,9 +38,9 @@ class WaymoDataset(data.Dataset):
         self.imgs = {img['id']: img for img in sorted(self.raw_split['images'], key=lambda img: img['id'])}
         self.idx_to_img_id = {idx: img_id for idx, img_id in enumerate(self.imgs)}
 
-        self.cls2data_id = {"unknown": 0, "Car": 1, "Pedestrian": 2, "Sign": 3, "Cyclist": 4}
+        self.cls2eval_id = {"unknown": 0, "Car": 1, "Pedestrian": 2, "Sign": 3, "Cyclist": 4}
         self.cls2train_id = {"Car": 0, "Pedestrian": 1, "Cyclist": 2}
-        self.data_id2cls = {0: "unknown", 1: "Car", 2: "Pedestrian", 3: "Sign", 4: "Cyclist"}
+        self.data_id2cls = {0: "unknown", 1: "Car", 2: "Pedestrian", 3: "Cyclist"}
         self.train_id2cls = {0: "Car", 1: "Pedestrian", 2: "Cyclist"}
 
         self.anns_by_img = defaultdict(list)
@@ -162,7 +162,6 @@ class WaymoDataset(data.Dataset):
                             data=tuple(trans_inv.reshape(-1).tolist()),
                             resample=Image.BILINEAR)
 
-        coord_range = np.array([center - crop_size / 2, center + crop_size / 2]).astype(np.float32)
         # image encoding
         img = np.array(img).astype(np.float32) / 255.0
         img = img.transpose(2, 0, 1)  # C * H * W
@@ -362,7 +361,7 @@ class WaymoDataset(data.Dataset):
             frame_id = int(key.split(".")[0])
 
             for pred in results[key]:
-                cls = self.cls2data_id[self.train_id2cls[int(pred[0])]]
+                cls = self.cls2eval_id[self.train_id2cls[int(pred[0])]]
                 dim = pred[6:9][::-1] # h,w,l -> l,w,h
                 #dim = pred[6:9] # has to be length, width, height according to https://github.com/waymo-research/waymo-open-dataset/blob/master/src/waymo_open_dataset/metrics/python/detection_metrics.py
                 location = pred[9:12]
@@ -374,7 +373,7 @@ class WaymoDataset(data.Dataset):
                 pred_annos["score"].append(score)
 
             for gt in self.anns_by_img[frame_id]:
-                cls = gt["category_id"]
+                cls = self.cls2eval_id[self.data_id2cls[gt["category_id"]]]
                 dim = gt["dim"]
                 location = gt["translation"]
                 ry = [gt["rotation_y"]]
@@ -405,7 +404,7 @@ class WaymoDataset(data.Dataset):
         lines = subprocess.check_output(command, shell= True, text= True, env={})
 
         print(lines)
-        metric3d = float(lines.split("\n")[5].split("|")[2].strip().split(" ")[0])
+        metric3d = float(lines.split("\n")[4].split("|")[2].strip().split(" ")[0])
         return metric3d
 
     def decode_preds_eval(self, preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=True, threshold=0.001):
