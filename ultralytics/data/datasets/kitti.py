@@ -168,7 +168,6 @@ class KITTIDataset(data.Dataset):
                             data=tuple(trans_inv.reshape(-1).tolist()),
                             resample=Image.BILINEAR)
 
-        coord_range = np.array([center - crop_size / 2, center + crop_size / 2]).astype(np.float32)
         # image encoding
         img = np.array(img).astype(np.float32) / 255.0
         img = img.transpose(2, 0, 1)  # C * H * W
