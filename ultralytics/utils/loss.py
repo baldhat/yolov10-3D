@@ -745,7 +745,7 @@ class DetectLoss3d:
         return loss_one2many[0] + loss_one2one[0], torch.cat((loss_one2many[1], loss_one2one[1]))
 
 
-class DDDetectionLoss():
+class DDDetectionLoss:
     def __init__(self, model, tal_topk=10):  # model must be de-paralleled
         device = next(model.parameters()).device  # get model device
         h = model.args  # hyperparameters
@@ -765,6 +765,7 @@ class DDDetectionLoss():
                                               gamma=model.args.tal_gamma, use_2d=model.args.tal_2d,
                                               use_3d=model.args.tal_3d, kps_dist_metric=model.args.kps_dist_metric,
                                               constrain_anchors=model.args.constrain_anchors)
+        self.supervisor = SupervisionLoss(model)
 
     def preprocess(self, targets, batch_size, scale_tensor):
         """Preprocesses the target counts and matches with the input batch size to output a tensor."""
@@ -863,9 +864,13 @@ class DDDetectionLoss():
 
         loss[2:6] = self.compute_box3d_loss(targets_3d, pred_3d, anchor_points, stride_tensor,
                                             fg_mask, target_scores_sum)
-        #kps_loss = self.compute_keypoint_loss()
+
+        self.supervisor.forward(batch["img"].detach(), gt_center_3d, gt_depth)
 
         return loss.sum() * batch_size, loss
+
+    def plot_depth_maps(self, depth_maps):
+        pass
 
     def plot_assignments(self, batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt):
         self.debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor)
@@ -1102,3 +1107,31 @@ def compute_heading_loss(input, target_cls, target_reg):
     reg_loss = F.l1_loss(input_reg, target_reg, reduction='sum')
 
     return cls_loss + reg_loss
+
+class SupervisionLoss:
+    def __init__(self, model):
+        from ultralytics.utils.dino import DinoDepther
+        self.device = next(model.parameters()).device  # get model device
+        self.args = model.args
+        self.model = model
+        self.foundation_model = DinoDepther()
+
+    def forward(self, imgs, gt_center_3d, gt_depth):
+        depth_maps, embeddings = self.foundation_model(imgs)
+
+        self.plot_depth_maps(depth_maps, imgs)
+        supervision_depths = [depth_maps[i, gt_center_3d[i, 0, 1].long(), gt_center_3d[i, 0, 0].long()].item() for i in range(5)]
+        gt_depths = [gt_depth[i, 0].item() for i in range(5)]
+        print()
+
+    def plot_depth_maps(self, depth_maps, imgs):
+        fig ,axes = plt.subplots(2, 2, figsize=(18, 12))
+        fig.tight_layout()
+        axes = axes.ravel()
+        for i, ax in enumerate(axes):
+            dmap = cv2.applyColorMap(((depth_maps[i]/depth_maps[i].max()).cpu().numpy()*255).astype(np.uint8), cv2.COLORMAP_JET)
+            img = (255*imgs[i].cpu().numpy().transpose(1, 2, 0)).astype(np.uint8)
+            res = np.vstack((dmap, img))
+            ax.imshow(res)
+
+        plt.show()
