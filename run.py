@@ -29,6 +29,10 @@ def get_source_code_dirs(name: str):
         return [
             "/home/stud/mijo/dev/yolov10-3D"
         ]
+    elif name.lower().startswith("dino"):
+        return [
+            "/home/stud/mijo/dev/yolov10-3D"
+        ]
     else:
         raise NotImplementedError()
 

@@ -765,7 +765,7 @@ class DDDetectionLoss:
                                               gamma=model.args.tal_gamma, use_2d=model.args.tal_2d,
                                               use_3d=model.args.tal_3d, kps_dist_metric=model.args.kps_dist_metric,
                                               constrain_anchors=model.args.constrain_anchors)
-        self.supervisor = SupervisionLoss(model)
+        #self.supervisor = SupervisionLoss(model)
 
     def preprocess(self, targets, batch_size, scale_tensor):
         """Preprocesses the target counts and matches with the input batch size to output a tensor."""
@@ -865,7 +865,7 @@ class DDDetectionLoss:
         loss[2:6] = self.compute_box3d_loss(targets_3d, pred_3d, anchor_points, stride_tensor,
                                             fg_mask, target_scores_sum)
 
-        self.supervisor.forward(batch["img"].detach(), gt_center_3d, gt_depth)
+        #self.supervisor.forward(batch["img"].detach(), gt_center_3d, gt_depth)
 
         return loss.sum() * batch_size, loss
 

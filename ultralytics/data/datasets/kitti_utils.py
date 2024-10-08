@@ -432,7 +432,6 @@ def get_affine_transform(center,
     # scale all area
     # src[2, :] = np.array([center[0] - 0.5 * scale_tmp[0], center[1] - 0.5 * scale_tmp[1]])
     # dst[2, :] = np.array([0, 0])
-
     if inv:
         trans = cv2.getAffineTransform(np.float32(src), np.float32(dst))
         trans_inv = cv2.getAffineTransform(np.float32(dst), np.float32(src))

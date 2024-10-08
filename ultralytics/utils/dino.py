@@ -3,8 +3,9 @@ import os
 import random
 import numpy as np
 import tqdm
+from pathlib import Path
 
-REPO_PATH = "/home/baldhat/dev/mono3d/dinov2" # Specify a local path to the repository (or use installed package instead)
+REPO_PATH = "/home/stud/mijo/dev/dinov2" # Specify a local path to the repository (or use installed package instead)
 sys.path.append(REPO_PATH)
 
 import torch
@@ -19,7 +20,6 @@ import torch.nn.functional as F
 
 import warnings
 from dinov2.eval.depth.models import build_depther
-from dinov2.eval.depth.models.decode_heads import BNHead
 
 
 def resize(input, size=None, scale_factor=None, mode="nearest", align_corners=None, warning=False):
@@ -59,16 +59,6 @@ class CenterPadding(torch.nn.Module):
         pads = list(itertools.chain.from_iterable(self._get_pad(m) for m in x.shape[:1:-1]))
         output = F.pad(x, pads)
         return output
-
-
-class Head(BNHead):
-    def __init__(self, **kwargs):
-        super().__init__(in_index=(0, ), **kwargs)
-        self.conv_depth = torch.nn.Sequential(
-            torch.nn.Conv2d(self.channels, self.n_bins, kernel_size=1, padding=0, stride=1),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Conv2d(self.n_bins, self.n_bins, kernel_size=1, padding=0, stride=1)
-        )
 
 
 def create_depther(cfg, backbone_model):
@@ -174,18 +164,6 @@ class DinoDepther(torch.nn.Module):
 from ultralytics.data.datasets.kitti import KITTIDataset
 from ultralytics.data.build import InfiniteDataLoader
 
-class Args:
-    cam_dis = False
-    fliplr = 0.5
-    random_crop = 0.5
-    scale = 0.4
-    min_scale = 0.6
-    max_scale = 1.4
-    translate = 0.1
-    mixup = 0.5
-    max_depth_threshold = 70
-    min_depth_threshold = 0.5
-    seed = 1
 
 def seed_worker(worker_id):
     worker_seed = torch.initial_seed() % 2**32
@@ -272,43 +250,60 @@ def train_one_epoch(epoch_index, model, dataloader, optimizer):
     print(f"Mean loss: {mean_loss / len(dataloader)}")
     return mean_loss / len(dataloader)
 
-def main():
-    train_file_path = "../datasets/KITTI/ImageSets/train.txt"
-    val_file_path = "../datasets/KITTI/ImageSets/train.txt"
-    mode = "train"
+class Args:
+    cam_dis = False
+    fliplr = 0.5
+    random_crop = 0.5
+    scale = 0.4
+    min_scale = 0.6
+    max_scale = 1.4
+    translate = 0.1
+    mixup = 0.5
+    max_depth_threshold = 70
+    min_depth_threshold = 0.5
+    seed = 1
+    
+
+def main(save_dir):
+    train_file_path = "/home/stud/mijo/dev/datasets/KITTI/ImageSets/train.txt"
+    val_file_path = "/home/stud/mijo/dev/datasets/KITTI/ImageSets/val.txt"
     args = Args()
-    train_dataset = KITTIDataset(train_file_path, mode, args)
-    val_dataset = KITTIDataset(val_file_path, mode, args)
-    train_dataloader = build_dataloader(train_dataset, 16, 8, shuffle=True)
-    val_dataloader = build_dataloader(val_dataset, 16, 8, shuffle=False)
+    train_dataset = KITTIDataset(train_file_path, "train", args)
+    val_dataset = KITTIDataset(val_file_path, "val", args)
+    train_dataloader = build_dataloader(train_dataset, 64, 8, shuffle=True)
+    val_dataloader = build_dataloader(val_dataset, 64, 8, shuffle=False)
 
     model = DinoDepther()
     model.train()
 
     freeze_backbone(model)
 
-    optimizer = torch.optim.Adam(model.head.parameters(), lr=1e-4)
-    lr_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer=optimizer, start_factor=1.0, end_factor=0.1, total_iters=50)
+    optimizer = torch.optim.Adam(model.head.parameters(), lr=6e-5)
+    lr_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer=optimizer, start_factor=1.0, end_factor=0.01, total_iters=100)
 
     best_eval_loss = 100000
     best_epoch = 0
     train_losses = []
     val_losses = []
 
-    for epoch in range(200):
+    for epoch in range(100):
         train_loss = train_one_epoch(epoch, model, train_dataloader, optimizer)
         eval_loss = validate(epoch, model, val_dataloader)
 
         train_losses.append(train_loss)
         val_losses.append(eval_loss)
+        
+        Path(os.path.join(save_dir, "dino")).mkdir(parents=True, exist_ok=True)
         if eval_loss < best_eval_loss:
             best_eval_loss = eval_loss
             best_epoch = epoch
-            model.save("runs/dino/best.pt")
+            model.save(os.path.join(save_dir, "dino/best.pt"))
         lr_scheduler.step()
         print(f"Best epoch: {best_epoch}")
-        np.save("runs/dino/losses", np.array((train_losses, val_losses)))
+        np.save(os.path.join(save_dir, "dino/losses"), np.array((train_losses, val_losses)))
 
 
 if __name__ == '__main__':
-    main()
+    save_dir = sys.argv[1]
+    print(save_dir)
+    main(save_dir)

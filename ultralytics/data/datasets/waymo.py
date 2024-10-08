@@ -10,7 +10,6 @@ import subprocess
 import torch
 from pathlib import Path
 import time
-import pyvips
 
 from collections import defaultdict
 import json
