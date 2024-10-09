@@ -164,7 +164,6 @@ class DinoDepther(torch.nn.Module):
 from ultralytics.data.datasets.kitti import KITTIDataset
 from ultralytics.data.build import InfiniteDataLoader
 
-
 def seed_worker(worker_id):
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)

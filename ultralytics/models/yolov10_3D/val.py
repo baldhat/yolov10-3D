@@ -16,6 +16,7 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
         self.args.save_json |= self.is_coco
         self.visualizer = KITTIVisualizer()
         self.results = {}
+        self.dino_model = None
 
     def build_dataset(self, img_path, mode="val", batch=None):
         dataset_yaml = self.args.data.split("/")[-1]
@@ -48,6 +49,19 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
             predsM = torch.cat((regM, scoresM.unsqueeze(-1), labelsM.unsqueeze(-1)), dim=-1)
             
             preds = self.aggregate_o2m_preds(preds, predsM)
+            
+        elif self.args.use_dino_depth:
+            if self.dino_model is None:
+                from ultralytics.utils import DinoDepther
+                self.dino_model = DinoDepther()
+                self.dino_model.load(self.args.dino_path)
+            with torch.inference_mode():
+                imgs = self.batch["img"]
+                depth_maps, embeddings = self.dino_model.forward(imgs)
+                pred_center3d = preds[..., 4:6]
+                for batch_idx, center3d in enumerate(pred_center3d):
+                    pred_deps = output[batch_idx, pred_center3d[batch_idx, :, 1].long(), pred_center3d[batch_idx, :, 0].long()].unsqueeze(-1)
+                    preds[batch_idx] = pred_deps
         
         return preds
     
@@ -84,6 +98,7 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
         for k in ["batch_idx", "bboxes", "cls", "depth", "center_3d", "center_2d", "size_2d", "heading_bin",
                   "heading_res", "size_3d", "calib"]:
             batch[k] = batch[k].to(self.device)
+        self.batch = batch
         return batch
 
     def update_metrics(self, preds, batch):
