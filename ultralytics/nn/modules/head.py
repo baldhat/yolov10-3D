@@ -645,6 +645,7 @@ class v10Detect3d(nn.Module):
 
     def forward_feat(self, x, heads):
         y = []
+        embs = [None] * self.nl
         head_names = list(self.output_channels.keys())
         for i in range(self.nl):
             outputs = {}
@@ -657,11 +658,24 @@ class v10Detect3d(nn.Module):
                                                 else outputs[key] / self.dep_norm
                                    for key in self.predecessors[head_names[j]]]
                     inputs.extend([predecessor.detach() for predecessor in predecessors])
-                    outputs[head_names[j]] = module[i](torch.cat(inputs, dim=1))
+                    if head_names[j] == "dep":
+                        outputs[head_names[j]], embs[i] = self.single_head_forward(module[i], (torch.cat(inputs, dim=1)))
+                    else:
+                        outputs[head_names[j]] = module[i](torch.cat(inputs, dim=1))
                 else:
-                    outputs[head_names[j]] = module[i](x[i])
+                    if head_names[j] == "dep":
+                        outputs[head_names[j]], embs[i] = self.single_head_forward(module[i], x[i])
+                    else:
+                        outputs[head_names[j]] = module[i](x[i])
             y.append(torch.cat(list(outputs.values()), dim=1))
-        return y
+        return y, embs
+
+    def single_head_forward(self, head, features):
+        assert len(head) == 3
+        embeddings = head[0](features)
+        output = head[1](embeddings)
+        return head[2](output), embeddings
+
 
     def sum_predecessor_chs(self, predecessors):
         return sum([self.output_channels[predecessor] for predecessor in predecessors]) if len(predecessors) > 0 else 0
@@ -713,29 +727,29 @@ class v10Detect3d(nn.Module):
 
     def _forward(self, x):
         """Concatenates and returns predicted bounding boxes and class probabilities."""
-        y = self.forward_feat(x, self.o2m_heads)
+        y, embs = self.forward_feat(x, self.o2m_heads)
 
         if self.training:
-            return y
+            return y, embs
 
-        return self.inference(y)
+        return self.inference(y), embs
 
     def forward(self, x):
-        one2one = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
+        one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
         if not self.export:
-            one2many = self._forward(x)
+            one2many, o2m_embs = self._forward(x)
 
         if not self.training:
             one2one = self.inference(one2one)
             if not self.export:
-                return {"one2many": one2many, "one2one": one2one}
+                return {"one2many": one2many, "one2one": one2one, "o2m_embs": o2m_embs, "o2o_embs": o2o_embs}
             else:
                 raise NotImplementedError("TODO")
                 assert(self.max_det != -1)
                 boxes, scores, labels = ops.v10postprocess(one2one.permute(0, 2, 1), self.max_det, self.nc)
                 return torch.cat([boxes, scores.unsqueeze(-1), labels.unsqueeze(-1).to(boxes.dtype)], dim=-1)
         else:
-            return {"one2many": one2many, "one2one": one2one}
+            return {"one2many": one2many, "one2one": one2one, "o2m_embs": o2m_embs, "o2o_embs": o2o_embs}
 
 
     def decode_bboxes(self, bboxes, anchors):

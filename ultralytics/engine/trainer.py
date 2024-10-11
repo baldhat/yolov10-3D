@@ -520,7 +520,7 @@ class BaseTrainer:
         ckpt = {
             "epoch": self.epoch,
             "best_fitness": self.best_fitness,
-            "model": deepcopy(de_parallel(self.model)).half(),
+            "model": deepcopy(de_parallel(self.model)),
             "ema": deepcopy(self.ema.ema).half(),
             "updates": self.ema.updates,
             "optimizer": self.optimizer.state_dict(),

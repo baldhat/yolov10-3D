@@ -51,20 +51,27 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
             preds = self.aggregate_o2m_preds(preds, predsM)
             
         elif self.args.use_dino_depth:
-            if self.dino_model is None:
-                from ultralytics.utils import DinoDepther
-                self.dino_model = DinoDepther()
-                self.dino_model.load(self.args.dino_path)
-            with torch.inference_mode():
-                imgs = self.batch["img"]
-                depth_maps, embeddings = self.dino_model.forward(imgs)
-                pred_center3d = preds[..., 4:6]
-                for batch_idx, center3d in enumerate(pred_center3d):
-                    pred_deps = output[batch_idx, pred_center3d[batch_idx, :, 1].long(), pred_center3d[batch_idx, :, 0].long()].unsqueeze(-1)
-                    preds[batch_idx] = pred_deps
+            preds = self.dino_depth_pred(preds)
         
         return preds
-    
+
+    def dino_depth_pred(self, preds):
+        if self.dino_model is None:
+            from ultralytics.utils.dino import DinoDepther
+            self.dino_model = DinoDepther()
+            self.dino_model.load(self.args.dino_path)
+        with torch.inference_mode():
+            imgs = self.batch["img"]
+            depth_maps, embeddings = self.dino_model.forward(imgs)
+            pred_center3d = preds[..., 4:6]
+            for batch_idx, center3d in enumerate(pred_center3d):
+                pred_deps = depth_maps[
+                    batch_idx,
+                    pred_center3d[batch_idx, :, 1].long().clamp(min=0, max=depth_maps.shape[1] - 1),
+                    pred_center3d[batch_idx, :, 0].long().clamp(min=0, max=depth_maps.shape[2] - 1)]
+                preds[batch_idx, :, -4] = pred_deps
+        return preds
+
     def aggregate_o2m_preds(self, predsO, predsM, thres=0.1):
         # bbox, pred_center3d, pred_s3d, pred_hd, pred_dep, pred_dep_un, scores, labels = preds.split((4, 2, 3, 24, 1, 1, 1, 1), dim=-1)
         bboxO = predsO[:, :, 0:4] # format: xyxy

@@ -442,8 +442,8 @@ class KITTIDataset(data.Dataset):
                     else:
                         locations = calibs[i].img_to_rect(c3d[0], c3d[1], depth).reshape(-1)
                 else:
-                    x3d = batch["center_3d"][mask][j, 0].cpu().numpy() / batch["ratio_pad"][i][0]
-                    y3d = batch["center_3d"][mask][j, 1].cpu().numpy() / batch["ratio_pad"][i][1]
+                    x3d = batch["center_3d"][mask][j, 0].cpu().numpy() / batch["ratio_pad"][i][0, 0]
+                    y3d = batch["center_3d"][mask][j, 1].cpu().numpy() / batch["ratio_pad"][i][0, 1]
                     if self.use_camera_dis:
                         locations = calibs[i].camera_dis_to_rect(x3d, y3d, depth).reshape(-1)
                     else:
