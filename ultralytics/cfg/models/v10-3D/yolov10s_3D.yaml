@@ -7,6 +7,7 @@ dsconv: False
 use_predecessors: False
 detach_predecessors: False
 deform: False
+common_head: False
 channels:
   cls_c: 128
   o2d_c: 128
