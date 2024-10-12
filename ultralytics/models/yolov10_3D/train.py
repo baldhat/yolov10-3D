@@ -4,12 +4,12 @@ from .model import YOLOv10_3DDetectionModel
 from ultralytics.models.yolov10 import YOLOv10
 from ultralytics.nn.modules.head import v10Detect3d
 from copy import copy
-from ultralytics.utils import RANK
 from ultralytics.data.datasets.kitti import KITTIDataset
 from ultralytics.data.datasets.waymo import WaymoDataset
-from ultralytics.utils.torch_utils import de_parallel
 from ultralytics.utils.plotting import plot_labels_3D, KITTIVisualizer, plot_images, plot_training_depth_dist
-import numpy as np
+
+from ...data.datasets.omni3d import Omni3Dataset
+
 
 class YOLOv10_3DDetectionTrainer(DetectionTrainer):
 
@@ -23,6 +23,8 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
             return KITTIDataset(img_path, mode, self.args)
         elif dataset_yaml == "waymo.yaml":
             return WaymoDataset(img_path, mode, self.args)
+        elif dataset_yaml == "omni3d.yaml":
+            return Omni3Dataset(img_path, mode, self.args)
         else:
             raise NotImplemented("Yolov10_3D only support Kitti and Waymo datasets")
 

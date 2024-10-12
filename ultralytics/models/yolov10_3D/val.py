@@ -2,6 +2,7 @@ from ultralytics.models.yolo.detect import DetectionValidator
 from ultralytics.utils import ops
 from ultralytics.data.datasets.kitti import KITTIDataset
 from ultralytics.data.datasets.waymo import WaymoDataset
+from ultralytics.data.datasets.omni3d import Omni3Dataset
 from ultralytics.utils.plotting import KITTIVisualizer
 from ultralytics.utils.metrics import box_iou
 
@@ -24,6 +25,8 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
             return KITTIDataset(img_path, mode, self.args)
         elif dataset_yaml == "waymo.yaml":
             return WaymoDataset(img_path, mode, self.args)
+        elif dataset_yaml == "omni3d.yaml":
+            return Omni3Dataset(img_path, mode, self.args)
         else:
             raise NotImplemented("Yolov10_3D only supports Kitti and Waymo datasets")
 
