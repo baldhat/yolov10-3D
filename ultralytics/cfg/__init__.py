@@ -534,6 +534,10 @@ def entrypoint(debug=""):
         if "model" not in overrides:
             overrides["model"] = TASK2MODEL[task]
 
+    if mode == "train" and os.path.exists(os.path.join(overrides.get("save_dir", ""), "weights/last.pt")):
+        overrides["resume"] = True
+        overrides["model"] = os.path.join(overrides.get("save_dir", ""), "weights/last.pt")
+
     # Model
     model = overrides.pop("model", DEFAULT_CFG.model)
     if model is None:

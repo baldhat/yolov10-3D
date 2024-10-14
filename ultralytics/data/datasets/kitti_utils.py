@@ -1,7 +1,7 @@
 import numpy as np
 import cv2
-import pdb
-from ultralytics.utils import ops
+from scipy.spatial.transform import Rotation
+
 
 
 ################  Object3D  ##################
@@ -35,22 +35,44 @@ class Object3d(object):
             self.level_str = None
             self.level = self.get_obj_level()
             self.num_lidar = 0
-        else:
+        elif type(line) == dict:
             self.cls_type = line["category"]
-            self.trucation = -1.0
-            self.occlusion = -1.0
-            box = np.array(line["bbox"])
-            self.box2d = np.array([box[0], box[1], box[0] + box[2], box[1] + box[3]], dtype=np.float32)
-            self.pos = np.array(line["translation"])
-            self.l = np.array(line["dim"])[2]
-            self.h = np.array(line["dim"])[0]
-            self.w = np.array(line["dim"])[1]
-            self.dims = np.array(line["dim"])
-            self.ry = line["rotation_y"]
-            self.level_str = None
-            self.level = self.get_obj_level()
-            self.num_lidar = line["num_lidar"]
-
+            if line.get("rotation_y", None) is not None:
+                self.trucation = -1.0
+                self.occlusion = -1.0
+                box = np.array(line["bbox"])
+                self.box2d = np.array([box[0], box[1], box[0] + box[2], box[1] + box[3]], dtype=np.float32)
+                self.pos = np.array(line["translation"])
+                self.l = np.array(line["dim"])[2]
+                self.h = np.array(line["dim"])[0]
+                self.w = np.array(line["dim"])[1]
+                self.dims = np.array(line["dim"])
+                self.ry = line["rotation_y"]
+                self.level_str = None
+                self.level = self.get_obj_level()
+                self.num_lidar = line["num_lidar"]
+            else:
+                self.occlusion = -1.0
+                box = np.array(line["bbox2D_proj"]) # xyxy
+                self.box2d = np.array(box, dtype=np.float32)
+                self.w = np.array(line["dimensions"])[0]
+                self.h = np.array(line["dimensions"])[1]
+                self.l = np.array(line["dimensions"])[2]
+                self.pos = np.array(line["center_cam"]) + np.array([0, self.h / 2, 0]) # already the center
+                omni_euler = Rotation.from_matrix(line['R_cam']).as_euler('xyz')
+                self.ry = omni_euler[1]
+                #dsc_euler = omni_euler + np.asarray([np.pi / 2, 0, 0])
+                #dsc_egoc_rot_matrix = Rotation.from_euler('xyz', dsc_euler).as_matrix()
+                self.level_str = 'UnKnown'
+                self.num_lidar = line["lidar_pts"]
+                self.behind_camera = line["behind_camera"] # a corner is behind camera
+                self.visibility = line["visibility"]# annotated visibility 0 to 1
+                self.truncation = line["truncation"] # computed truncation 0 to 1
+                self.segmentation_pts = line["segmentation_pts"] # visible instance segmentation points
+                self.depth_error = line["depth_error"] # L1 of depth map and rendered object
+                self.valid3D = line.get("valid3D", True)
+        else:
+            raise RuntimeError("Cannot create Object3D from type", type(line))
 
     def get_obj_level(self):
         height = float(self.box2d[3]) - float(self.box2d[1]) + 1

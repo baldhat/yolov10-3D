@@ -738,10 +738,10 @@ class DetectLoss3d:
         self.one2one = DDDetectionLoss(model, tal_topk=1)
 
     def __call__(self, preds, batch):
-        one2many = preds["one2many"]
-        loss_one2many = self.one2many(one2many, batch)
-        one2one = preds["one2one"]
-        loss_one2one = self.one2one(one2one, batch)
+        one2many, o2m_embs = preds["one2many"], preds["o2m_embs"]
+        loss_one2many = self.one2many(one2many, batch, embeddings=o2m_embs)
+        one2one, o2o_embs = preds["one2one"], preds["o2o_embs"]
+        loss_one2one = self.one2one(one2one, batch, embeddings=o2o_embs)
         return loss_one2many[0] + loss_one2one[0], torch.cat((loss_one2many[1], loss_one2one[1]))
 
 
@@ -765,7 +765,8 @@ class DDDetectionLoss:
                                               gamma=model.args.tal_gamma, use_2d=model.args.tal_2d,
                                               use_3d=model.args.tal_3d, kps_dist_metric=model.args.kps_dist_metric,
                                               constrain_anchors=model.args.constrain_anchors)
-        #self.supervisor = SupervisionLoss(model)
+        if self.hyp.distillation:
+            self.supervisor = SupervisionLoss(model)
 
     def preprocess(self, targets, batch_size, scale_tensor):
         """Preprocesses the target counts and matches with the input batch size to output a tensor."""
@@ -793,9 +794,9 @@ class DDDetectionLoss:
         xy2 = centers + size / 2
         return torch.cat((xy1, xy2), dim=-1) * stride_tensor
 
-    def __call__(self, preds, batch):
+    def __call__(self, preds, batch, embeddings):
         """Calculate the sum of the loss for box, cls and dfl multiplied by batch size."""
-        loss = torch.zeros(6, device=self.device)  # box, cls, dep, o3d, s3d, hd
+        loss = torch.zeros(7 if self.hyp.distillation else 6, device=self.device)  # box, cls, dep, o3d, s3d, hd
         feats = preds[1] if isinstance(preds, tuple) else preds
         pred_scores, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un = (
             torch.cat([xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2).split(
@@ -865,12 +866,14 @@ class DDDetectionLoss:
         loss[2:6] = self.compute_box3d_loss(targets_3d, pred_3d, anchor_points, stride_tensor,
                                             fg_mask, target_scores_sum)
 
-        #self.supervisor.forward(batch["img"].detach(), gt_center_3d, gt_depth)
+        if self.hyp.distillation:
+            embeddings = torch.cat([emb.view(feats[0].shape[0], 128, -1) for emb in embeddings], dim=2)
+            loss[6] = self.supervisor.forward(
+                batch["img"].detach(), gt_center_3d, embeddings, fg_mask.bool(),
+                target_gt_idx, mask_gt.bool().squeeze(-1)
+            ) / target_scores_sum
 
         return loss.sum() * batch_size, loss
-
-    def plot_depth_maps(self, depth_maps):
-        pass
 
     def plot_assignments(self, batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt):
         self.debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor)
@@ -1115,14 +1118,37 @@ class SupervisionLoss:
         self.args = model.args
         self.model = model
         self.foundation_model = DinoDepther()
+        self.foundation_model.load(self.args.dino_path)
+        self.T = self.args.distillation_temp
+        self.weight = self.args.distillation_weight
 
-    def forward(self, imgs, gt_center_3d, gt_depth):
-        depth_maps, embeddings = self.foundation_model(imgs)
+    def forward(self, imgs, gt_center_3d, pred_embeddings, fg_mask, target_gt_idx, mask_gt):
+        loss = torch.zeros(imgs.shape[0], device=imgs.device)
 
-        self.plot_depth_maps(depth_maps, imgs)
-        supervision_depths = [depth_maps[i, gt_center_3d[i, 0, 1].long(), gt_center_3d[i, 0, 0].long()].item() for i in range(5)]
-        gt_depths = [gt_depth[i, 0].item() for i in range(5)]
-        print()
+        with torch.no_grad():
+            depth_maps, dino_embeddings = self.foundation_model(imgs)
+        #self.plot_depth_maps(depth_maps, imgs)
+
+        for batch_idx in range(depth_maps.shape[0]):
+            if mask_gt[batch_idx].any():
+                img_size = torch.tensor(imgs.shape[2:][::-1], device=gt_center_3d.device)
+                dino_embed_size = torch.tensor(dino_embeddings.shape[2:][::-1], device=gt_center_3d.device)
+                center3d = gt_center_3d[batch_idx][mask_gt[batch_idx]] / img_size * dino_embed_size
+                dino_emb = dino_embeddings.transpose(1, 3)[
+                        batch_idx,
+                        center3d[:, 0].round().long().clamp(min=0, max=dino_embed_size[0] - 1),
+                        center3d[:, 1].round().long().clamp(min=0, max=dino_embed_size[1] - 1)
+                ][target_gt_idx[batch_idx][fg_mask[batch_idx]]]
+                pred_emb = pred_embeddings.transpose(1, 2)[batch_idx][fg_mask[batch_idx]]
+
+                soft_targets = nn.functional.softmax(dino_emb / self.T, dim=-1)
+                soft_prob = nn.functional.log_softmax(pred_emb / self.T, dim=-1)
+                loss[batch_idx] = torch.sum(soft_targets * (soft_targets.log() - soft_prob)) / soft_prob.size()[0] * (
+                            self.T ** 2)
+            else:
+                loss[batch_idx] = 0
+        return loss.sum() * self.weight
+
 
     def plot_depth_maps(self, depth_maps, imgs):
         fig ,axes = plt.subplots(2, 2, figsize=(18, 12))

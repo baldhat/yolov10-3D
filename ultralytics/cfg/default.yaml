@@ -66,6 +66,8 @@ classes: # (int | list[int], optional) filter results by class, i.e. classes=0, 
 retina_masks: False # (bool) use high-resolution segmentation masks
 embed: # (list[int], optional) return feature vectors/embeddings from given layers
 use_o2m_depth: False
+use_dino_depth: False
+dino_path:
 
 # Visualize settings ---------------------------------------------------------------------------------------------------
 show: False # (bool) show predicted images and videos if environment allows
@@ -123,6 +125,9 @@ min_depth_threshold: 0.5
 min_scale: 0.6
 max_scale: 1.4
 overfit: False
+distillation: True
+distillation_temp: 2
+distillation_weight: 0.25
 
 dfl: 1.5 # (float) dfl loss gain
 pose: 12.0 # (float) pose loss gain

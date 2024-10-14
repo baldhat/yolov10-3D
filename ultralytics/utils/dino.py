@@ -5,7 +5,7 @@ import numpy as np
 import tqdm
 from pathlib import Path
 
-REPO_PATH = "/home/stud/mijo/dev/dinov2" # Specify a local path to the repository (or use installed package instead)
+REPO_PATH = os.environ["DINO_PATH"]
 sys.path.append(REPO_PATH)
 
 import torch
@@ -60,6 +60,8 @@ class CenterPadding(torch.nn.Module):
         output = F.pad(x, pads)
         return output
 
+def pre_hook(a, x, patch_size):
+    return CenterPadding(patch_size)(x[0])
 
 def create_depther(cfg, backbone_model):
     train_cfg = cfg.get("train_cfg")
@@ -75,17 +77,14 @@ def create_depther(cfg, backbone_model):
     )
 
     if hasattr(backbone_model, "patch_size"):
-        depther.backbone.register_forward_pre_hook(lambda _, x: CenterPadding(backbone_model.patch_size)(x[0]))
+        depther.backbone.register_forward_pre_hook(partial(pre_hook, patch_size=backbone_model.patch_size))
 
     return depther
-
 
 
 def load_config_from_url(url: str) -> str:
     with urllib.request.urlopen(url) as f:
         return f.read().decode()
-
-
 
 class DinoDepther(torch.nn.Module):
     def __init__(self):
@@ -132,14 +131,13 @@ class DinoDepther(torch.nn.Module):
     def transform_imgs(self, imgs):
         self.img_size = [imgs.shape[2], imgs.shape[3]]
         t = transforms.Compose([
-            lambda x: 255.0 * x,  # Discard alpha component and scale by 255
             transforms.Normalize(
                 mean=(123.675, 116.28, 103.53),
                 std=(58.395, 57.12, 57.375),
             ),
             transforms.Resize(size=[imgs.shape[2] - imgs.shape[2] % 14, imgs.shape[3] - imgs.shape[3] % 14])
         ])
-        return t(imgs)
+        return t(imgs * 255.0)
 
     def transform_back(self, depth_maps):
         t = transforms.Compose([
@@ -163,7 +161,6 @@ class DinoDepther(torch.nn.Module):
 
 from ultralytics.data.datasets.kitti import KITTIDataset
 from ultralytics.data.build import InfiniteDataLoader
-
 
 def seed_worker(worker_id):
     worker_seed = torch.initial_seed() % 2**32
@@ -279,7 +276,7 @@ def main(save_dir):
     freeze_backbone(model)
 
     optimizer = torch.optim.Adam(model.head.parameters(), lr=6e-5)
-    lr_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer=optimizer, start_factor=1.0, end_factor=0.01, total_iters=100)
+    lr_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer=optimizer, start_factor=1.0, end_factor=0.1, total_iters=100)
 
     best_eval_loss = 100000
     best_epoch = 0

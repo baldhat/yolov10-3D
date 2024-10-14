@@ -1,59 +1,65 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
 import os
-import torch
-import pathlib
+
 from ultralytics.data.datasets.decode_helper import  *
-from ultralytics.data.datasets.kitti_eval import eval_from_scrach
+from ultralytics.utils.keypoint_utils import get_object_keypoints
 
 import torch.utils.data as data
 from PIL import Image
+import subprocess
+import torch
+from pathlib import Path
+import time
+
+from collections import defaultdict
+import json
 
 from ultralytics.data.utils import angle2class
-from ultralytics.data.datasets.kitti_utils import get_objects_from_label, Calibration, get_affine_transform, affine_transform
+from ultralytics.data.datasets.kitti_utils import get_objects_from_dict, Calibration, get_affine_transform, affine_transform
 
-from ultralytics.utils.ops import  xyxy2xywh, xywh2xyxy
+from ultralytics.utils.ops import xyxy2xywh, xywh2xyxy
 
 
-class KITTIDataset(data.Dataset):
-    def __init__(self, image_file_path, mode, args):
-        np.random.seed(args.seed)
-        # basic configuration
-        self.max_objs = 50
+class Omni3Dataset(data.Dataset):
+    def __init__(self, filepath, mode, args):
+        self.args = args
+        self.path = "/".join(filepath.split("/")[:-1])
+        self.split = mode
+        self.mode = mode
         self.class_name = ['Car', 'Pedestrian', 'Cyclist']
-        self.cls2train_id = {'Car': 0, 'Pedestrian': 1, 'Cyclist': 2}
-        self.resolution = np.array([1280, 384])  # W * H
-        self.use_3d_center = True  # cfg['use_3d_center']
-        self.use_camera_dis = args.cam_dis
-        self.writelist = ['Car' ,'Pedestrian' ,'Cyclist']
+        self.writelist = ['Car', 'Pedestrian', 'Cyclist']
+        self.resolution = np.array([960, 640])  # W * H
+        self.max_objs = 50
+        self.use_camera_dis = False
 
-        '''    
-        ['Car': np.array([3.88311640418,1.62856739989,1.52563191462]),
-         'Pedestrian': np.array([0.84422524,0.66068622,1.76255119]),
-         'Cyclist': np.array([1.76282397,0.59706367,1.73698127])] 
-        '''
-        ##h,l,w
+        print("Loading Omni3D Dataset...")
+        self.raw_split = json.load(open(filepath, 'r'))
+        if args.overfit:
+            self.raw_split["images"] = [image for image in self.raw_split["images"] if image["id"] < 50]
+            self.raw_split["annotations"] = [anns for anns in self.raw_split["annotations"] if anns["image_id"] < 50]
+
+        self.imgs = {img['id']: img for img in sorted(self.raw_split['images'], key=lambda img: img['id'])}
+        self.idx_to_img_id = {idx: img_id for idx, img_id in enumerate(self.imgs)}
+
+        self.cls2train_id = {"Car": 0, "Pedestrian": 1, "Cyclist": 2}
+        self.train_id2cls = {0: "Car", 1: "Pedestrian", 2: "Cyclist"}
+
+        self.data_cls2data_id = {value["name"].title(): value["id"] for value in self.raw_split["categories"]}
+        self.data_id2data_cls = {cls_id: cls_name for cls_name, cls_id in self.data_cls2data_id.items()}
+        self.cls2eval_id = {"unknown": 0, "Car": 1, "Pedestrian": 2, "Sign": 3, "Cyclist": 4}
+
+        self.anns_by_img = defaultdict(list)
+        for ii, ann in enumerate(self.raw_split['annotations']):
+            ann["category"] = self.data_id2data_cls[ann["category_id"]]
+            self.anns_by_img[ann['image_id']].append(ann)
+
+        self.labels = self.get_labels()
+
+        ##h,w,l
         self.cls_mean_size = np.array([
             [1.52563191462, 1.62856739989, 3.88311640418],
             [1.76255119, 0.66068622, 0.84422524],
             [1.73698127, 0.59706367, 1.76282397]])
-
-        # data split loading
-        assert mode in ['train', 'val', 'trainval', 'test']
-        self.split = mode
-        self.mode = mode
-        root_dir = pathlib.Path(image_file_path).parent.parent
-        split_dir = image_file_path
-        self.idx_list = [x.strip() for x in open(split_dir).readlines()]
-
-        # path configuration
-        self.data_dir = os.path.join(root_dir, 'testing' if self.mode == 'test' else 'training')
-        self.image_dir = os.path.join(self.data_dir, 'image_2')
-        self.depth_dir = os.path.join(self.data_dir, 'depth')
-        self.calib_dir = os.path.join(self.data_dir, 'calib')
-        self.label_dir = os.path.join(self.data_dir, 'label_2')
-
-        self.im_files = self.get_im_files()
-        self.labels = self.get_labels()
 
         # data augmentation configuration
         self.data_augmentation = True if self.mode in ['train', 'trainval'] else False
@@ -67,43 +73,37 @@ class KITTIDataset(data.Dataset):
         self.max_depth_threshold = args.max_depth_threshold
         self.min_depth_thres = args.min_depth_threshold
 
-        # statistics
-        # self.mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-        # self.std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-        self.mean = 0
-        self.std = 1
+        print("Finished loading!")
 
     def get_image(self, idx):
-        img_file = os.path.join(self.image_dir, '%06d.png' % idx)
-        assert os.path.exists(img_file)
-        return Image.open(img_file)  # (H, W, 3) RGB mode
+        img_file = os.path.join(self.path, self.imgs[idx]["file_path"].replace("waymo/images/", ""))
+        if not os.path.exists(img_file):
+            print(f"Missing segment: {img_file}")
+        return Image.open(img_file).convert("RGB")
 
     def get_label(self, idx):
-        label_file = os.path.join(self.label_dir, '%06d.txt' % idx)
-        assert os.path.exists(label_file)
-        return get_objects_from_label(label_file)
+        return get_objects_from_dict(self.anns_by_img[idx])
 
     def get_labels(self):
-        labels = [self.get_label(int(idx)) for idx in self.idx_list]
-        labels = [item for sublist in labels for item in sublist]
-        labels = [item for item in labels if item.cls_type in self.writelist]
+        labels = self.anns_by_img
+        labels = [item for sublist in labels.values() for item in sublist]
+        labels = [item for item in labels if item["category"] in self.writelist]
         return labels
 
     def get_calib(self, idx):
-        calib_file = os.path.join(self.calib_dir, '%06d.txt' % idx)
-        assert os.path.exists(calib_file)
-        return Calibration(calib_file)
+        calib = np.array(self.imgs[idx]["K"])
+        calib = np.hstack((calib, np.zeros((3, 1))))
+        return Calibration({"P2": calib, 'R0': 0, "Tr_velo2cam": np.ones_like(calib)})
 
     def get_im_files(self):
-        return [os.path.join(self.image_dir, '%06d.png' % int(idx)) for idx in self.idx_list]
+        return self.imgs.values()
 
     def __len__(self):
-        return self.idx_list.__len__()
+        return self.imgs.__len__()
 
     def __getitem__(self, item):
-        #  ============================   get inputs   ===========================
-        index = int(self.idx_list[item])  # index mapping, get real data id
-        ori_img = self.get_image(index)
+        index = int(self.idx_to_img_id[item])  # index mapping, get real data id
+        ori_img =  self.get_image(index)
         img = ori_img
         img_size = np.array(ori_img.size)
         if self.split != 'test':
@@ -142,8 +142,8 @@ class KITTIDataset(data.Dataset):
             random_mix_flag = False
             while count_num < 50:
                 count_num += 1
-                random_index = np.random.randint(len(self.idx_list))
-                random_index = int(self.idx_list[random_index])
+                random_index = np.random.randint(self.__len__())
+                random_index = int(self.idx_to_img_id[random_index])
                 calib_temp = self.get_calib(random_index)
 
                 if calib_temp.cu == calib.cu and calib_temp.cv == calib.cv and calib_temp.fu == calib.fu and calib_temp.fv == calib.fv:
@@ -189,7 +189,7 @@ class KITTIDataset(data.Dataset):
             if random_flip_flag:
                 calib.flip(img_size)
                 for object in objects:
-                    [x1, _, x2, _] = object.box2d
+                    [x1, _, x2, _] = object.box2d # xyxy
                     object.box2d[0], object.box2d[2] = img_size[0] - x2, img_size[0] - x1
                     object.ry = np.pi - object.ry
                     object.pos[0] *= -1
@@ -198,80 +198,19 @@ class KITTIDataset(data.Dataset):
 
             object_num = len(objects) if len(objects) < self.max_objs else self.max_objs
 
-            count = 0
             for i in range(object_num):
-                # filter objects by writelist
-                if objects[i].cls_type not in self.writelist:
-                    continue
-
-                # filter inappropriate samples by difficulty
-                if objects[i].level_str == 'UnKnown' or (objects[i].pos[-1] * scale < self.min_depth_thres):
-                    continue
-
-                if objects[i].trucation > 0.5 or objects[i].occlusion > 2:
-                    continue
-
-                # process 2d bbox & get 2d center
-                bbox_2d = objects[i].box2d.copy()
-                # add affine transformation for 2d boxes.
-                bbox_2d[:2] = affine_transform(bbox_2d[:2], trans)
-                bbox_2d[2:] = affine_transform(bbox_2d[2:], trans)
-
-                bbox_2d_ = np.copy(bbox_2d)
-                bbox_2d_[:2] = bbox_2d[:2]
-                bbox_2d_[2:] = bbox_2d[2:]
-                bbox_2d_ = xyxy2xywh(bbox_2d_)
-                gt_size_2d_ = bbox_2d_[2:]
-                center_2d = np.array([(bbox_2d[0] + bbox_2d[2]) / 2, (bbox_2d[1] + bbox_2d[3]) / 2],
-                                     dtype=np.float32)  # W * H
-
-                # process 3d bbox & get 3d center
-                center_3d = objects[i].pos + [0, -objects[i].h / 2, 0]  # real 3D center in 3D space
-                r_center_3d = center_3d.reshape(-1, 3)  # shape adjustment (N, 3)
-                center_3d, _ = calib.rect_to_img(r_center_3d)  # project 3D center to image plane
-                center_3d = center_3d[0]  # shape adjustment
-                center_3d = affine_transform(center_3d.reshape(-1), trans)
-                gt_center_3d_ = center_3d.copy()
-
-                # generate the center of gaussian heatmap [optional: 3d center or 2d center]
-                center_heatmap = center_3d.astype(np.int32)
-                if center_heatmap[0] < 0 or center_heatmap[0] >= self.resolution[0]: continue
-                if center_heatmap[1] < 0 or center_heatmap[1] >= self.resolution[1]: continue
-
-                # encoding depth
-                depth = objects[i].pos[-1]
-                depth *= scale
-                if depth > self.max_depth_threshold:
-                    continue
-
-                cls_id = self.cls2train_id[objects[i].cls_type]
-                gt_cls.append([cls_id])
-                gt_boxes_2d.append(bbox_2d_)
-                gt_center_3d.append(gt_center_3d_)
-                gt_center_2d.append(center_2d)
-                gt_size_2d.append(gt_size_2d_)
-
-
-                # encoding heading angle
-                # heading_angle = objects[i].alpha
-                heading_angle = calib.ry2alpha(objects[i].ry, (objects[i].box2d[0] + objects[i].box2d[2]) / 2)
-                if heading_angle > np.pi:  heading_angle -= 2 * np.pi  # check range
-                if heading_angle < -np.pi: heading_angle += 2 * np.pi
-
-                heading_bin, heading_res = angle2class(heading_angle)
-                gt_heading_bin.append(heading_bin)
-                gt_heading_res.append(heading_res)
-
-                s3d = (np.array([objects[i].h, objects[i].w, objects[i].l], dtype=np.float32)
-                       - self.cls_mean_size[self.cls2train_id[objects[i].cls_type]])
-                gt_size_3d.append(s3d)
-
-                if self.use_camera_dis:
-                    r_center_3d *= scale
-                    dep = np.linalg.norm(r_center_3d)
-                    gt_depth.append(dep)
-                else:
-                    gt_depth.append(depth)
+                valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res \
+                    = self.load_object(objects[i], scale, trans, calib)
+                if valid:
+                    gt_boxes_2d.append(_box)
+                    gt_cls.append(_cls)
+                    gt_center_2d.append(_center2d)
+                    gt_center_3d.append(_center3d)
+                    gt_size_2d.append(_size2d)
+                    gt_size_3d.append(_size3d)
+                    gt_depth.append(_depth)
+                    gt_heading_bin.append(_head_bin)
+                    gt_heading_res.append(_head_res)
 
             if random_mix_flag == True:
                 # if False:
@@ -288,71 +227,18 @@ class KITTIDataset(data.Dataset):
                 object_num_temp = len(objects) if len(objects) < (self.max_objs - object_num) else (
                         self.max_objs - object_num)
                 for i in range(object_num_temp):
-                    if objects[i].cls_type not in self.writelist:
-                        continue
-
-                    if objects[i].level_str == 'UnKnown' or (objects[i].pos[-1] * scale < self.min_depth_thres):
-                        continue
-
-                    if objects[i].trucation > 0.5 or objects[i].occlusion > 2:
-                        continue
-
-                    # process 2d bbox & get 2d center
-                    bbox_2d = objects[i].box2d.copy()
-                    # add affine transformation for 2d boxes.
-                    bbox_2d[:2] = affine_transform(bbox_2d[:2], trans)
-                    bbox_2d[2:] = affine_transform(bbox_2d[2:], trans)
-
-                    bbox_2d_ = np.copy(bbox_2d)
-                    bbox_2d_[:2] = bbox_2d[:2]
-                    bbox_2d_[2:] = bbox_2d[2:]
-                    bbox_2d_ = xyxy2xywh(bbox_2d_)
-                    gt_size_2d_ = bbox_2d_[2:]
-                    center_2d = np.array([(bbox_2d[0] + bbox_2d[2]) / 2, (bbox_2d[1] + bbox_2d[3]) / 2],
-                                         dtype=np.float32)  # W * H
-
-                    # process 3d bbox & get 3d center
-                    center_3d = objects[i].pos + [0, -objects[i].h / 2, 0]  # real 3D center in 3D space
-                    r_center_3d = center_3d.reshape(-1, 3)  # shape adjustment (N, 3)
-                    center_3d, _ = calib.rect_to_img(r_center_3d)  # project 3D center to image plane
-                    center_3d = center_3d[0]  # shape adjustment
-                    center_3d = affine_transform(center_3d.reshape(-1), trans)
-
-                    # generate the center of gaussian heatmap [optional: 3d center or 2d center]
-                    center_heatmap = center_3d.astype(np.int32)
-                    if center_heatmap[0] < 0 or center_heatmap[0] >= self.resolution[0]: continue
-                    if center_heatmap[1] < 0 or center_heatmap[1] >= self.resolution[1]: continue
-                    # encoding depth
-                    depth = objects[i].pos[-1]
-                    depth *= scale
-                    if depth > self.max_depth_threshold:
-                        continue
-
-                    cls_id = self.cls2train_id[objects[i].cls_type]
-                    gt_cls.append([cls_id])
-                    gt_boxes_2d.append(bbox_2d_)
-                    gt_center_3d.append(center_3d)
-                    gt_center_2d.append(center_2d)
-                    gt_size_2d.append(gt_size_2d_)
-
-                    # encoding heading angle
-                    heading_angle = calib.ry2alpha(objects[i].ry, (objects[i].box2d[0] + objects[i].box2d[2]) / 2)
-                    if heading_angle > np.pi:  heading_angle -= 2 * np.pi  # check range
-                    if heading_angle < -np.pi: heading_angle += 2 * np.pi
-                    heading_bin, heading_res = angle2class(heading_angle)
-                    gt_heading_bin.append(heading_bin)
-                    gt_heading_res.append(heading_res)
-
-                    s3d = (np.array([objects[i].h, objects[i].w, objects[i].l], dtype=np.float32)
-                           - self.cls_mean_size[self.cls2train_id[objects[i].cls_type]])
-                    gt_size_3d.append(s3d)
-
-                    if self.use_camera_dis:
-                        r_center_3d *= scale
-                        dep = np.linalg.norm(r_center_3d)
-                        gt_depth.append(dep)
-                    else:
-                        gt_depth.append(depth)
+                    valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res = (
+                        self.load_object(objects[i], scale, trans, calib))
+                    if valid:
+                        gt_boxes_2d.append(_box)
+                        gt_cls.append(_cls)
+                        gt_center_2d.append(_center2d)
+                        gt_center_3d.append(_center3d)
+                        gt_size_2d.append(_size2d)
+                        gt_size_3d.append(_size3d)
+                        gt_depth.append(_depth)
+                        gt_heading_bin.append(_head_bin)
+                        gt_heading_res.append(_head_res)
 
         inputs = torch.tensor(img)
         info = {'img_id': index,
@@ -364,21 +250,21 @@ class KITTIDataset(data.Dataset):
             bboxes = torch.clip(torch.tensor(np.array(gt_boxes_2d) / self.resolution[[0, 1, 0, 1]]), 0, 1)
         else:
             bboxes = torch.empty(0)
-        ratio_pad = np.array([self.resolution /img_size, np.array([0, 0])])
+        ratio_pad = np.array([self.resolution / img_size, np.array([0, 0])])
         calib = torch.tensor(np.array([calib.cu * ratio_pad[0, 0], calib.cv * ratio_pad[0, 1],
                                        calib.fu * ratio_pad[0, 0], calib.fv * ratio_pad[0, 1],
                                        calib.tx * ratio_pad[0, 0], calib.ty * ratio_pad[0, 1]]))
 
-        return {
+        data = {
             "img": inputs,
             "ori_img": ori_img,
             "calib": calib,
             "info": info,
             "cls": torch.tensor(np.array(gt_cls)),
             "bboxes": bboxes,
-            "batch_idx": torch.zeros(len(gt_boxes_2d)), # Used during collate_fn
+            "batch_idx": torch.zeros(len(gt_boxes_2d)),  # Used during collate_fn
             "im_file": '%06d.txt' % info["img_id"],
-            "ori_shape": info["img_size"][::-1], # this one is (height, width)
+            "ori_shape": info["img_size"][::-1],  # this one is (height, width)
             "ratio_pad": torch.tensor(ratio_pad),
             "center_2d": torch.tensor(np.array(gt_center_2d)),
             "center_3d": torch.tensor(np.array(gt_center_3d)),
@@ -389,28 +275,137 @@ class KITTIDataset(data.Dataset):
             "heading_bin": torch.tensor(np.array(gt_heading_bin)),
             "heading_res": torch.tensor(np.array(gt_heading_res)),
         }
+        return data
+
+    def load_object(self, object_, scale, trans, calib):
+        valid = False
+        _box = 0
+        _cls = 0
+        _center2d = 0
+        _center3d = 0
+        _size2d = 0
+        _size3d = 0
+        _depth = 0
+        _head_bin = 0
+        _head_res = 0
+
+        if ((object_.cls_type not in self.writelist)
+                or (object_.behind_camera or (object_.pos[-1] * scale < self.min_depth_thres))
+                or not object_.valid3D or object_.num_lidar == 0 or object_.depth_error >= 0.5
+                or (object_.truncation >= 0.75 or (object_.visibility <= 0.25 and object_.visibility != -1))):
+            return valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res
+
+        # process 3d bbox & get 3d center
+        center_3d = object_.pos - [0, object_.h / 2, 0]  # real 3D center in 3D space
+        r_center_3d = center_3d.reshape(-1, 3)  # shape adjustment (N, 3)
+        center_3d, _ = calib.rect_to_img(r_center_3d)  # project 3D center to image plane
+        center_3d = center_3d[0]  # shape adjustment
+        center_3d = affine_transform(center_3d.reshape(-1), trans)
+        _center3d = center_3d.copy()
+
+        # process 2d bbox & get 2d center
+        bbox_2d = object_.box2d
+        # add affine transformation for 2d boxes.
+        bbox_2d[:2] = affine_transform(bbox_2d[:2], trans)
+        bbox_2d[2:] = affine_transform(bbox_2d[2:], trans)
+
+        _box = np.copy(bbox_2d)
+        _box = xyxy2xywh(_box)
+        _size2d = _box[2:]
+        _center2d = np.array([(bbox_2d[0] + bbox_2d[2]) / 2, (bbox_2d[1] + bbox_2d[3]) / 2],
+                             dtype=np.float32)  # W * H
+
+        # generate the center of gaussian heatmap [optional: 3d center or 2d center]
+        center_heatmap = center_3d.astype(np.int32)
+        if (center_heatmap[0] < 0 or center_heatmap[0] >= self.resolution[0]
+                or center_heatmap[1] < 0 or center_heatmap[1] >= self.resolution[1]):
+            return valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res
+
+        # encoding depth
+        depth = object_.pos[-1]
+        depth *= scale
+        if depth > self.max_depth_threshold:
+            return valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res
+
+        _cls = [self.cls2train_id[object_.cls_type]]
+
+        # encoding heading angle
+        # heading_angle = objects[i].alpha
+        heading_angle = calib.ry2alpha(object_.ry, (object_.box2d[0] + object_.box2d[2]) / 2)
+        if heading_angle > np.pi:  heading_angle -= 2 * np.pi  # check range
+        if heading_angle < -np.pi: heading_angle += 2 * np.pi
+        heading_bin, heading_res = angle2class(heading_angle)
+        _head_bin = heading_bin
+        _head_res = heading_res
+
+        _size3d = (np.array([object_.h, object_.w, object_.l], dtype=np.float32)
+                   - self.cls_mean_size[self.cls2train_id[object_.cls_type]])
+
+        if self.use_camera_dis:
+            r_center_3d *= scale
+            dep = np.linalg.norm(r_center_3d)
+            _depth = dep
+        else:
+            _depth = depth
+        valid = True
+        return valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res
+
+    def get_preds_and_gts(self, results):
+        pred_annos = {"bbox": [], "type": [], 'frame_id': [], "score": []}
+        gt_annos = {"bbox": [], "type": [], 'frame_id': [], "score": [], "diff": []}
+
+        for (key, value) in results.items():
+            frame_id = int(key.split(".")[0])
+
+            for pred in results[key]:
+                cls = self.cls2eval_id[self.train_id2cls[int(pred[0])]]
+                dim = pred[6:9][::-1] # h,w,l -> l,w,h
+                #dim = pred[6:9] # has to be length, width, height according to https://github.com/waymo-research/waymo-open-dataset/blob/master/src/waymo_open_dataset/metrics/python/detection_metrics.py
+                location = pred[9:12]
+                ry = [pred[12]]
+                score = float(pred[13])
+                pred_annos["bbox"].append(location + dim + ry)
+                pred_annos["type"].append(cls)
+                pred_annos["frame_id"].append(frame_id)
+                pred_annos["score"].append(score)
+
+            for gt in self.anns_by_img[frame_id]:
+                cls = self.cls2eval_id[self.data_id2cls[gt["category_id"]]]
+                dim = gt["dim"]
+                location = gt["translation"]
+                ry = [gt["rotation_y"]]
+                score = "1.0"
+                gt_annos["bbox"].append(location + dim[::-1] + ry) # h,w,l -> l,w,h
+                #gt_annos["bbox"].append(location + dim + ry)  FIXME
+                gt_annos["type"].append(cls)
+                gt_annos["frame_id"].append(frame_id)
+                gt_annos["score"].append(score)
+                gt_annos['diff'].append((2 if (gt['num_lidar'] <= 5 or gt['difficulty'] == 2) else 1))
+
+        return pred_annos, gt_annos
 
     def get_stats(self, results, save_dir):
-        self.save_results(results, output_dir=save_dir)
-        result = eval_from_scrach(
-            self.label_dir,
-            os.path.join(save_dir, 'preds'),
-            ap_mode=40)
-        return result["3d@0.70"][1]
+        pred_annos, gt_annos = self.get_preds_and_gts(results)
 
-    def save_results(self, results, output_dir='./outputs'):
-        output_dir = os.path.join(output_dir, 'preds')
-        os.makedirs(output_dir, exist_ok=True)
-        for img_file in results.keys():
-            out_path = os.path.join(output_dir, img_file)
-            f = open(out_path, 'w')
-            for i in range(len(results[img_file])):
-                class_name = self.class_name[int(results[img_file][i][0])]
-                f.write('{} 0.0 0'.format(class_name))
-                for j in range(1, len(results[img_file][i])):
-                    f.write(' {:.2f}'.format(results[img_file][i][j]))
-                f.write('\n')
-            f.close()
+        file_path = os.path.join(save_dir, "eval_results.json")
+        with open(file_path, "w") as f:
+            json.dump({
+                "pred": pred_annos,
+                "gt": gt_annos
+            }, f)
+
+        python = os.path.join(Path.home(), "anaconda3/envs/py36_waymo_tf/bin/python")
+        if not os.path.exists(python):
+            python = os.path.join(Path.home(), "miniconda3/envs/py36_waymo_tf/bin/python")
+        command = f"{python} -u ultralytics/data/datasets/waymo_eval.py --iou 0.7 --pred {file_path}"
+        lines = subprocess.check_output(command, shell= True, text= True, env={})
+
+        print(lines)
+        metric3d = float(lines.split("\n")[4].split("|")[2].strip().split(" ")[0])
+        return metric3d
+
+    def decode_preds_eval(self, preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=True, threshold=0.001):
+        return self.decode_preds(preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=undo_augment, threshold=threshold)
 
     def decode_batch_eval(self, batch, calibs, undo_augment=True):
         return self.decode_batch(batch, calibs, undo_augment=undo_augment)
@@ -461,10 +456,6 @@ class KITTIDataset(data.Dataset):
             results[batch["im_file"][i]] = targets
         return results
 
-    def decode_preds_eval(self, preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=True,
-                          threshold=0.001):
-        return self.decode_preds(preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=undo_augment, threshold=threshold)
-
     def decode_preds(self, preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=True,
                      threshold=0.001):
         preds = preds.detach().cpu()
@@ -486,7 +477,9 @@ class KITTIDataset(data.Dataset):
             for j, pred in enumerate(img):
                 cls_id = labels[i, j].item()
 
-                bbox_ = (bbox[i, j].numpy() / ratio_pad[i][0][[0, 1, 0, 1]]).tolist()
+                bbox_ = (bbox[i, j].numpy() / np.array([ratio_pad[i][0, 0], ratio_pad[i][0, 1], ratio_pad[i][0, 0],
+                                                        ratio_pad[i]
+                                                            [0, 1]])).tolist()
                 x = (bbox_[0] + bbox_[2]) / 2
 
                 dimensions = pred_s3d[i, j].numpy()
@@ -504,8 +497,8 @@ class KITTIDataset(data.Dataset):
                     else:
                         locations = calibs[i].img_to_rect(c3d[0], c3d[1], depth).reshape(-1)
                 else:
-                    x3d = pred_center3d[i, j, 0].numpy() * 1242 / 1280.0
-                    y3d = pred_center3d[i, j, 1].numpy() * 375 / 384.0
+                    x3d = pred_center3d[i, j, 0].numpy() / ratio_pad[i][0, 0]
+                    y3d = pred_center3d[i, j, 1].numpy() / ratio_pad[i][0, 1]
                     if self.use_camera_dis:
                         locations = calibs[i].camera_dis_to_rect(x3d, y3d, depth).reshape(-1)
                     else:
@@ -546,3 +539,7 @@ class KITTIDataset(data.Dataset):
             new_batch["batch_idx"][j] += j  # add target image index for build_targets()
         new_batch["batch_idx"] = torch.cat(new_batch["batch_idx"], 0)
         return new_batch
+
+    @staticmethod
+    def sort_by_id(categories):
+        return sorted(categories, key=lambda cat: cat['id'])

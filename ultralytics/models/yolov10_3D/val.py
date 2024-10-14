@@ -2,6 +2,7 @@ from ultralytics.models.yolo.detect import DetectionValidator
 from ultralytics.utils import ops
 from ultralytics.data.datasets.kitti import KITTIDataset
 from ultralytics.data.datasets.waymo import WaymoDataset
+from ultralytics.data.datasets.omni3d import Omni3Dataset
 from ultralytics.utils.plotting import KITTIVisualizer
 from ultralytics.utils.metrics import box_iou
 
@@ -16,6 +17,7 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
         self.args.save_json |= self.is_coco
         self.visualizer = KITTIVisualizer()
         self.results = {}
+        self.dino_model = None
 
     def build_dataset(self, img_path, mode="val", batch=None):
         dataset_yaml = self.args.data.split("/")[-1]
@@ -23,6 +25,8 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
             return KITTIDataset(img_path, mode, self.args)
         elif dataset_yaml == "waymo.yaml":
             return WaymoDataset(img_path, mode, self.args)
+        elif dataset_yaml == "omni3d.yaml":
+            return Omni3Dataset(img_path, mode, self.args)
         else:
             raise NotImplemented("Yolov10_3D only supports Kitti and Waymo datasets")
 
@@ -48,9 +52,29 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
             predsM = torch.cat((regM, scoresM.unsqueeze(-1), labelsM.unsqueeze(-1)), dim=-1)
             
             preds = self.aggregate_o2m_preds(preds, predsM)
+            
+        elif self.args.use_dino_depth:
+            preds = self.dino_depth_pred(preds)
         
         return preds
-    
+
+    def dino_depth_pred(self, preds):
+        if self.dino_model is None:
+            from ultralytics.utils.dino import DinoDepther
+            self.dino_model = DinoDepther()
+            self.dino_model.load(self.args.dino_path)
+        with torch.inference_mode():
+            imgs = self.batch["img"]
+            depth_maps, embeddings = self.dino_model.forward(imgs)
+            pred_center3d = preds[..., 4:6]
+            for batch_idx, center3d in enumerate(pred_center3d):
+                pred_deps = depth_maps[
+                    batch_idx,
+                    pred_center3d[batch_idx, :, 1].long().clamp(min=0, max=depth_maps.shape[1] - 1),
+                    pred_center3d[batch_idx, :, 0].long().clamp(min=0, max=depth_maps.shape[2] - 1)]
+                preds[batch_idx, :, -4] = pred_deps
+        return preds
+
     def aggregate_o2m_preds(self, predsO, predsM, thres=0.1):
         # bbox, pred_center3d, pred_s3d, pred_hd, pred_dep, pred_dep_un, scores, labels = preds.split((4, 2, 3, 24, 1, 1, 1, 1), dim=-1)
         bboxO = predsO[:, :, 0:4] # format: xyxy
@@ -84,6 +108,7 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
         for k in ["batch_idx", "bboxes", "cls", "depth", "center_3d", "center_2d", "size_2d", "heading_bin",
                   "heading_res", "size_3d", "calib"]:
             batch[k] = batch[k].to(self.device)
+        self.batch = batch
         return batch
 
     def update_metrics(self, preds, batch):
