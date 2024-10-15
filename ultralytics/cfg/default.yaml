@@ -128,6 +128,7 @@ overfit: False
 distillation: True
 distillation_temp: 2
 distillation_weight: 0.25
+distillation_loss: "mse"
 
 dfl: 1.5 # (float) dfl loss gain
 pose: 12.0 # (float) pose loss gain
