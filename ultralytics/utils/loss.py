@@ -1151,8 +1151,10 @@ class SupervisionLoss:
                     soft_prob = nn.functional.log_softmax(pred_emb / self.T, dim=-1)
                     loss[batch_idx] = torch.sum(soft_targets * (soft_targets.log() - soft_prob)) / soft_prob.size()[0] * (
                             self.T ** 2)
-                elif self.criterion == "mse" or self.criterion == "cos":
+                elif self.criterion == "mse":
                     loss[batch_idx] = self.loss(pred_emb, dino_emb)
+                elif self.criterion == "cos":
+                    loss[batch_idx] = self.loss(pred_emb, dino_emb, target=torch.ones(dino_emb.size(0)).to(dino_emb.device))
                 else:
                     raise RuntimeError(f"Unknown criterion function: {self.criterion}")
             else:
