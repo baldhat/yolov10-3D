@@ -51,14 +51,14 @@ class WaymoDataset(data.Dataset):
             ann["category"] = self.data_id2cls[ann["category_id"]]
             self.anns_by_img[ann['image_id']].append(ann)
 
-
         self.labels = self.get_labels()
 
         ##h,w,l
+        #self.calc_mean_cls_size()
         self.cls_mean_size = np.array([
-            [1.52563191462, 1.62856739989, 3.88311640418],
-            [1.76255119, 0.66068622, 0.84422524],
-            [1.73698127, 0.59706367, 1.76282397]])
+            [ 1.7974, 2.106,   4.8117],  # Car
+            [ 1.751,  0.85498, 0.90977], # Pedestrian
+            [ 1.7697, 0.83474, 1.769]])  # Cyclist
 
         # data augmentation configuration
         self.data_augmentation = True if self.mode in ['train', 'trainval'] else False
@@ -86,6 +86,21 @@ class WaymoDataset(data.Dataset):
         labels = [item for sublist in labels.values() for item in sublist]
         labels = [item for item in labels if self.data_id2cls[item["category_id"]] in self.writelist]
         return labels
+
+    def calc_mean_cls_size(self):
+        dims = {
+            "Car": (np.array([0, 0, 0], dtype=np.float64), 0),
+            "Pedestrian": (np.array([0, 0, 0], dtype=np.float64), 0),
+            "Cyclist": (np.array([0, 0, 0], dtype=np.float64), 0),
+        }
+        for i in range(self.__len__()):
+            index = int(self.idx_to_img_id[i])
+            objs = self.get_label(index)
+            for obj in objs:
+                dims[obj.cls_type] = (dims[obj.cls_type][0] + np.array([obj.h, obj.w, obj.l], dtype=np.float32), dims[obj.cls_type][1] + 1)
+        for key, value in dims.items():
+            dims[key] = (value[0] / value[1], value[1])
+        print(f"Mean dimensions (h, w, l): {dims}")
 
     def get_calib(self, idx):
         calib = self.imgs[idx]["calib"]

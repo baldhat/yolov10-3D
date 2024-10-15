@@ -1121,6 +1121,11 @@ class SupervisionLoss:
         self.foundation_model.load(self.args.dino_path)
         self.T = self.args.distillation_temp
         self.weight = self.args.distillation_weight
+        self.criterion = self.args.distillation_loss
+        if self.criterion == "cos":
+            self.loss = nn.CosineEmbeddingLoss()
+        elif self.criterion == "mse":
+            self.loss = nn.MSELoss()
 
     def forward(self, imgs, gt_center_3d, pred_embeddings, fg_mask, target_gt_idx, mask_gt):
         loss = torch.zeros(imgs.shape[0], device=imgs.device)
@@ -1141,10 +1146,15 @@ class SupervisionLoss:
                 ][target_gt_idx[batch_idx][fg_mask[batch_idx]]]
                 pred_emb = pred_embeddings.transpose(1, 2)[batch_idx][fg_mask[batch_idx]]
 
-                soft_targets = nn.functional.softmax(dino_emb / self.T, dim=-1)
-                soft_prob = nn.functional.log_softmax(pred_emb / self.T, dim=-1)
-                loss[batch_idx] = torch.sum(soft_targets * (soft_targets.log() - soft_prob)) / soft_prob.size()[0] * (
+                if self.criterion == "soft":
+                    soft_targets = nn.functional.softmax(dino_emb / self.T, dim=-1)
+                    soft_prob = nn.functional.log_softmax(pred_emb / self.T, dim=-1)
+                    loss[batch_idx] = torch.sum(soft_targets * (soft_targets.log() - soft_prob)) / soft_prob.size()[0] * (
                             self.T ** 2)
+                elif self.criterion == "mse" or self.criterion == "cos":
+                    loss[batch_idx] = self.loss(pred_emb, dino_emb)
+                else:
+                    raise RuntimeError(f"Unknown criterion function: {self.criterion}")
             else:
                 loss[batch_idx] = 0
         return loss.sum() * self.weight
