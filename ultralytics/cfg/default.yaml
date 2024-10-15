@@ -24,7 +24,7 @@ exist_ok: False # (bool) whether to overwrite existing experiment
 pretrained: True # (bool | str) whether to use a pretrained model (bool) or a model to load weights from (str)
 optimizer: AdamW # (str) optimizer to use, choices=[SGD, Adam, Adamax, AdamW, NAdam, RAdam, RMSProp, auto]
 verbose: True # (bool) whether to print verbose output
-seed: 5 # (int) random seed for reproducibility
+seed: 1 # (int) random seed for reproducibility
 deterministic: True # (bool) whether to enable deterministic mode
 single_cls: False # (bool) train multi-class data as single-class
 rect: False # (bool) rectangular training if mode='train' or rectangular validation if mode='val'
@@ -67,7 +67,7 @@ retina_masks: False # (bool) use high-resolution segmentation masks
 embed: # (list[int], optional) return feature vectors/embeddings from given layers
 use_o2m_depth: False
 use_dino_depth: False
-dino_path:
+dino_path: /home/stud/mijo/experiments/results/dino_lr1e-4/dino/best.pt
 
 # Visualize settings ---------------------------------------------------------------------------------------------------
 show: False # (bool) show predicted images and videos if environment allows
@@ -127,7 +127,7 @@ max_scale: 1.4
 overfit: False
 distillation: True
 distillation_temp: 2
-distillation_weight: 0.25
+distillation_weight: 0.75
 
 dfl: 1.5 # (float) dfl loss gain
 pose: 12.0 # (float) pose loss gain
