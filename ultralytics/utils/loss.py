@@ -870,7 +870,7 @@ class DDDetectionLoss:
             embeddings = torch.cat([emb.view(feats[0].shape[0], 128, -1) for emb in embeddings], dim=2)
             loss[6] = self.supervisor.forward(
                 batch["img"].detach(), gt_center_3d, embeddings, fg_mask.bool(),
-                target_gt_idx, mask_gt.bool().squeeze(-1)
+                target_gt_idx, mask_gt.bool().squeeze(-1), batch["mixed"].bool()
             ) / target_scores_sum
 
         return loss.sum() * batch_size, loss
@@ -1122,12 +1122,13 @@ class SupervisionLoss:
         self.T = self.args.distillation_temp
         self.weight = self.args.distillation_weight
         self.criterion = self.args.distillation_loss
+        self.no_mixup = self.args.distillation_no_mixup
         if self.criterion == "cos":
             self.loss = nn.CosineEmbeddingLoss()
         elif self.criterion == "mse":
             self.loss = nn.MSELoss()
 
-    def forward(self, imgs, gt_center_3d, pred_embeddings, fg_mask, target_gt_idx, mask_gt):
+    def forward(self, imgs, gt_center_3d, pred_embeddings, fg_mask, target_gt_idx, mask_gt, mixed_mask):
         loss = torch.zeros(imgs.shape[0], device=imgs.device)
 
         with torch.no_grad():
@@ -1135,7 +1136,7 @@ class SupervisionLoss:
         #self.plot_depth_maps(depth_maps, imgs)
 
         for batch_idx in range(depth_maps.shape[0]):
-            if mask_gt[batch_idx].any():
+            if mask_gt[batch_idx].any() and (not self.no_mixup or not mixed_mask[batch_idx]):
                 img_size = torch.tensor(imgs.shape[2:][::-1], device=gt_center_3d.device)
                 dino_embed_size = torch.tensor(dino_embeddings.shape[2:][::-1], device=gt_center_3d.device)
                 center3d = gt_center_3d[batch_idx][mask_gt[batch_idx]] / img_size * dino_embed_size

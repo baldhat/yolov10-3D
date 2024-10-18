@@ -551,12 +551,14 @@ class v10Detect3d(nn.Module):
     anchors = torch.empty(0)  # init
     strides = torch.empty(0)  # init
 
-    def __init__(self, nc=80, ch=(), dsconv=False, channels=None, use_predecessors=False, detach_predecessors=True, deform=False, common_head=False):
+    def __init__(self, nc=80, ch=(), dsconv=False, channels=None, use_predecessors=False, detach_predecessors=True,
+                 deform=False, common_head=False, num_scales=3, half_channels=False):
         super().__init__()
         assert (channels is not None)
         self.nc = nc  # number of classes
         self.dsconv = dsconv
-        self.nl = len(ch)  # number of detection layers
+        self.nl = num_scales
+        self.half_channels = half_channels
         self.output_channels = {
             "cls": self.nc,
             "o2d": 2,
@@ -586,6 +588,7 @@ class v10Detect3d(nn.Module):
         }
         self.dep_norm = 65.0
 
+        ch = [ch[i] for i in range(self.nl)]
         self.cls_in_ch = [ch_ + self.sum_predecessor_chs(self.predecessors["cls"]) if self.use_predecessors else ch_ for ch_ in ch]
         self.o2d_in_ch = [ch_ + self.sum_predecessor_chs(self.predecessors["o2d"]) if self.use_predecessors else ch_ for ch_ in ch]
         self.s2d_in_ch = [ch_ + self.sum_predecessor_chs(self.predecessors["s2d"]) if self.use_predecessors else ch_ for ch_ in ch]
@@ -606,24 +609,24 @@ class v10Detect3d(nn.Module):
             self.dep = self.build_small_head(ch, channels["dep_c"], 1, self.dsconv)
             self.dep_un = self.build_small_head(ch, channels["dep_un_c"], 1, self.dsconv)
         else:
-            self.cls = self.build_head(self.cls_in_ch, channels["cls_c"], self.nc, self.dsconv, self.deform)
-            self.o2d = self.build_head(self.o2d_in_ch, channels["o2d_c"], 2, self.dsconv, self.deform)
-            self.s2d = self.build_head(self.s2d_in_ch, channels["s2d_c"], 2, self.dsconv, self.deform)
-            self.o3d = self.build_head(self.o3d_in_ch, channels["o3d_c"], 2, self.dsconv, self.deform)
-            self.s3d = self.build_head(self.s3d_in_ch, channels["s3d_c"], 3, self.dsconv, self.deform)
-            self.hd = self.build_head(self.hd_in_ch, channels["hd_c"], 24, self.dsconv, self.deform)
-            self.dep = self.build_head(self.dep_in_ch, channels["dep_c"], 1, self.dsconv, self.deform)
-            self.dep_un = self.build_head(self.dep_un_in_ch, channels["dep_un_c"], 1, self.dsconv, self.deform, activation=False)
+            self.cls = self.build_head(self.cls_in_ch, channels["cls_c"], self.nc, self.dsconv, self.deform, half_channels=self.half_channels)
+            self.o2d = self.build_head(self.o2d_in_ch, channels["o2d_c"], 2, self.dsconv, self.deform, half_channels=self.half_channels)
+            self.s2d = self.build_head(self.s2d_in_ch, channels["s2d_c"], 2, self.dsconv, self.deform, half_channels=self.half_channels)
+            self.o3d = self.build_head(self.o3d_in_ch, channels["o3d_c"], 2, self.dsconv, self.deform, half_channels=self.half_channels)
+            self.s3d = self.build_head(self.s3d_in_ch, channels["s3d_c"], 3, self.dsconv, self.deform, half_channels=self.half_channels)
+            self.hd = self.build_head(self.hd_in_ch, channels["hd_c"], 24, self.dsconv, self.deform, half_channels=self.half_channels)
+            self.dep = self.build_head(self.dep_in_ch, channels["dep_c"], 1, self.dsconv, self.deform, half_channels=self.half_channels)
+            self.dep_un = self.build_head(self.dep_un_in_ch, channels["dep_un_c"], 1, self.dsconv, self.deform, half_channels=self.half_channels)
 
         self.o2o_heads = nn.ModuleList(
             [self.cls, self.o2d, self.s2d, self.o3d, self.s3d, self.hd, self.dep, self.dep_un])
         self.o2m_heads = copy.deepcopy(self.o2o_heads)
 
     @staticmethod
-    def build_head(in_channels, mid_channels, output_channels, dsconv, deform, activation=False):
+    def build_head(in_channels, mid_channels, output_channels, dsconv, deform, half_channels=False):
         return nn.ModuleList(nn.Sequential(v10Detect3d.build_conv(x, mid_channels, 3, dsconv,  deform=deform),
-                                           v10Detect3d.build_conv(mid_channels, mid_channels, 3, dsconv),
-                                           nn.Conv2d(mid_channels, output_channels, 1)
+                                           v10Detect3d.build_conv(mid_channels, mid_channels // 2 if half_channels else mid_channels, 3, dsconv),
+                                           nn.Conv2d(mid_channels // 2 if half_channels else mid_channels, output_channels, 1)
                                            )
                              for x in in_channels
         )
@@ -764,8 +767,14 @@ class v10Detect3d(nn.Module):
         return torch.cat((xy, wh), dim=1)
 
     def bias_init(self):
-        deps = [45, 25, 10]
-        ranges = [[-2, 2], [-1.5, 1.5], [-1, 1]]
+        if self.nl == 1:
+            deps = [40]
+            ranges = [[-3.5, 3.5]]
+        elif self.nl == 3:
+            deps = [45, 25, 10]
+            ranges = [[-2, 2], [-1.5, 1.5], [-1, 1]]
+        else:
+            raise RuntimeError("Initialization only set for 1 and 3 scales")
         for i in range(self.nl):
             self.cls[i][-1].bias.data[: self.nc] = math.log(5 / self.nc / ((1280 / self.stride[i]) * (384 / self.stride[i])))
             self.s2d[i][-1].bias.data.fill_(6)

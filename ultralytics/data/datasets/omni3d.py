@@ -274,6 +274,7 @@ class Omni3Dataset(data.Dataset):
             "mean_sizes": torch.tensor(self.cls_mean_size),
             "heading_bin": torch.tensor(np.array(gt_heading_bin)),
             "heading_res": torch.tensor(np.array(gt_heading_res)),
+            "mixed": torch.tensor(np.array(random_mix_flag, dtype=np.uint8))
         }
         return data
 
@@ -525,7 +526,7 @@ class Omni3Dataset(data.Dataset):
         values = list(zip(*[list(b.values()) for b in batch]))
         for i, k in enumerate(keys):
             value = values[i]
-            if k in ["img", "coord_range", "ratio_pad", "calib"]:
+            if k in ["img", "coord_range", "ratio_pad", "calib", "mixed"]:
                 value = torch.stack(value, 0)
             if k in ["bboxes", "cls", "depth", "center_3d", "center_2d", "size_2d", "heading_bin",
                      "heading_res", "size_3d"]:

@@ -102,7 +102,7 @@ warmup_bias_lr: 0.1 # (float) warmup initial bias lr
 box: 5 # (float) 2dbox loss gain
 
 # Losses
-cls: 1 # (float) cls l oss gain (scale with pixels)
+cls: 1 # (float) cls loss gain (scale with pixels)
 loss2d: 2 # (float) box loss gain
 depth: 1 # (float) depth loss gain
 offset3d: 10 # (float) 3d pixel offset loss gain
@@ -128,7 +128,9 @@ overfit: False
 distillation: True
 distillation_temp: 2
 distillation_weight: 0.75
-distillation_loss: "mse"
+distillation_loss: "cos"
+distillation_no_mixup: False
+load_depth_maps: False
 
 dfl: 1.5 # (float) dfl loss gain
 pose: 12.0 # (float) pose loss gain

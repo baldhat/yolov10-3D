@@ -1,5 +1,7 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
 import os
+
+import cv2
 import torch
 import pathlib
 from ultralytics.data.datasets.decode_helper import  *
@@ -23,6 +25,7 @@ class KITTIDataset(data.Dataset):
         self.cls2train_id = {'Car': 0, 'Pedestrian': 1, 'Cyclist': 2}
         self.resolution = np.array([1280, 384])  # W * H
         self.use_3d_center = True  # cfg['use_3d_center']
+        self.load_depth_maps = args.load_depth_maps
         self.use_camera_dis = args.cam_dis
         self.writelist = ['Car' ,'Pedestrian' ,'Cyclist']
 
@@ -67,11 +70,7 @@ class KITTIDataset(data.Dataset):
         self.max_depth_threshold = args.max_depth_threshold
         self.min_depth_thres = args.min_depth_threshold
 
-        # statistics
-        # self.mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-        # self.std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-        self.mean = 0
-        self.std = 1
+        os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 
     def get_image(self, idx):
         img_file = os.path.join(self.image_dir, '%06d.png' % idx)
@@ -82,6 +81,18 @@ class KITTIDataset(data.Dataset):
         label_file = os.path.join(self.label_dir, '%06d.txt' % idx)
         assert os.path.exists(label_file)
         return get_objects_from_label(label_file)
+
+    def get_segmentation(self, idx):
+        segmentation_file = os.path.join(self.image_dir, '%06d_seg.png' % idx)
+        assert os.path.exists(segmentation_file)
+        return cv2.imread(segmentation_file, -1)
+
+    def get_depth_map(self, idx):
+        depth_file = os.path.join(self.image_dir, '%06d_depth.exr' % idx)
+        assert os.path.exists(depth_file)
+        file = cv2.imread(depth_file, -1)
+        return Image.fromarray(np.where(file <= 0, self.max_depth_threshold + 1, file))
+
 
     def get_labels(self):
         labels = [self.get_label(int(idx)) for idx in self.idx_list]
@@ -109,6 +120,9 @@ class KITTIDataset(data.Dataset):
         if self.split != 'test':
             dst_W, dst_H = img_size
 
+        if self.load_depth_maps:
+            depth_map = self.get_depth_map(index)
+
         # data augmentation for image
         center = np.array(img_size) / 2
         crop_size = img_size
@@ -124,6 +138,8 @@ class KITTIDataset(data.Dataset):
             if np.random.random() < self.random_flip:
                 random_flip_flag = True
                 img = img.transpose(Image.FLIP_LEFT_RIGHT)
+                if self.load_depth_maps:
+                    depth_map = depth_map.transpose(Image.FLIP_LEFT_RIGHT)
 
             if np.random.random() < self.random_crop:
                 random_crop_flag = True
@@ -148,6 +164,8 @@ class KITTIDataset(data.Dataset):
 
                 if calib_temp.cu == calib.cu and calib_temp.cv == calib.cv and calib_temp.fu == calib.fu and calib_temp.fv == calib.fv:
                     img_temp = self.get_image(random_index)
+                    if self.load_depth_maps:
+                        depth_map_temp = self.get_depth_map(random_index)
                     img_size_temp = np.array(img.size)
                     dst_W_temp, dst_H_temp = img_size_temp
                     if dst_W_temp == dst_W and dst_H_temp == dst_H:
@@ -157,8 +175,14 @@ class KITTIDataset(data.Dataset):
                             random_mix_flag = True
                             if random_flip_flag == True:
                                 img_temp = img_temp.transpose(Image.FLIP_LEFT_RIGHT)
+                                depth_map_temp = depth_map_temp.transpose(Image.FLIP_LEFT_RIGHT)
+
                             img_blend = Image.blend(img, img_temp, alpha=0.5)
                             img = img_blend
+                            if self.load_depth_maps:
+                                depth_map_temp_np = np.array(depth_map_temp)
+                                depth_map_np = np.array(depth_map)
+                                depth_map = Image.fromarray(np.minimum(depth_map_temp_np, depth_map_np))
                             break
 
         # add affine transformation for 2d images.
@@ -167,6 +191,12 @@ class KITTIDataset(data.Dataset):
                             method=Image.AFFINE,
                             data=tuple(trans_inv.reshape(-1).tolist()),
                             resample=Image.BILINEAR)
+        if self.load_depth_maps:
+            depth_map = np.array(depth_map.transform(tuple(self.resolution.tolist()),
+                            method=Image.AFFINE,
+                            data=tuple(trans_inv.reshape(-1).tolist()),
+                            resample=Image.NEAREST)).astype(np.float32)
+            depth_map = np.minimum(depth_map, self.max_depth_threshold)
 
         # image encoding
         img = np.array(img).astype(np.float32) / 255.0
@@ -368,6 +398,7 @@ class KITTIDataset(data.Dataset):
         calib = torch.tensor(np.array([calib.cu * ratio_pad[0, 0], calib.cv * ratio_pad[0, 1],
                                        calib.fu * ratio_pad[0, 0], calib.fv * ratio_pad[0, 1],
                                        calib.tx * ratio_pad[0, 0], calib.ty * ratio_pad[0, 1]]))
+        depth_map = torch.tensor(np.where(depth_map >= self.max_depth_threshold, 0, depth_map)) * scale if self.load_depth_maps else None
 
         return {
             "img": inputs,
@@ -385,9 +416,11 @@ class KITTIDataset(data.Dataset):
             "size_2d": torch.tensor(np.array(gt_size_2d)),
             "size_3d": torch.tensor(np.array(gt_size_3d)),
             "depth": torch.tensor(np.array(gt_depth)),
+            "depth_map": depth_map,
             "mean_sizes": torch.tensor(self.cls_mean_size),
             "heading_bin": torch.tensor(np.array(gt_heading_bin)),
             "heading_res": torch.tensor(np.array(gt_heading_res)),
+            "mixed": torch.tensor(np.array(random_mix_flag, dtype=np.uint8))
         }
 
     def get_stats(self, results, save_dir):
@@ -532,7 +565,7 @@ class KITTIDataset(data.Dataset):
         values = list(zip(*[list(b.values()) for b in batch]))
         for i, k in enumerate(keys):
             value = values[i]
-            if k in ["img", "coord_range", "ratio_pad", "calib"]:
+            if k in ["img", "coord_range", "ratio_pad", "calib", "mixed", "depth_map"]:
                 value = torch.stack(value, 0)
             if k in ["bboxes", "cls", "depth", "center_3d", "center_2d", "size_2d", "heading_bin",
                      "heading_res", "size_3d"]:
