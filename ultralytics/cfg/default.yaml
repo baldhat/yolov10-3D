@@ -130,6 +130,7 @@ distillation_temp: 2
 distillation_weight: 0.25
 distillation_loss: "cos"
 distillation_no_mixup: True
+load_depth_maps: True
 
 dfl: 1.5 # (float) dfl loss gain
 pose: 12.0 # (float) pose loss gain

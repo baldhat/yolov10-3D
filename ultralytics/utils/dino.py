@@ -203,7 +203,7 @@ def preprocess_gts(targets, batch_size):
             out[j, :n] = targets[matches, 1:]
     return out
 
-def get_loss(output, batch):
+def get_sparse_loss(output, batch):
     batch_size = output.shape[0]
     gt_batchid = batch["batch_idx"]
     gt_depths = batch["depth"]
@@ -219,6 +219,11 @@ def get_loss(output, batch):
             loss[batch_idx] = torch.nn.functional.smooth_l1_loss(pred_deps.double()[mask_gt[batch_idx]], gt_depths[batch_idx].double()[mask_gt[batch_idx]], reduction="sum") / num_objects
     return loss.sum() / batch_size
 
+def get_depth_map_loss(output, batch):
+    depth_map = batch["depth_map"].cuda()
+    mask = depth_map > 0
+    return torch.nn.functional.smooth_l1_loss(output[mask], depth_map[mask], reduction="mean")
+
 def validate(epoch_index, model, dataloader):
     model.eval()
     mean_loss = 0
@@ -226,9 +231,10 @@ def validate(epoch_index, model, dataloader):
         pbar = tqdm.tqdm(enumerate(dataloader), total=len(dataloader))
         for i, batch in pbar:
             pred, feats = model(batch["img"].cuda())
-            loss = get_loss(pred, batch)
+            # loss = get_sparse_loss(pred, batch)
+            loss = get_depth_map_loss(pred, batch)
             mean_loss += loss.item()
-            pbar.set_description(f"Eval Epoch {epoch_index}: MSE: {loss.item()}")
+            pbar.set_description(f"Eval Epoch {epoch_index}: Loss: {loss.item()}")
     print(f"Mean loss: {mean_loss / len(dataloader)}")
     return mean_loss / len(dataloader)
 
@@ -239,9 +245,9 @@ def train_one_epoch(epoch_index, model, dataloader, optimizer):
     for i, batch in pbar:
         optimizer.zero_grad()
         pred, feats = model(batch["img"].cuda())
-        loss = get_loss(pred, batch)
+        loss = get_depth_map_loss(pred, batch)
         mean_loss += loss.item()
-        pbar.set_description(f"Epoch {epoch_index}: MSE: {loss.item()}")
+        pbar.set_description(f"Epoch {epoch_index}: Loss: {loss.item()}")
         loss.backward()
         optimizer.step()
     print(f"Mean loss: {mean_loss / len(dataloader)}")
@@ -255,27 +261,29 @@ class Args:
     min_scale = 0.6
     max_scale = 1.4
     translate = 0.1
-    mixup = 0.5
+    mixup = 0.0
     max_depth_threshold = 70
     min_depth_threshold = 0.5
     seed = 1
+    load_depth_maps = True
     
 
 def main(save_dir):
-    train_file_path = "/home/stud/mijo/dev/datasets/KITTI/ImageSets/train.txt"
-    val_file_path = "/home/stud/mijo/dev/datasets/KITTI/ImageSets/val.txt"
+    path = os.environ["KITTI_PATH"]
+    train_file_path = os.path.join(path, "ImageSets/train.txt")
+    val_file_path = os.path.join(path, "ImageSets/val.txt")
     args = Args()
     train_dataset = KITTIDataset(train_file_path, "train", args)
     val_dataset = KITTIDataset(val_file_path, "val", args)
-    train_dataloader = build_dataloader(train_dataset, 64, 8, shuffle=True)
-    val_dataloader = build_dataloader(val_dataset, 64, 8, shuffle=False)
+    train_dataloader = build_dataloader(train_dataset, 12, 8, shuffle=True)
+    val_dataloader = build_dataloader(val_dataset, 16, 8, shuffle=False)
 
     model = DinoDepther()
     model.train()
 
     freeze_backbone(model)
 
-    optimizer = torch.optim.Adam(model.head.parameters(), lr=6e-5)
+    optimizer = torch.optim.Adam(model.head.parameters(), lr=1e-4)
     lr_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer=optimizer, start_factor=1.0, end_factor=0.1, total_iters=100)
 
     best_eval_loss = 100000
@@ -285,7 +293,9 @@ def main(save_dir):
 
     for epoch in range(100):
         train_loss = train_one_epoch(epoch, model, train_dataloader, optimizer)
+        torch.cuda.empty_cache()
         eval_loss = validate(epoch, model, val_dataloader)
+        torch.cuda.empty_cache()
 
         train_losses.append(train_loss)
         val_losses.append(eval_loss)
