@@ -1,8 +1,13 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
 import math
+import warnings
+from typing import Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchvision import transforms
+from torchvision.transforms.functional import InterpolationMode
 
 from ultralytics.utils.metrics import OKS_SIGMA
 from ultralytics.utils.ops import crop_mask, xywh2xyxy, xyxy2xywh
@@ -48,9 +53,9 @@ class FocalLoss(nn.Module):
         super().__init__()
 
     @staticmethod
-    def forward(pred, label, gamma=1.5, alpha=0.25):
+    def forward(pred, label, gamma=1.5, alpha=0.25, reduction="none"):
         """Calculates and updates confusion matrix for object detection/classification tasks."""
-        loss = F.binary_cross_entropy_with_logits(pred, label, reduction="none")
+        loss = F.binary_cross_entropy_with_logits(pred, label, reduction=reduction)
         # p_t = torch.exp(-loss)
         # loss *= self.alpha * (1.000001 - p_t) ** self.gamma  # non-zero power for gradient stability
 
@@ -736,13 +741,22 @@ class DetectLoss3d:
     def __init__(self, model):
         self.one2many = DDDetectionLoss(model, tal_topk=model.args.tal_topk)
         self.one2one = DDDetectionLoss(model, tal_topk=1)
+        self.model = model
+        if self.model.args.fgdm_loss:
+            self.fgdm_loss_func = ForegroundDepthMapLoss(self.model)
 
     def __call__(self, preds, batch):
         one2many, o2m_embs = preds["one2many"], preds["o2m_embs"]
         loss_one2many = self.one2many(one2many, batch, embeddings=o2m_embs)
         one2one, o2o_embs = preds["one2one"], preds["o2o_embs"]
         loss_one2one = self.one2one(one2one, batch, embeddings=o2o_embs)
-        return loss_one2many[0] + loss_one2one[0], torch.cat((loss_one2many[1], loss_one2one[1]))
+        if self.model.args.fgdm_loss:
+            gt_depth_maps = batch["depth_map"].to(preds["depth_maps"][0].device)
+            depth_logits = preds["depth_maps"][0]
+            fgdm_loss = self.fgdm_loss_func(depth_logits, gt_depth_maps)
+            return loss_one2many[0] + loss_one2one[0] + fgdm_loss, torch.cat((loss_one2many[1], loss_one2one[1], fgdm_loss.unsqueeze(0)))
+        else:
+            return loss_one2many[0] + loss_one2one[0], torch.cat((loss_one2many[1], loss_one2one[1]))
 
 
 class DDDetectionLoss:
@@ -757,8 +771,6 @@ class DDDetectionLoss:
         self.nc = m.nc  # number of classes
         self.no = m.no
         self.device = device
-
-        self.use_dfl = False
 
         self.assigner = TaskAlignedAssigner3d(topk=tal_topk, num_classes=self.nc,
                                               alpha=model.args.tal_alpha, beta=model.args.tal_beta,
@@ -1174,3 +1186,346 @@ class SupervisionLoss:
             ax.imshow(res)
 
         plt.show()
+
+
+class ForegroundDepthMapLoss(nn.Module):
+
+    def __init__(self,
+                 model,
+                 alpha=0.25,
+                 gamma=2.0,
+                 fg_weight=13,
+                 bg_weight=1,
+                 downsample_factor=1):
+        """
+        Initializes DDNLoss module
+        Args:
+            weight [float]: Loss function weight
+            alpha [float]: Alpha value for Focal Loss
+            gamma [float]: Gamma value for Focal Loss
+            disc_cfg [dict]: Depth discretiziation configuration
+            fg_weight [float]: Foreground loss weight
+            bg_weight [float]: Background loss weight
+            downsample_factor [int]: Depth map downsample factor
+        """
+        super().__init__()
+        self.device = next(model.parameters()).device  # get model device
+        self.args = model.args
+        self.num_bins = 80
+        self.model = model
+        self.balancer = Balancer(
+            downsample_factor=downsample_factor,
+            fg_weight=fg_weight,
+            bg_weight=bg_weight)
+
+        # Set loss function
+        self.alpha = alpha
+        self.gamma = gamma
+        self.loss_func = LogitFocalLoss(alpha=self.alpha, gamma=self.gamma, reduction="none")
+
+    def bin_depths(self, depth_map, depth_min, depth_max, num_bins, target=False):
+        mode = "LID"
+        """
+        Converts depth map into bin indices
+        Args:
+            depth_map [torch.Tensor(H, W)]: Depth Map
+            mode [string]: Discretiziation mode (See https://arxiv.org/pdf/2005.13423.pdf for more details)
+                UD: Uniform discretiziation
+                LID: Linear increasing discretiziation
+                SID: Spacing increasing discretiziation
+            depth_min [float]: Minimum depth value
+            depth_max [float]: Maximum depth value
+            num_bins [int]: Number of depth bins
+            target [bool]: Whether the depth bins indices will be used for a target tensor in loss comparison
+        Returns:
+            indices [torch.Tensor(H, W)]: Depth bin indices
+        """
+        if mode == "UD":
+            bin_size = (depth_max - depth_min) / num_bins
+            indices = ((depth_map - depth_min) / bin_size)
+        elif mode == "LID":
+            bin_size = 2 * (depth_max - depth_min) / (num_bins * (1 + num_bins))
+            indices = -0.5 + 0.5 * torch.sqrt(1 + 8 * (depth_map - depth_min) / bin_size)
+        elif mode == "SID":
+            indices = num_bins * (torch.log(1 + depth_map) - math.log(1 + depth_min)) / \
+                      (math.log(1 + depth_max) - math.log(1 + depth_min))
+        else:
+            raise NotImplementedError
+
+        if target:
+            # Remove indicies outside of bounds
+            mask = (indices < 0) | (indices > num_bins) | (~torch.isfinite(indices))
+            indices[mask] = num_bins
+
+            # Convert to integer
+            indices = indices.type(torch.int64)
+
+        return indices
+
+    def forward(self, depth_logits, depth_maps):
+        """
+        Gets depth_map loss
+        Args:
+            depth_logits: torch.Tensor(B, D+1, H, W)]: Predicted depth logits
+            gt_boxes2d [torch.Tensor (B, N, 4)]: 2D box labels for foreground/background balancing
+            num_gt_per_img:
+            gt_center_depth:
+        Returns:
+            loss [torch.Tensor(1)]: Depth classification network loss
+        """
+
+        # downsample depth_maps by 8
+        depth_maps = transforms.Resize(size=[depth_maps.shape[1] // 16, depth_maps.shape[2] // 16], interpolation=InterpolationMode.NEAREST)(depth_maps)
+        # Bin depth map to create target
+        depth_target = self.bin_depths(depth_maps,
+                                       target=True,
+                                       depth_min=self.args.min_depth_threshold,
+                                       depth_max=self.args.max_depth_threshold,
+                                       num_bins=self.num_bins)
+        # Compute loss
+        loss = self.loss_func(depth_logits, depth_target.long())
+        # Compute foreground/background balancing
+        loss = self.balancer(loss=loss, fg_mask=depth_maps>0)
+
+        return loss
+
+
+class Balancer(nn.Module):
+    def __init__(self, fg_weight, bg_weight, downsample_factor=1):
+        """
+        Initialize fixed foreground/background loss balancer
+        Args:
+            fg_weight [float]: Foreground loss weight
+            bg_weight [float]: Background loss weight
+            downsample_factor [int]: Depth map downsample factor
+        """
+        super().__init__()
+        self.fg_weight = fg_weight
+        self.bg_weight = bg_weight
+        self.downsample_factor = downsample_factor
+
+    def forward(self, loss, fg_mask):
+        """
+        Forward pass
+        Args:
+            loss [torch.Tensor(B, H, W)]: Pixel-wise loss
+            gt_boxes2d [torch.Tensor (B, N, 4)]: 2D box labels for foreground/background balancing
+        Returns:
+            loss [torch.Tensor(1)]: Total loss after foreground/background balancing
+            tb_dict [dict[float]]: All losses to log in tensorboard
+        """
+        # Compute masks
+        bg_mask = ~fg_mask
+
+        # Compute balancing weights
+        weights = self.fg_weight * fg_mask + self.bg_weight * bg_mask
+        num_pixels = fg_mask.sum() + bg_mask.sum()
+
+        # Compute losses
+        loss *= weights
+        fg_loss = loss[fg_mask].sum() / num_pixels
+        bg_loss = loss[bg_mask].sum() / num_pixels
+
+        # Get total loss
+        loss = fg_loss + bg_loss
+        return loss
+
+
+def compute_fg_mask(gt_boxes2d, shape, num_gt_per_img, downsample_factor=1, device=torch.device("cpu")):
+    """
+    Compute foreground mask for images
+    Args:
+        gt_boxes2d [torch.Tensor(B, N, 4)]: 2D box labels
+        shape [torch.Size or tuple]: Foreground mask desired shape
+        downsample_factor [int]: Downsample factor for image
+        device [torch.device]: Foreground mask desired device
+    Returns:
+        fg_mask [torch.Tensor(shape)]: Foreground mask
+    """
+    #ipdb.set_trace()
+    fg_mask = torch.zeros(shape, dtype=torch.bool, device=device)
+
+    # Set box corners
+    gt_boxes2d /= downsample_factor
+    gt_boxes2d[:, :2] = torch.floor(gt_boxes2d[:, :2])
+    gt_boxes2d[:, 2:] = torch.ceil(gt_boxes2d[:, 2:])
+    gt_boxes2d = gt_boxes2d.long()
+
+    # Set all values within each box to True
+    gt_boxes2d = gt_boxes2d.split(num_gt_per_img, dim=0)
+    B = len(gt_boxes2d)
+    for b in range(B):
+        for n in range(gt_boxes2d[b].shape[0]):
+            u1, v1, u2, v2 = gt_boxes2d[b][n]
+            fg_mask[b, v1:v2, u1:u2] = True
+
+    return fg_mask
+
+
+def one_hot(
+        labels: torch.Tensor,
+        num_classes: int,
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
+        eps: float = 1e-6,
+) -> torch.Tensor:
+    r"""Convert an integer label x-D tensor to a one-hot (x+1)-D tensor.
+    Args:
+        labels: tensor with labels of shape :math:`(N, *)`, where N is batch size.
+          Each value is an integer representing correct classification.
+        num_classes: number of classes in labels.
+        device: the desired device of returned tensor.
+        dtype: the desired data type of returned tensor.
+    Returns:
+        the labels in one hot tensor of shape :math:`(N, C, *)`,
+    Examples:
+        >>> labels = torch.LongTensor([[[0, 1], [2, 0]]])
+        >>> one_hot(labels, num_classes=3)
+        tensor([[[[1.0000e+00, 1.0000e-06],
+                  [1.0000e-06, 1.0000e+00]],
+        <BLANKLINE>
+                 [[1.0000e-06, 1.0000e+00],
+                  [1.0000e-06, 1.0000e-06]],
+        <BLANKLINE>
+                 [[1.0000e-06, 1.0000e-06],
+                  [1.0000e+00, 1.0000e-06]]]])
+    """
+    if not isinstance(labels, torch.Tensor):
+        raise TypeError(f"Input labels type is not a torch.Tensor. Got {type(labels)}")
+
+    if not labels.dtype == torch.int64:
+        raise ValueError(f"labels must be of the same dtype torch.int64. Got: {labels.dtype}")
+
+    if num_classes < 1:
+        raise ValueError("The number of classes must be bigger than one." " Got: {}".format(num_classes))
+    # ipdb.set_trace()
+    shape = labels.shape
+    one_hot = torch.zeros((shape[0], num_classes) + shape[1:], device=device, dtype=dtype)
+    # ipdb.set_trace()
+    return one_hot.scatter_(1, labels.unsqueeze(1), 1.0) + eps
+
+
+def focal_loss(
+        input: torch.Tensor,
+        target: torch.Tensor,
+        alpha: float,
+        gamma: float = 2.0,
+        reduction: str = 'none',
+        eps: Optional[float] = None,
+) -> torch.Tensor:
+    r"""Criterion that computes Focal loss.
+    According to :cite:`lin2018focal`, the Focal loss is computed as follows:
+    .. math::
+        \text{FL}(p_t) = -\alpha_t (1 - p_t)^{\gamma} \, \text{log}(p_t)
+    Where:
+       - :math:`p_t` is the model's estimated probability for each class.
+    Args:
+        input: logits tensor with shape :math:`(N, C, *)` where C = number of classes.
+        target: labels tensor with shape :math:`(N, *)` where each value is :math:`0 ≤ targets[i] ≤ C−1`.
+        alpha: Weighting factor :math:`\alpha \in [0, 1]`.
+        gamma: Focusing parameter :math:`\gamma >= 0`.
+        reduction: Specifies the reduction to apply to the
+          output: ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction
+          will be applied, ``'mean'``: the sum of the output will be divided by
+          the number of elements in the output, ``'sum'``: the output will be
+          summed.
+        eps: Deprecated: scalar to enforce numerical stabiliy. This is no longer used.
+    Return:
+        the computed loss.
+    Example:
+        >>> N = 5  # num_classes
+        >>> input = torch.randn(1, N, 3, 5, requires_grad=True)
+        >>> target = torch.empty(1, 3, 5, dtype=torch.long).random_(N)
+        >>> output = focal_loss(input, target, alpha=0.5, gamma=2.0, reduction='mean')
+        >>> output.backward()
+    """
+    if eps is not None and not torch.jit.is_scripting():
+        warnings.warn(
+            "`focal_loss` has been reworked for improved numerical stability "
+            "and the `eps` argument is no longer necessary",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+    if not isinstance(input, torch.Tensor):
+        raise TypeError(f"Input type is not a torch.Tensor. Got {type(input)}")
+
+    if not len(input.shape) >= 2:
+        raise ValueError(f"Invalid input shape, we expect BxCx*. Got: {input.shape}")
+
+    if input.size(0) != target.size(0):
+        raise ValueError(f'Expected input batch_size ({input.size(0)}) to match target batch_size ({target.size(0)}).')
+
+    n = input.size(0)
+    out_size = (n,) + input.size()[2:]
+    if target.size()[1:] != input.size()[2:]:
+        raise ValueError(f'Expected target size {out_size}, got {target.size()}')
+
+    if not input.device == target.device:
+        raise ValueError(f"input and target must be in the same device. Got: {input.device} and {target.device}")
+
+    # compute softmax over the classes axis
+    input_soft: torch.Tensor = F.softmax(input, dim=1)
+    log_input_soft: torch.Tensor = F.log_softmax(input, dim=1)
+    # ipdb.set_trace()
+    # create the labels one hot tensor
+    target_one_hot: torch.Tensor = one_hot(target, num_classes=input.shape[1], device=input.device, dtype=input.dtype)
+
+    # compute the actual focal loss
+    weight = torch.pow(-input_soft + 1.0, gamma)
+
+    focal = -alpha * weight * log_input_soft
+    loss_tmp = torch.einsum('bc...,bc...->b...', (target_one_hot, focal))
+    # ipdb.set_trace()
+    if reduction == 'none':
+        loss = loss_tmp
+    elif reduction == 'mean':
+        loss = torch.mean(loss_tmp)
+    elif reduction == 'sum':
+        loss = torch.sum(loss_tmp)
+    else:
+        raise NotImplementedError(f"Invalid reduction mode: {reduction}")
+    return loss
+
+
+class LogitFocalLoss(nn.Module):
+    r"""Criterion that computes Focal loss.
+    According to :cite:`lin2018focal`, the Focal loss is computed as follows:
+    .. math::
+        \text{FL}(p_t) = -\alpha_t (1 - p_t)^{\gamma} \, \text{log}(p_t)
+    Where:
+       - :math:`p_t` is the model's estimated probability for each class.
+    Args:
+        alpha: Weighting factor :math:`\alpha \in [0, 1]`.
+        gamma: Focusing parameter :math:`\gamma >= 0`.
+        reduction: Specifies the reduction to apply to the
+          output: ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction
+          will be applied, ``'mean'``: the sum of the output will be divided by
+          the number of elements in the output, ``'sum'``: the output will be
+          summed.
+        eps: Deprecated: scalar to enforce numerical stability. This is no longer
+          used.
+    Shape:
+        - Input: :math:`(N, C, *)` where C = number of classes.
+        - Target: :math:`(N, *)` where each value is
+          :math:`0 ≤ targets[i] ≤ C−1`.
+    Example:
+        >>> N = 5  # num_classes
+        >>> kwargs = {"alpha": 0.5, "gamma": 2.0, "reduction": 'mean'}
+        >>> criterion = FocalLoss(**kwargs)
+        >>> input = torch.randn(1, N, 3, 5, requires_grad=True)
+        >>> target = torch.empty(1, 3, 5, dtype=torch.long).random_(N)
+        >>> output = criterion(input, target)
+        >>> output.backward()
+    """
+
+    def __init__(self, alpha: float, gamma: float = 2.0, reduction: str = 'none', eps: Optional[float] = None) -> None:
+        super().__init__()
+        self.alpha: float = alpha
+        self.gamma: float = gamma
+        self.reduction: str = reduction
+        self.eps: Optional[float] = eps
+
+    def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        return focal_loss(input, target, self.alpha, self.gamma, self.reduction, self.eps)
+

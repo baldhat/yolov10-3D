@@ -30,12 +30,17 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
 
     def get_validator(self):
         """Returns a DetectionValidator for YOLO model validation."""
+        self.loss_names = [["box_om", "cls_om", "dep_om", "o3d_om", "s3d_om", "hd_om"],
+                           ["box_oo", "cls_oo", "dep_oo", "o3d_oo", "s3d_oo", "hd_oo"]]
         if self.args.distillation:
-            self.loss_names = ("box_om", "cls_om", "dep_om", "o3d_om", "s3d_om", "hd_om", "dis_om",
-                               "box_oo", "cls_oo", "dep_oo", "o3d_oo", "s3d_oo", "hd_oo", "dis_oo")
-        else:
-            self.loss_names = ("box_om", "cls_om", "dep_om", "o3d_om", "s3d_om", "hd_om",
-                               "box_oo", "cls_oo", "dep_oo", "o3d_oo", "s3d_oo", "hd_oo")
+            self.loss_names[0] += ["dis_om"]
+            self.loss_names[1] += ["dis_oo"]
+
+        self.loss_names = self.loss_names[0] + self.loss_names[1]
+
+        if self.args.fgdm_loss:
+            self.loss_names += ["fgdm"]
+
         return YOLOv10_3DDetectionValidator(
             self.test_loader, save_dir=self.save_dir, args=copy(self.args), _callbacks=self.callbacks
         )

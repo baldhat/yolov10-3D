@@ -622,6 +622,8 @@ class v10Detect3d(nn.Module):
             [self.cls, self.o2d, self.s2d, self.o3d, self.s3d, self.hd, self.dep, self.dep_un])
         self.o2m_heads = copy.deepcopy(self.o2o_heads)
 
+        self.fgdm_predictor = DepthPredictor(ch)
+
     @staticmethod
     def build_head(in_channels, mid_channels, output_channels, dsconv, deform, half_channels=False):
         return nn.ModuleList(nn.Sequential(v10Detect3d.build_conv(x, mid_channels, 3, dsconv,  deform=deform),
@@ -731,28 +733,29 @@ class v10Detect3d(nn.Module):
     def _forward(self, x):
         """Concatenates and returns predicted bounding boxes and class probabilities."""
         y, embs = self.forward_feat(x, self.o2m_heads)
+        depth_maps = self.fgdm_predictor(x)
 
         if self.training:
-            return y, embs
+            return y, embs, depth_maps
 
-        return self.inference(y), embs
+        return self.inference(y), embs, depth_maps
 
     def forward(self, x):
         one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
         if not self.export:
-            one2many, o2m_embs = self._forward(x)
+            one2many, o2m_embs, depth_maps = self._forward(x)
 
         if not self.training:
             one2one = self.inference(one2one)
             if not self.export:
-                return {"one2many": one2many, "one2one": one2one, "o2m_embs": o2m_embs, "o2o_embs": o2o_embs}
+                return {"one2many": one2many, "one2one": one2one, "o2m_embs": o2m_embs, "o2o_embs": o2o_embs, "depth_maps": depth_maps}
             else:
                 raise NotImplementedError("TODO")
                 assert(self.max_det != -1)
                 boxes, scores, labels = ops.v10postprocess(one2one.permute(0, 2, 1), self.max_det, self.nc)
                 return torch.cat([boxes, scores.unsqueeze(-1), labels.unsqueeze(-1).to(boxes.dtype)], dim=-1)
         else:
-            return {"one2many": one2many, "one2one": one2one, "o2m_embs": o2m_embs, "o2o_embs": o2o_embs}
+            return {"one2many": one2many, "one2one": one2one, "o2m_embs": o2m_embs, "o2o_embs": o2o_embs, "depth_maps": depth_maps}
 
 
     def decode_bboxes(self, bboxes, anchors):
@@ -795,3 +798,77 @@ class v10Detect3d(nn.Module):
                 nn.init.normal_(m.weight, std=0.001)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
+
+
+class DepthPredictor(nn.Module):
+    '''
+    Adapted from MonoDETR depth predictor
+    '''
+    def __init__(self, ch=()):
+        super().__init__()
+        self.depth_min = 1   #self.args.min_depth_threshold #FIXME
+        self.depth_max = 70 #self.args.max_depth_threshold #FIXME
+        self.depth_bins = 80
+
+        bin_size = 2 * (self.depth_max - self.depth_min) / (self.depth_bins * (1 + self.depth_bins))
+        bin_indice = torch.linspace(0, self.depth_bins - 1, self.depth_bins)
+        bin_value = (bin_indice + 0.5).pow(2) * bin_size / 2 - bin_size / 8 + self.depth_min
+        bin_value = torch.cat([bin_value, torch.tensor([self.depth_max])], dim=0)
+        self.depth_bin_values = nn.Parameter(bin_value, requires_grad=False)
+
+        # Create modules
+        hidden_dim = 128
+        self.downsample = nn.Sequential(
+            nn.Conv2d(ch[0], hidden_dim, kernel_size=(3, 3), stride=(2, 2), padding=1),
+            nn.GroupNorm(32, hidden_dim))
+        self.proj = nn.Sequential(
+            nn.Conv2d(ch[1], hidden_dim, kernel_size=(1, 1)),
+            nn.GroupNorm(32, hidden_dim))
+        self.upsample = nn.Sequential(
+            nn.Conv2d(ch[2], hidden_dim, kernel_size=(1, 1)),
+            nn.GroupNorm(32, hidden_dim))
+
+        self.depth_head = nn.Sequential(
+            nn.Conv2d(hidden_dim, hidden_dim, kernel_size=(3, 3), padding=1),
+            nn.GroupNorm(32, num_channels=hidden_dim),
+            nn.ReLU(),
+            nn.Conv2d(hidden_dim, hidden_dim, kernel_size=(3, 3), padding=1),
+            nn.GroupNorm(32, num_channels=hidden_dim),
+            nn.ReLU())
+
+        self.depth_classifier = nn.Conv2d(hidden_dim, self.depth_bins + 1, kernel_size=(1, 1))
+
+    def forward(self, feature):
+        assert len(feature) == 3
+
+        src_8 = self.downsample(feature[0])
+        src_16 = self.proj(feature[1])
+        src_32 = self.upsample(torch.nn.functional.interpolate(feature[2], size=src_16.shape[-2:], mode='bilinear'))
+        # new_add
+        # src_8 = self.proj(feature[0])
+        # src_16 = self.upsample(F.interpolate(feature[1], size=src_8.shape[-2:], mode='bilinear'))
+        # src_32 = self.upsample(F.interpolate(feature[2], size=src_8.shape[-2:], mode='bilinear'))
+        ####
+        src = (src_8 + src_16 + src_32) / 3
+
+        src = self.depth_head(src)
+        # ipdb.set_trace()
+        depth_logits = self.depth_classifier(src)
+
+        depth_probs = torch.nn.functional.softmax(depth_logits, dim=1)
+        weighted_depth = (depth_probs * self.depth_bin_values.reshape(1, -1, 1, 1)).sum(dim=1)
+
+        return depth_logits, weighted_depth
+
+    def interpolate_depth_embed(self, depth):
+        depth = depth.clamp(min=0, max=self.depth_max)
+        pos = self.interpolate_1d(depth, self.depth_pos_embed)
+        pos = pos.permute(0, 3, 1, 2)
+        return pos
+
+    def interpolate_1d(self, coord, embed):
+        floor_coord = coord.floor()
+        delta = (coord - floor_coord).unsqueeze(-1)
+        floor_coord = floor_coord.long()
+        ceil_coord = (floor_coord + 1).clamp(max=embed.num_embeddings - 1)
+        return embed(floor_coord) * (1 - delta) + embed(ceil_coord) * delta
