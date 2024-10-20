@@ -1264,6 +1264,17 @@ class KITTIVisualizer():
             ax[i].axis("off")
 
         plt.savefig(filename, dpi=300, bbox_inches="tight")
+        plt.clf()
+
+        fig, ax = plt.subplots(math.ceil(self.max_imgs ** 0.5), math.ceil(self.max_imgs ** 0.5),
+                               figsize=(18, 12), gridspec_kw={'wspace': 0, 'hspace': 0}, constrained_layout=True)
+        ax = ax.ravel()
+        for i, depth_map in enumerate(batch["depth_map"]):
+            if i >= self.max_imgs:
+                break
+            ax[i].imshow(depth_map)
+            ax[i].axis("off")
+        plt.savefig(str(filename) + "depth.png", dpi=300, bbox_inches="tight")
 
     def plot_preds(self, batch, preds, dataset, paths, fname, names, threshold=0.1):
         infos_ = self.collate_infos(batch)

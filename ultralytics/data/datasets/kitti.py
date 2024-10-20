@@ -398,7 +398,11 @@ class KITTIDataset(data.Dataset):
         calib = torch.tensor(np.array([calib.cu * ratio_pad[0, 0], calib.cv * ratio_pad[0, 1],
                                        calib.fu * ratio_pad[0, 0], calib.fv * ratio_pad[0, 1],
                                        calib.tx * ratio_pad[0, 0], calib.ty * ratio_pad[0, 1]]))
-        depth_map = torch.tensor(np.where(depth_map >= self.max_depth_threshold, 0, depth_map)) * scale if self.load_depth_maps else None
+        if scale >= 1.0:
+            depth_map = torch.tensor(
+                np.where(depth_map  * scale >= self.max_depth_threshold, 0, depth_map * scale)) if self.load_depth_maps else None
+        else:
+            depth_map = torch.tensor(np.where(depth_map >= self.max_depth_threshold, 0, depth_map)) * scale if self.load_depth_maps else None
 
         return {
             "img": inputs,

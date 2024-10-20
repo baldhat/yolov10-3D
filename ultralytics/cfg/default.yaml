@@ -121,16 +121,18 @@ constrain_anchors: True
 htl: False
 close_mixup: 0 # Epochs before the end to stop mixup augmentation
 max_depth_threshold: 70
-min_depth_threshold: 0.5
+min_depth_threshold: 1
 min_scale: 0.6
 max_scale: 1.4
 overfit: False
-distillation: True
+distillation: False
 distillation_temp: 2
 distillation_weight: 0.75
 distillation_loss: "cos"
 distillation_no_mixup: False
 load_depth_maps: False
+
+fgdm_loss: True
 
 dfl: 1.5 # (float) dfl loss gain
 pose: 12.0 # (float) pose loss gain

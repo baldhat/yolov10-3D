@@ -86,10 +86,10 @@ def load_config_from_url(url: str) -> str:
     with urllib.request.urlopen(url) as f:
         return f.read().decode()
 
-class DinoDepther(torch.nn.Module):
-    def __init__(self):
+class DinoDepther(torch.nn.Module, ):
+    def __init__(self, backbone_size="small"):
         super().__init__()
-        self.backbone = self.load_backbone()
+        self.backbone = self.load_backbone(backbone_size)
         self.head = self.load_head()
 
     def load_head(self):
@@ -113,15 +113,14 @@ class DinoDepther(torch.nn.Module):
         model.cuda()
         return model
 
-    def load_backbone(self):
-        BACKBONE_SIZE = "small"  # in ("small", "base", "large" or "giant")
+    def load_backbone(self, backbone_size="small"):
         backbone_archs = {
             "small": "vits14",
             "base": "vitb14",
             "large": "vitl14",
             "giant": "vitg14",
         }
-        backbone_arch = backbone_archs[BACKBONE_SIZE]
+        backbone_arch = backbone_archs[backbone_size]
         self.backbone_name = f"dinov2_{backbone_arch}"
         backbone_model = torch.hub.load(repo_or_dir="facebookresearch/dinov2", model=self.backbone_name)
         backbone_model.eval()
@@ -222,7 +221,9 @@ def get_sparse_loss(output, batch):
 def get_depth_map_loss(output, batch):
     depth_map = batch["depth_map"].cuda()
     mask = depth_map > 0
-    return torch.nn.functional.smooth_l1_loss(output[mask], depth_map[mask], reduction="mean")
+    sl1_loss = torch.nn.functional.smooth_l1_loss(output[mask], depth_map[mask], reduction="mean")
+    #ssim_loss = tensorflow.image.ssim(output[mask], depth_map[mask], max_val=1.0).mean()
+    return sl1_loss
 
 def validate(epoch_index, model, dataloader):
     model.eval()
@@ -261,12 +262,12 @@ class Args:
     min_scale = 0.6
     max_scale = 1.4
     translate = 0.1
-    mixup = 0.0
+    mixup = 0.5
     max_depth_threshold = 70
     min_depth_threshold = 0.5
     seed = 1
     load_depth_maps = True
-    
+
 
 def main(save_dir):
     path = os.environ["KITTI_PATH"]
@@ -275,15 +276,15 @@ def main(save_dir):
     args = Args()
     train_dataset = KITTIDataset(train_file_path, "train", args)
     val_dataset = KITTIDataset(val_file_path, "val", args)
-    train_dataloader = build_dataloader(train_dataset, 12, 8, shuffle=True)
-    val_dataloader = build_dataloader(val_dataset, 16, 8, shuffle=False)
+    train_dataloader = build_dataloader(train_dataset, 4, 4, shuffle=True)
+    val_dataloader = build_dataloader(val_dataset, 6, 4, shuffle=False)
 
-    model = DinoDepther()
+    model = DinoDepther("large")
     model.train()
 
     freeze_backbone(model)
 
-    optimizer = torch.optim.Adam(model.head.parameters(), lr=1e-4)
+    optimizer = torch.optim.Adam(model.head.parameters(), lr=1e-5)
     lr_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer=optimizer, start_factor=1.0, end_factor=0.1, total_iters=100)
 
     best_eval_loss = 100000
@@ -299,7 +300,7 @@ def main(save_dir):
 
         train_losses.append(train_loss)
         val_losses.append(eval_loss)
-        
+
         Path(os.path.join(save_dir, "dino")).mkdir(parents=True, exist_ok=True)
         if eval_loss < best_eval_loss:
             best_eval_loss = eval_loss
