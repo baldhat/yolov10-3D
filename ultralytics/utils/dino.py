@@ -279,7 +279,7 @@ def main(save_dir):
     train_dataloader = build_dataloader(train_dataset, 4, 4, shuffle=True)
     val_dataloader = build_dataloader(val_dataset, 6, 4, shuffle=False)
 
-    model = DinoDepther("large")
+    model = DinoDepther("small")
     model.train()
 
     freeze_backbone(model)
