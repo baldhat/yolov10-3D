@@ -1274,7 +1274,7 @@ class ForegroundDepthMapLoss(nn.Module):
             loss [torch.Tensor(1)]: Depth classification network loss
         """
 
-        # downsample depth_maps by 8
+        # downsample depth_maps by 16
         depth_maps = transforms.Resize(size=[depth_maps.shape[1] // 16, depth_maps.shape[2] // 16], interpolation=InterpolationMode.NEAREST)(depth_maps)
         # Bin depth map to create target
         depth_target = self.bin_depths(depth_maps,

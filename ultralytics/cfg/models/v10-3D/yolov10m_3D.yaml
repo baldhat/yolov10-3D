@@ -12,7 +12,8 @@ detach_predecessors: False
 deform: False
 common_head: False
 num_scales: 3
-half_channels: True
+half_channels: False
+fgdm_predictor: True
 channels:
   cls_c: 128
   o2d_c: 128

@@ -9,14 +9,14 @@ from scipy.spatial.transform import Rotation
 def get_objects_from_label(label_file):
     with open(label_file, 'r') as f:
         lines = f.readlines()
-    objects = [Object3d(line) for line in lines]
+    objects = [Object3d(line, idx) for idx, line in enumerate(lines)]
     return objects
 
 def get_objects_from_dict(dict_list):
-    return [Object3d(item) for item in dict_list]
+    return [Object3d(item, idx) for idx, item in enumerate(dict_list)]
 
 class Object3d(object):
-    def __init__(self, line):
+    def __init__(self, line, idx=None):
         if type(line) == str:
             label = line.strip().split(' ')
             self.src = line
@@ -35,6 +35,7 @@ class Object3d(object):
             self.level_str = None
             self.level = self.get_obj_level()
             self.num_lidar = 0
+            self.line_index = idx
         elif type(line) == dict:
             self.cls_type = line["category"]
             if line.get("rotation_y", None) is not None:

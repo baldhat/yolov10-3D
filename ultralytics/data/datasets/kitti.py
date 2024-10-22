@@ -85,7 +85,7 @@ class KITTIDataset(data.Dataset):
     def get_segmentation(self, idx):
         segmentation_file = os.path.join(self.depth_dir, '%06d_seg.png' % idx)
         assert os.path.exists(segmentation_file)
-        return cv2.imread(segmentation_file, -1)
+        return Image.fromarray(cv2.imread(segmentation_file, -1))
 
     def get_depth_map(self, idx):
         depth_file = os.path.join(self.depth_dir, '%06d_depth.exr' % idx)
@@ -120,8 +120,9 @@ class KITTIDataset(data.Dataset):
         if self.split != 'test':
             dst_W, dst_H = img_size
 
-        if self.load_depth_maps:
-            depth_map = self.get_depth_map(index)
+            if self.load_depth_maps:
+                depth_maps = []
+                seg_mask = self.get_segmentation(index)
 
         # data augmentation for image
         center = np.array(img_size) / 2
@@ -139,7 +140,7 @@ class KITTIDataset(data.Dataset):
                 random_flip_flag = True
                 img = img.transpose(Image.FLIP_LEFT_RIGHT)
                 if self.load_depth_maps:
-                    depth_map = depth_map.transpose(Image.FLIP_LEFT_RIGHT)
+                    seg_mask = seg_mask.transpose(Image.FLIP_LEFT_RIGHT)
 
             if np.random.random() < self.random_crop:
                 random_crop_flag = True
@@ -165,7 +166,7 @@ class KITTIDataset(data.Dataset):
                 if calib_temp.cu == calib.cu and calib_temp.cv == calib.cv and calib_temp.fu == calib.fu and calib_temp.fv == calib.fv:
                     img_temp = self.get_image(random_index)
                     if self.load_depth_maps:
-                        depth_map_temp = self.get_depth_map(random_index)
+                        seg_mask_tmp = self.get_segmentation(random_index)
                     img_size_temp = np.array(img.size)
                     dst_W_temp, dst_H_temp = img_size_temp
                     if dst_W_temp == dst_W and dst_H_temp == dst_H:
@@ -176,14 +177,8 @@ class KITTIDataset(data.Dataset):
                             if random_flip_flag == True:
                                 img_temp = img_temp.transpose(Image.FLIP_LEFT_RIGHT)
                                 if self.load_depth_maps:
-                                    depth_map_temp = depth_map_temp.transpose(Image.FLIP_LEFT_RIGHT)
-
-                            img_blend = Image.blend(img, img_temp, alpha=0.5)
-                            img = img_blend
-                            if self.load_depth_maps:
-                                depth_map_temp_np = np.array(depth_map_temp)
-                                depth_map_np = np.array(depth_map)
-                                depth_map = Image.fromarray(np.minimum(depth_map_temp_np, depth_map_np))
+                                    seg_mask_tmp = seg_mask_tmp.transpose(Image.FLIP_LEFT_RIGHT)
+                            img = Image.blend(img, img_temp, alpha=0.5)
                             break
 
         # add affine transformation for 2d images.
@@ -193,11 +188,15 @@ class KITTIDataset(data.Dataset):
                             data=tuple(trans_inv.reshape(-1).tolist()),
                             resample=Image.BILINEAR)
         if self.load_depth_maps:
-            depth_map = np.array(depth_map.transform(tuple(self.resolution.tolist()),
-                            method=Image.AFFINE,
-                            data=tuple(trans_inv.reshape(-1).tolist()),
-                            resample=Image.NEAREST)).astype(np.float32)
-            depth_map = np.minimum(depth_map, self.max_depth_threshold)
+            seg_mask = np.array(seg_mask.transform(tuple(self.resolution.tolist()),
+                                    method=Image.AFFINE,
+                                    data=tuple(trans_inv.reshape(-1).tolist()),
+                                    resample=Image.NEAREST, fillcolor=51))
+            if random_mix_flag == True:
+                seg_mask_tmp = np.array(seg_mask_tmp.transform(tuple(self.resolution.tolist()),
+                                            method=Image.AFFINE,
+                                            data=tuple(trans_inv.reshape(-1).tolist()),
+                                            resample=Image.NEAREST, fillcolor=51))
 
         # image encoding
         img = np.array(img).astype(np.float32) / 255.0
@@ -282,6 +281,8 @@ class KITTIDataset(data.Dataset):
                 gt_center_2d.append(center_2d)
                 gt_size_2d.append(gt_size_2d_)
 
+                if self.load_depth_maps:
+                    depth_maps.append(np.where(seg_mask == objects[i].line_index, depth, 1000))
 
                 # encoding heading angle
                 # heading_angle = objects[i].alpha
@@ -378,6 +379,9 @@ class KITTIDataset(data.Dataset):
                            - self.cls_mean_size[self.cls2train_id[objects[i].cls_type]])
                     gt_size_3d.append(s3d)
 
+                    if self.load_depth_maps:
+                        depth_maps.append(np.where(seg_mask_tmp == objects[i].line_index, depth, 1000))
+
                     if self.use_camera_dis:
                         r_center_3d *= scale
                         dep = np.linalg.norm(r_center_3d)
@@ -400,11 +404,17 @@ class KITTIDataset(data.Dataset):
                                        calib.fu * ratio_pad[0, 0], calib.fv * ratio_pad[0, 1],
                                        calib.tx * ratio_pad[0, 0], calib.ty * ratio_pad[0, 1]]))
 
-        if scale >= 1.0:
-            depth_map = torch.tensor(
-                np.where(depth_map  * scale >= self.max_depth_threshold, 0, depth_map * scale)) if self.load_depth_maps else torch.empty(1)
+        if self.load_depth_maps:
+            if len(depth_maps) == 0:
+                depth_map = torch.tensor(np.zeros_like(seg_mask))
+            else:
+                depth_map = depth_maps[0]
+                for map_ in depth_maps:
+                    depth_map = np.minimum(depth_map, map_)
+                depth_map = torch.tensor(depth_map)
+                depth_map = torch.where(depth_map > self.max_depth_threshold, 0, depth_map)
         else:
-            depth_map = torch.tensor(np.where(depth_map >= self.max_depth_threshold, 0, depth_map)) * scale if self.load_depth_maps else torch.empty(1)
+            depth_map = torch.empty(1)
 
         return {
             "img": inputs,

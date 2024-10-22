@@ -552,7 +552,7 @@ class v10Detect3d(nn.Module):
     strides = torch.empty(0)  # init
 
     def __init__(self, nc=80, ch=(), dsconv=False, channels=None, use_predecessors=False, detach_predecessors=True,
-                 deform=False, common_head=False, num_scales=3, half_channels=False):
+                 deform=False, common_head=False, num_scales=3, half_channels=False, fgdm_predictor=False):
         super().__init__()
         assert (channels is not None)
         self.nc = nc  # number of classes
@@ -573,6 +573,8 @@ class v10Detect3d(nn.Module):
         self.stride = torch.zeros(self.nl)  # strides computed during build
         self.deform = deform
         self.common_head = common_head
+
+        self.fgdm_pred = fgdm_predictor
 
         self.use_predecessors = use_predecessors
         self.detach_predecessors = detach_predecessors
@@ -622,7 +624,8 @@ class v10Detect3d(nn.Module):
             [self.cls, self.o2d, self.s2d, self.o3d, self.s3d, self.hd, self.dep, self.dep_un])
         self.o2m_heads = copy.deepcopy(self.o2o_heads)
 
-        self.fgdm_predictor = DepthPredictor(ch)
+        if self.fgdm_pred:
+            self.fgdm_predictor = DepthPredictor(ch)
 
     @staticmethod
     def build_head(in_channels, mid_channels, output_channels, dsconv, deform, half_channels=False):
@@ -733,7 +736,11 @@ class v10Detect3d(nn.Module):
     def _forward(self, x):
         """Concatenates and returns predicted bounding boxes and class probabilities."""
         y, embs = self.forward_feat(x, self.o2m_heads)
-        depth_maps = self.fgdm_predictor(x)
+
+        if hasattr(self, "fgdm_pred") and self.fgdm_pred:
+            depth_maps = self.fgdm_predictor(x)
+        else:
+            depth_maps = torch.empty(1)
 
         if self.training:
             return y, embs, depth_maps
