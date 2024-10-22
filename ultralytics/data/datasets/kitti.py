@@ -51,7 +51,7 @@ class KITTIDataset(data.Dataset):
         # path configuration
         self.data_dir = os.path.join(root_dir, 'testing' if self.mode == 'test' else 'training')
         self.image_dir = os.path.join(self.data_dir, 'image_2')
-        self.depth_dir = os.path.join(self.data_dir, 'depth')
+        self.depth_dir = os.path.join(root_dir, 'deepseg', "training", "image_2")
         self.calib_dir = os.path.join(self.data_dir, 'calib')
         self.label_dir = os.path.join(self.data_dir, 'label_2')
 
@@ -83,12 +83,12 @@ class KITTIDataset(data.Dataset):
         return get_objects_from_label(label_file)
 
     def get_segmentation(self, idx):
-        segmentation_file = os.path.join(self.image_dir, '%06d_seg.png' % idx)
+        segmentation_file = os.path.join(self.depth_dir, '%06d_seg.png' % idx)
         assert os.path.exists(segmentation_file)
         return cv2.imread(segmentation_file, -1)
 
     def get_depth_map(self, idx):
-        depth_file = os.path.join(self.image_dir, '%06d_depth.exr' % idx)
+        depth_file = os.path.join(self.depth_dir, '%06d_depth.exr' % idx)
         assert os.path.exists(depth_file)
         file = cv2.imread(depth_file, -1)
         return Image.fromarray(np.where(file <= 0, self.max_depth_threshold + 1, file))
@@ -175,7 +175,8 @@ class KITTIDataset(data.Dataset):
                             random_mix_flag = True
                             if random_flip_flag == True:
                                 img_temp = img_temp.transpose(Image.FLIP_LEFT_RIGHT)
-                                depth_map_temp = depth_map_temp.transpose(Image.FLIP_LEFT_RIGHT)
+                                if self.load_depth_maps:
+                                    depth_map_temp = depth_map_temp.transpose(Image.FLIP_LEFT_RIGHT)
 
                             img_blend = Image.blend(img, img_temp, alpha=0.5)
                             img = img_blend
@@ -398,11 +399,12 @@ class KITTIDataset(data.Dataset):
         calib = torch.tensor(np.array([calib.cu * ratio_pad[0, 0], calib.cv * ratio_pad[0, 1],
                                        calib.fu * ratio_pad[0, 0], calib.fv * ratio_pad[0, 1],
                                        calib.tx * ratio_pad[0, 0], calib.ty * ratio_pad[0, 1]]))
+
         if scale >= 1.0:
             depth_map = torch.tensor(
-                np.where(depth_map  * scale >= self.max_depth_threshold, 0, depth_map * scale)) if self.load_depth_maps else None
+                np.where(depth_map  * scale >= self.max_depth_threshold, 0, depth_map * scale)) if self.load_depth_maps else torch.empty(1)
         else:
-            depth_map = torch.tensor(np.where(depth_map >= self.max_depth_threshold, 0, depth_map)) * scale if self.load_depth_maps else None
+            depth_map = torch.tensor(np.where(depth_map >= self.max_depth_threshold, 0, depth_map)) * scale if self.load_depth_maps else torch.empty(1)
 
         return {
             "img": inputs,

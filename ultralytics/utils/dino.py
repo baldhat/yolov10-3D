@@ -276,8 +276,8 @@ def main(save_dir):
     args = Args()
     train_dataset = KITTIDataset(train_file_path, "train", args)
     val_dataset = KITTIDataset(val_file_path, "val", args)
-    train_dataloader = build_dataloader(train_dataset, 4, 4, shuffle=True)
-    val_dataloader = build_dataloader(val_dataset, 6, 4, shuffle=False)
+    train_dataloader = build_dataloader(train_dataset, 24, 4, shuffle=True)
+    val_dataloader = build_dataloader(val_dataset, 32, 4, shuffle=False)
 
     model = DinoDepther("large")
     model.train()

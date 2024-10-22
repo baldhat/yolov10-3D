@@ -24,7 +24,7 @@ exist_ok: False # (bool) whether to overwrite existing experiment
 pretrained: True # (bool | str) whether to use a pretrained model (bool) or a model to load weights from (str)
 optimizer: AdamW # (str) optimizer to use, choices=[SGD, Adam, Adamax, AdamW, NAdam, RAdam, RMSProp, auto]
 verbose: True # (bool) whether to print verbose output
-seed: 1 # (int) random seed for reproducibility
+seed: 5 # (int) random seed for reproducibility
 deterministic: True # (bool) whether to enable deterministic mode
 single_cls: False # (bool) train multi-class data as single-class
 rect: False # (bool) rectangular training if mode='train' or rectangular validation if mode='val'
@@ -132,7 +132,7 @@ distillation_loss: "cos"
 distillation_no_mixup: False
 load_depth_maps: False
 
-fgdm_loss: True
+fgdm_loss: False
 
 dfl: 1.5 # (float) dfl loss gain
 pose: 12.0 # (float) pose loss gain
