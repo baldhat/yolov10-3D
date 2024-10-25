@@ -1249,11 +1249,17 @@ class KITTIVisualizer():
 
             for object in result:
                 cls = object[0]
-                bbox2d = np.array(object[2:6])
-                dimensions = np.array([object[8], object[7], object[6]])
-                translation = object[9:12]
-                ry = object[12]
-                egoc_rot_matrix = self.get_egoc_rot_matrix(ry)
+                if dataset.pred_rot_mat:
+                    egoc_rot_matrix = np.array(object[1:10]).reshape(3, 3)
+                    dimensions = np.array([object[16], object[15], object[14]])
+                    translation = object[17:20]
+                    bbox2d = object[10:14]
+                else:
+                    bbox2d = np.array(object[2:6])
+                    dimensions = np.array([object[8], object[7], object[6]])
+                    translation = object[9:12]
+                    ry = object[12]
+                    egoc_rot_matrix = self.get_egoc_rot_matrix(ry)
 
                 self.plot_3d_obj(img,
                                  VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
@@ -1266,15 +1272,16 @@ class KITTIVisualizer():
         plt.savefig(filename, dpi=300, bbox_inches="tight")
         plt.clf()
 
-        fig, ax = plt.subplots(math.ceil(self.max_imgs ** 0.5), math.ceil(self.max_imgs ** 0.5),
-                               figsize=(18, 12), gridspec_kw={'wspace': 0, 'hspace': 0}, constrained_layout=True)
-        ax = ax.ravel()
-        for i, depth_map in enumerate(batch["depth_map"]):
-            if i >= self.max_imgs:
-                break
-            ax[i].imshow(depth_map)
-            ax[i].axis("off")
-        plt.savefig(str(filename) + "depth.png", dpi=300, bbox_inches="tight")
+        if dataset.load_depth_maps:
+            fig, ax = plt.subplots(math.ceil(self.max_imgs ** 0.5), math.ceil(self.max_imgs ** 0.5),
+                                   figsize=(18, 12), gridspec_kw={'wspace': 0, 'hspace': 0}, constrained_layout=True)
+            ax = ax.ravel()
+            for i, depth_map in enumerate(batch["depth_map"]):
+                if i >= self.max_imgs:
+                    break
+                ax[i].imshow(depth_map)
+                ax[i].axis("off")
+            plt.savefig(str(filename) + "depth.png", dpi=300, bbox_inches="tight")
 
     def plot_preds(self, batch, preds, dataset, paths, fname, names, threshold=0.1):
         infos_ = self.collate_infos(batch)

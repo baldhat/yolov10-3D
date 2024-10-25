@@ -1,8 +1,8 @@
 import numpy as np
 import cv2
 from scipy.spatial.transform import Rotation
-
-
+import torch
+from ultralytics.utils.ops import convert_location_gravity2ground
 
 ################  Object3D  ##################
 
@@ -17,7 +17,7 @@ def get_objects_from_dict(dict_list):
 
 class Object3d(object):
     def __init__(self, line, idx=None):
-        if type(line) == str:
+        if type(line) == str: # KITTI
             label = line.strip().split(' ')
             self.src = line
             self.cls_type = label[0]
@@ -36,7 +36,7 @@ class Object3d(object):
             self.level = self.get_obj_level()
             self.num_lidar = 0
             self.line_index = idx
-        elif type(line) == dict:
+        elif type(line) == dict: # waymo
             self.cls_type = line["category"]
             if line.get("rotation_y", None) is not None:
                 self.trucation = -1.0
@@ -52,18 +52,20 @@ class Object3d(object):
                 self.level_str = None
                 self.level = self.get_obj_level()
                 self.num_lidar = line["num_lidar"]
-            else:
+            else: # Omni
                 self.occlusion = -1.0
                 box = np.array(line["bbox2D_proj"]) # xyxy
                 self.box2d = np.array(box, dtype=np.float32)
                 self.w = np.array(line["dimensions"])[0]
                 self.h = np.array(line["dimensions"])[1]
                 self.l = np.array(line["dimensions"])[2]
-                self.pos = np.array(line["center_cam"]) + np.array([0, self.h / 2, 0]) # already the center
                 omni_euler = Rotation.from_matrix(line['R_cam']).as_euler('xyz')
-                self.ry = omni_euler[1]
-                #dsc_euler = omni_euler + np.asarray([np.pi / 2, 0, 0])
-                #dsc_egoc_rot_matrix = Rotation.from_euler('xyz', dsc_euler).as_matrix()
+                dsc_euler = omni_euler + np.asarray([np.pi / 2, 0, 0])
+                self.rot_mat = Rotation.from_euler('xyz', dsc_euler).as_matrix()
+                self.pos = convert_location_gravity2ground(
+                    torch.Tensor([line['center_cam']]).float(),
+                    torch.Tensor([self.rot_mat]).float(),
+                    torch.from_numpy(np.array([[self.h, self.w, self.l]])).float()).numpy()[0]
                 self.level_str = 'UnKnown'
                 self.num_lidar = line["lidar_pts"]
                 self.behind_camera = line["behind_camera"] # a corner is behind camera

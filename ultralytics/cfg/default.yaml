@@ -101,6 +101,8 @@ warmup_momentum: 0.8 # (float) warmup initial momentum
 warmup_bias_lr: 0.1 # (float) warmup initial bias lr
 box: 5 # (float) 2dbox loss gain
 
+# General
+pred_rot_mat: True
 # Losses
 cls: 1 # (float) cls loss gain (scale with pixels)
 loss2d: 2 # (float) box loss gain

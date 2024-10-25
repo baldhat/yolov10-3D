@@ -849,6 +849,242 @@ def clean_str(s):
     """
     return re.sub(pattern="[|@#!¡·$€%&()=?¿^*;:,¨´><+]", repl="_", string=s)
 
+
+def compute_3d_points_torch(ground_center: torch.Tensor, dim: torch.Tensor, egoc_rot_matrix: torch.Tensor,
+                            local_pts_3d: torch.Tensor) -> torch.Tensor:
+    """Compute the 3D coordinate inside the object at position local_pts_3d
+
+    Args:
+        ground_center (torch.Tensor): B x 3
+        dim (torch.Tensor): B x 3 (h, w, l)
+        egoc_rot_matrix (torch.Tensor): B x 3 x 3
+        local_pts_3d (torch.Tensor): P x 3
+
+    Returns:
+        torch.Tensor: B x P x 3
+    """
+    box = (local_pts_3d[None] * dim[:, None, [2, 1, 0]]).transpose(1, 2)
+    with torch.cuda.amp.autocast(enabled=False):
+        pts3d = torch.bmm(egoc_rot_matrix.reshape(-1, 3, 3), box).transpose(1, 2) + ground_center.reshape(-1, 1, 3)
+
+    return pts3d
+
+def convert_location_ground2gravity(ground_center: torch.Tensor, egoc_rot_matrix: torch.Tensor,
+                                    dim: torch.Tensor) -> torch.Tensor:
+    """Move the 3D position from the gravity center to the ground center.
+
+    Args:
+        ground_center (torch.Tensor): B x 3
+        egoc_rot_matrix (torch.Tensor): B x 3 x 3
+        dim (torch.Tensor): B x 3 (h, w, l)
+
+    Returns:
+        torch.Tensor: B x 3
+    """
+    return compute_3d_points_torch(ground_center, dim, egoc_rot_matrix,
+                                   torch.Tensor([[0, 0, 0.5]]).to(dim.device))[:, 0]
+
+
+def convert_location_gravity2ground(gravity_center: torch.Tensor, egoc_rot_matrix: torch.Tensor,
+                                    dim: torch.Tensor) -> torch.Tensor:
+    """Move the 3D position from the gravity center to the ground center.
+
+    Args:
+        gravity_center (torch.Tensor): B x 3
+        egoc_rot_matrix (torch.Tensor): B x 3 x 3
+        dim (torch.Tensor): B x 3 (h, w, l)
+
+    Returns:
+        torch.Tensor: B x 3
+    """
+    return compute_3d_points_torch(gravity_center, dim, egoc_rot_matrix,
+                                   torch.Tensor([[0, 0, -0.5]]).to(dim.device))[:, 0]
+
+
+def rotation_6d_to_matrix(d6: torch.Tensor) -> torch.Tensor:
+    """
+    Converts 6D rotation representation by Zhou et al. [1] to rotation matrix
+    using Gram--Schmidt orthogonalisation per Section B of [1].
+    Args:
+        d6: 6D rotation representation, of size (*, 6)
+
+    Returns:
+        batch of rotation matrices of size (*, 3, 3)
+
+    [1] Zhou, Y., Barnes, C., Lu, J., Yang, J., & Li, H.
+    On the Continuity of Rotation Representations in Neural Networks.
+    IEEE Conference on Computer Vision and Pattern Recognition, 2019.
+    Retrieved from http://arxiv.org/abs/1812.07035
+    """
+
+    a1, a2 = d6[..., :3], d6[..., 3:]
+    b1 = F.normalize(a1, dim=-1)
+    b2 = a2 - (b1 * a2).sum(-1, keepdim=True) * b1
+    b2 = F.normalize(b2, dim=-1)
+    b3 = torch.cross(b1, b2, dim=-1)
+    return torch.stack((b1, b2, b3), dim=-2)
+
+def axis_angle_to_quaternion(axis_angle):
+    """
+    Convert rotations given as axis/angle to quaternions.
+
+    Args:
+        axis_angle: Rotations given as a vector in axis angle form,
+            as a tensor of shape (..., 3), where the magnitude is
+            the angle turned anticlockwise in radians around the
+            vector's direction.
+
+    Returns:
+        quaternions with real part first, as tensor of shape (..., 4).
+    """
+    angles = torch.norm(axis_angle, p=2, dim=-1, keepdim=True)
+    half_angles = 0.5 * angles
+    eps = 1e-6
+    small_angles = angles.abs() < eps
+    sin_half_angles_over_angles = torch.empty_like(angles)
+    sin_half_angles_over_angles[~small_angles] = (torch.sin(half_angles[~small_angles]) / angles[~small_angles])
+    # for x small, sin(x/2) is about x/2 - (x/2)^3/6
+    # so sin(x/2)/x is about 1/2 - (x*x)/48
+    sin_half_angles_over_angles[small_angles] = (0.5 - (angles[small_angles] * angles[small_angles]) / 48)
+    quaternions = torch.cat([torch.cos(half_angles), axis_angle * sin_half_angles_over_angles], dim=-1)
+    return quaternions
+
+
+def quaternion_to_matrix(quaternions):
+    """
+    Convert rotations given as quaternions to rotation matrices.
+
+    Args:
+        quaternions: quaternions with real part first,
+            as tensor of shape (..., 4).
+
+    Returns:
+        Rotation matrices as tensor of shape (..., 3, 3).
+    """
+    r, i, j, k = torch.unbind(quaternions, -1)
+    two_s = 2.0 / (quaternions * quaternions).sum(-1)
+
+    o = torch.stack(
+        (
+            1 - two_s * (j * j + k * k),
+            two_s * (i * j - k * r),
+            two_s * (i * k + j * r),
+            two_s * (i * j + k * r),
+            1 - two_s * (i * i + k * k),
+            two_s * (j * k - i * r),
+            two_s * (i * k - j * r),
+            two_s * (j * k + i * r),
+            1 - two_s * (i * i + j * j),
+        ),
+        -1,
+    )
+    return o.reshape(quaternions.shape[:-1] + (3, 3))
+
+
+def axis_angle_to_matrix(axis_angle):
+    """
+    Convert rotations given as axis/angle to rotation matrices.
+
+    Args:
+        axis_angle: Rotations given as a vector in axis angle form,
+            as a tensor of shape (..., 3), where the magnitude is
+            the angle turned anticlockwise in radians around the
+            vector's direction.
+
+    Returns:
+        Rotation matrices as tensor of shape (..., 3, 3).
+    """
+    return quaternion_to_matrix(axis_angle_to_quaternion(axis_angle))
+
+
+
+def alloc_to_egoc_rot_matrix_torch(amodal_center: torch.Tensor, alloc_rot_matrix: torch.Tensor, calib: torch.Tensor):
+    """Convert from allocentric to egocentric rotation.
+
+    Args:
+        amodal_center (torch.Tensor): B x 2. 3D center of the object projected on the ground.
+        alloc_rot_matrix (torch.Tensor): B x 3 x 3
+        calib (torch.Tensor): B x 3 x 4
+
+    Returns:
+        torch.Tensor: B x 3 x 3
+    """
+    amodal_center = amodal_center.to(dtype=torch.float32)
+    alloc_rot_matrix = alloc_rot_matrix.to(dtype=torch.float32)
+    calib = calib.to(dtype=torch.float32)
+
+    alloc_rot_matrix = alloc_rot_matrix.reshape(-1, 3, 3)
+    calib = calib.reshape(-1, 3, 4)
+
+    u, v = amodal_center[:, 0], amodal_center[:, 1]
+    fx = calib[:, 0, 0]
+    fy = calib[:, 1, 1]
+    sx = calib[:, 0, 2]
+    sy = calib[:, 1, 2]
+
+    camera_to_obj_center = torch.stack(((u - sx) / fx, (v - sy) / fy, torch.ones_like(u))).T
+    camera_to_obj_center = camera_to_obj_center / torch.linalg.norm(camera_to_obj_center, dim=1).unsqueeze(1)
+    angle = torch.acos(camera_to_obj_center[:, -1])
+
+    axis = torch.zeros_like(camera_to_obj_center, dtype=alloc_rot_matrix.dtype)
+    axis[:, 0] = axis[:, 0] - camera_to_obj_center[:, 1]
+    axis[:, 1] = axis[:, 1] + camera_to_obj_center[:, 0]
+    norms = torch.linalg.norm(axis, dim=1)
+
+    valid_angle = angle > 0
+
+    M = axis_angle_to_matrix(angle.unsqueeze(1) * axis / norms.unsqueeze(1))
+
+    egoc_rot_matrix = alloc_rot_matrix.clone()
+    egoc_rot_matrix[valid_angle] = torch.bmm(M[valid_angle], alloc_rot_matrix[valid_angle]).to(alloc_rot_matrix.dtype)
+
+    return egoc_rot_matrix
+
+
+def egoc_to_alloc_rot_matrix_torch(amodal_center: torch.Tensor, egoc_rot_matrix: torch.Tensor, calib: torch.Tensor):
+    """Convert from egocentric to allocentric rotation.
+
+    Args:
+        amodal_center (torch.Tensor): B x 2. 3D center of the object projected on the ground.
+        egoc_rot_matrix (torch.Tensor): B x 3 x 3
+        calib (torch.Tensor): B x 3 x 4
+
+    Returns:
+        torch.Tensor: B x 3 x 3
+    """
+    amodal_center = amodal_center.to(dtype=torch.float32)
+    egoc_rot_matrix = egoc_rot_matrix.to(dtype=torch.float32)
+    calib = calib.to(dtype=torch.float32)
+
+    egoc_rot_matrix = egoc_rot_matrix.reshape(-1, 3, 3)
+    calib = calib.reshape(-1, 3, 4)
+
+    u, v = amodal_center[:, 0], amodal_center[:, 1]
+    fx = calib[:, 0, 0]
+    fy = calib[:, 1, 1]
+    sx = calib[:, 0, 2]
+    sy = calib[:, 1, 2]
+
+    camera_to_obj_center = torch.stack(((u - sx) / fx, (v - sy) / fy, torch.ones_like(u))).T
+    camera_to_obj_center = camera_to_obj_center / torch.linalg.norm(camera_to_obj_center, dim=1).unsqueeze(1)
+    angle = torch.acos(camera_to_obj_center[:, -1])
+
+    axis = torch.zeros_like(camera_to_obj_center, dtype=egoc_rot_matrix.dtype)
+    axis[:, 0] = axis[:, 0] + camera_to_obj_center[:, 1]
+    axis[:, 1] = axis[:, 1] - camera_to_obj_center[:, 0]
+    norms = torch.linalg.norm(axis, dim=1)
+
+    valid_angle = angle > 0
+
+    M = axis_angle_to_matrix(angle.unsqueeze(1) * axis / norms.unsqueeze(1))
+
+    alloc_rot_matrix = egoc_rot_matrix.clone()
+    alloc_rot_matrix[valid_angle] = torch.bmm(M[valid_angle], egoc_rot_matrix[valid_angle]).to(alloc_rot_matrix.dtype)
+
+    return alloc_rot_matrix
+
+
+
 def v10postprocess(preds, max_det, nc=80):
     assert(4 + nc == preds.shape[-1])
     boxes, scores = preds.split([4, nc], dim=-1)

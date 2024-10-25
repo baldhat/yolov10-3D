@@ -1,23 +1,16 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
 import os
 
-from ultralytics.data.datasets.decode_helper import  *
-from ultralytics.utils.keypoint_utils import get_object_keypoints
-
 import torch.utils.data as data
 from PIL import Image
 import subprocess
-import torch
 from pathlib import Path
-import time
+from ultralytics.utils.ops import *
 
 from collections import defaultdict
 import json
 
-from ultralytics.data.utils import angle2class
 from ultralytics.data.datasets.kitti_utils import get_objects_from_dict, Calibration, get_affine_transform, affine_transform
-
-from ultralytics.utils.ops import xyxy2xywh, xywh2xyxy
 
 
 class Omni3Dataset(data.Dataset):
@@ -72,6 +65,12 @@ class Omni3Dataset(data.Dataset):
         self.mixup = args.mixup
         self.max_depth_threshold = args.max_depth_threshold
         self.min_depth_thres = args.min_depth_threshold
+        self.pred_rot_mat = args.pred_rot_mat
+        self.load_depth_maps = False
+        assert(self.pred_rot_mat)
+
+        self.left_multiply_matrix = np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]])
+        self.right_multiply_matrix = np.array([[-1, 0, 0], [0, 1, 0.], [0, 0, -1]])
 
         print("Finished loading!")
 
@@ -182,6 +181,7 @@ class Omni3Dataset(data.Dataset):
         gt_depth = []
         gt_heading_bin = []
         gt_heading_res = []
+        gt_rot_mat = []
 
         if self.split != 'test':
             objects = self.get_label(index)
@@ -191,15 +191,13 @@ class Omni3Dataset(data.Dataset):
                 for object in objects:
                     [x1, _, x2, _] = object.box2d # xyxy
                     object.box2d[0], object.box2d[2] = img_size[0] - x2, img_size[0] - x1
-                    object.ry = np.pi - object.ry
                     object.pos[0] *= -1
-                    if object.ry > np.pi:  object.ry -= 2 * np.pi
-                    if object.ry < -np.pi: object.ry += 2 * np.pi
+                    object.rot_mat = self.left_multiply_matrix @ object.rot_mat @ self.right_multiply_matrix
 
             object_num = len(objects) if len(objects) < self.max_objs else self.max_objs
 
             for i in range(object_num):
-                valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res \
+                valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res, _rot_mat \
                     = self.load_object(objects[i], scale, trans, calib)
                 if valid:
                     gt_boxes_2d.append(_box)
@@ -211,24 +209,22 @@ class Omni3Dataset(data.Dataset):
                     gt_depth.append(_depth)
                     gt_heading_bin.append(_head_bin)
                     gt_heading_res.append(_head_res)
+                    gt_rot_mat.append(_rot_mat)
 
             if random_mix_flag == True:
-                # if False:
                 objects = self.get_label(random_index)
                 # data augmentation for labels
                 if random_flip_flag:
                     for object in objects:
                         [x1, _, x2, _] = object.box2d
                         object.box2d[0], object.box2d[2] = img_size[0] - x2, img_size[0] - x1
-                        object.ry = np.pi - object.ry
                         object.pos[0] *= -1
-                        if object.ry > np.pi:  object.ry -= 2 * np.pi
-                        if object.ry < -np.pi: object.ry += 2 * np.pi
+                        object.rot_mat = self.left_multiply_matrix @ object.rot_mat @ self.right_multiply_matrix
                 object_num_temp = len(objects) if len(objects) < (self.max_objs - object_num) else (
                         self.max_objs - object_num)
                 for i in range(object_num_temp):
-                    valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res = (
-                        self.load_object(objects[i], scale, trans, calib))
+                    valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res, _rot_mat \
+                        = self.load_object(objects[i], scale, trans, calib)
                     if valid:
                         gt_boxes_2d.append(_box)
                         gt_cls.append(_cls)
@@ -239,6 +235,7 @@ class Omni3Dataset(data.Dataset):
                         gt_depth.append(_depth)
                         gt_heading_bin.append(_head_bin)
                         gt_heading_res.append(_head_res)
+                        gt_rot_mat.append(_rot_mat)
 
         inputs = torch.tensor(img)
         info = {'img_id': index,
@@ -274,7 +271,8 @@ class Omni3Dataset(data.Dataset):
             "mean_sizes": torch.tensor(self.cls_mean_size),
             "heading_bin": torch.tensor(np.array(gt_heading_bin)),
             "heading_res": torch.tensor(np.array(gt_heading_res)),
-            "mixed": torch.tensor(np.array(random_mix_flag, dtype=np.uint8))
+            "mixed": torch.tensor(np.array(random_mix_flag, dtype=np.uint8)),
+            "rot_mat": torch.tensor(gt_rot_mat)
         }
         return data
 
@@ -289,15 +287,19 @@ class Omni3Dataset(data.Dataset):
         _depth = 0
         _head_bin = 0
         _head_res = 0
+        _rot_mat = 0
 
         if ((object_.cls_type not in self.writelist)
                 or (object_.behind_camera or (object_.pos[-1] * scale < self.min_depth_thres))
-                or not object_.valid3D or object_.num_lidar == 0 or object_.depth_error >= 0.5
+                or not object_.valid3D or (object_.num_lidar != -1 and object_.num_lidar < 5) or object_.depth_error >= 0.5
                 or (object_.truncation >= 0.75 or (object_.visibility <= 0.25 and object_.visibility != -1))):
-            return valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res
+            return valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res, _rot_mat
 
         # process 3d bbox & get 3d center
-        center_3d = object_.pos - [0, object_.h / 2, 0]  # real 3D center in 3D space
+        center_3d = convert_location_ground2gravity(
+                    ground_center=torch.tensor(object_.pos)[None].float(),
+                    egoc_rot_matrix=torch.tensor(object_.rot_mat).unsqueeze(0).float(),
+                    dim=torch.tensor(np.array([object_.h, object_.w, object_.l], dtype=np.float32)).unsqueeze(0).float())[0].numpy()
         r_center_3d = center_3d.reshape(-1, 3)  # shape adjustment (N, 3)
         center_3d, _ = calib.rect_to_img(r_center_3d)  # project 3D center to image plane
         center_3d = center_3d[0]  # shape adjustment
@@ -320,24 +322,22 @@ class Omni3Dataset(data.Dataset):
         center_heatmap = center_3d.astype(np.int32)
         if (center_heatmap[0] < 0 or center_heatmap[0] >= self.resolution[0]
                 or center_heatmap[1] < 0 or center_heatmap[1] >= self.resolution[1]):
-            return valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res
+            return valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res, _rot_mat
 
         # encoding depth
-        depth = object_.pos[-1]
+        depth = r_center_3d[0, -1]
         depth *= scale
         if depth > self.max_depth_threshold:
-            return valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res
+            return valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res, _rot_mat
 
         _cls = [self.cls2train_id[object_.cls_type]]
 
         # encoding heading angle
         # heading_angle = objects[i].alpha
-        heading_angle = calib.ry2alpha(object_.ry, (object_.box2d[0] + object_.box2d[2]) / 2)
-        if heading_angle > np.pi:  heading_angle -= 2 * np.pi  # check range
-        if heading_angle < -np.pi: heading_angle += 2 * np.pi
-        heading_bin, heading_res = angle2class(heading_angle)
-        _head_bin = heading_bin
-        _head_res = heading_res
+
+        _rot_mat = egoc_to_alloc_rot_matrix_torch(amodal_center=torch.from_numpy(_center3d).unsqueeze(0).float(),
+                                                  egoc_rot_matrix=torch.from_numpy(object_.rot_mat).unsqueeze(0).float(),
+                                                  calib=torch.from_numpy(calib.P2).unsqueeze(0).float())[0].numpy().reshape(9)
 
         _size3d = (np.array([object_.h, object_.w, object_.l], dtype=np.float32)
                    - self.cls_mean_size[self.cls2train_id[object_.cls_type]])
@@ -349,7 +349,7 @@ class Omni3Dataset(data.Dataset):
         else:
             _depth = depth
         valid = True
-        return valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res
+        return valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res, _rot_mat
 
     def get_preds_and_gts(self, results):
         pred_annos = {"bbox": [], "type": [], 'frame_id': [], "score": []}
@@ -405,8 +405,10 @@ class Omni3Dataset(data.Dataset):
         metric3d = float(lines.split("\n")[4].split("|")[2].strip().split(" ")[0])
         return metric3d
 
-    def decode_preds_eval(self, preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=True, threshold=0.001):
-        return self.decode_preds(preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=undo_augment, threshold=threshold)
+    def decode_preds_eval(self, preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=True,
+                          threshold=0.001):
+        return self.decode_preds(preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=undo_augment,
+                                 threshold=threshold)
 
     def decode_batch_eval(self, batch, calibs, undo_augment=True):
         return self.decode_batch(batch, calibs, undo_augment=undo_augment)
@@ -444,15 +446,21 @@ class Omni3Dataset(data.Dataset):
                         locations = calibs[i].camera_dis_to_rect(x3d, y3d, depth).reshape(-1)
                     else:
                         locations = calibs[i].img_to_rect(x3d, y3d, depth).reshape(-1)
-                locations[1] += dimensions[0] / 2
 
-                hd_bin, hd_res = batch["heading_bin"][mask][j].item(), batch["heading_res"][mask][j].item()
-                alpha = class2angle(hd_bin, hd_res, to_label_format=True)
-                ry = calibs[i].alpha2ry(alpha, x)
+                egoc_rot_mat = alloc_to_egoc_rot_matrix_torch(
+                    amodal_center=batch["center_3d"][mask][j].unsqueeze(0),
+                    alloc_rot_matrix=batch["rot_mat"][mask][j].unsqueeze(0).reshape(1, 3, 3),
+                    calib=torch.tensor(calibs[i].P2).unsqueeze(0)
+                )[0].numpy()
+
+                locations = convert_location_gravity2ground(
+                    gravity_center=torch.tensor(locations)[None].float(),
+                    egoc_rot_matrix=torch.tensor(egoc_rot_mat).unsqueeze(0).float(),
+                    dim=torch.tensor(dimensions).unsqueeze(0).float())[0].numpy()
 
                 score = 1
 
-                targets.append([cls_id, alpha] + bbox + dimensions.tolist() + locations.tolist() + [ry, score])
+                targets.append([cls_id] + egoc_rot_mat.ravel().tolist() + bbox + dimensions.tolist() + locations.tolist() + [score])
 
             results[batch["im_file"][i]] = targets
         return results
@@ -460,15 +468,8 @@ class Omni3Dataset(data.Dataset):
     def decode_preds(self, preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=True,
                      threshold=0.001):
         preds = preds.detach().cpu()
-        bbox, pred_center3d, pred_s3d, pred_hd, pred_dep, pred_dep_un, scores, labels = preds.split(
-            (4, 2, 3, 24, 1, 1, 1, 1), dim=-1)
-
-        pred_bin = pred_hd[..., :12]
-        pred_res = pred_hd[..., 12:]
-        bins = pred_bin.argmax(dim=-1)
-        idx = torch.nn.functional.one_hot(pred_bin.max(dim=-1, keepdim=True)[1], num_classes=12).squeeze(-2)
-        res = pred_res[idx.bool()].view(bins.shape)
-        alphas = bin2angle(bins, res)
+        bbox, pred_center3d, pred_s3d, pred_rot_mat, pred_dep, pred_dep_un, scores, labels = preds.split(
+            (4, 2, 3, 9, 1, 1, 1, 1), dim=-1)
 
         scores = scores.sigmoid()
 
@@ -504,16 +505,23 @@ class Omni3Dataset(data.Dataset):
                         locations = calibs[i].camera_dis_to_rect(x3d, y3d, depth).reshape(-1)
                     else:
                         locations = calibs[i].img_to_rect(x3d, y3d, depth).reshape(-1)
-                locations[1] += dimensions[0] / 2
 
-                alpha = alphas[i, j].item()
-                ry = calibs[i].alpha2ry(alpha, x)
+                egoc_rot_mat = alloc_to_egoc_rot_matrix_torch(
+                    amodal_center=torch.tensor(locations).unsqueeze(0),
+                    alloc_rot_matrix=pred_rot_mat[i, j].unsqueeze(0).reshape(1, 3, 3),
+                    calib=torch.tensor(calibs[i].P2).unsqueeze(0)
+                )[0].numpy()
+
+                locations = convert_location_gravity2ground(
+                    gravity_center=torch.tensor(locations)[None].float(),
+                    egoc_rot_matrix=torch.tensor(egoc_rot_mat).unsqueeze(0).float(),
+                    dim=torch.tensor(dimensions).unsqueeze(0).float())[0].numpy()
 
                 score = scores[i, j].item() * sigma
                 if score < threshold:
                     continue
 
-                targets.append([cls_id, alpha] + bbox_ + dimensions.tolist() + locations.tolist() + [ry, score])
+                targets.append([cls_id, egoc_rot_mat.ravel()] + bbox_ + dimensions.tolist() + locations.tolist() + [score])
 
             results[im_files[i]] = targets
         return results
@@ -529,7 +537,7 @@ class Omni3Dataset(data.Dataset):
             if k in ["img", "coord_range", "ratio_pad", "calib", "mixed"]:
                 value = torch.stack(value, 0)
             if k in ["bboxes", "cls", "depth", "center_3d", "center_2d", "size_2d", "heading_bin",
-                     "heading_res", "size_3d"]:
+                     "heading_res", "size_3d", "rot_mat"]:
                 value = torch.cat(value, 0)
             if k not in ["mean_sizes"]:
                 new_batch[k] = value
