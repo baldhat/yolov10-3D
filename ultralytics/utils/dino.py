@@ -282,9 +282,11 @@ def main(save_dir):
     model = DinoDepther("small")
     model.train()
 
-    freeze_backbone(model)
+    for param in model.parameters():
+        param.requires_grad = True
+    #freeze_backbone(model)
 
-    optimizer = torch.optim.Adam(model.head.parameters(), lr=1e-5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
     lr_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer=optimizer, start_factor=1.0, end_factor=0.1, total_iters=100)
 
     best_eval_loss = 100000

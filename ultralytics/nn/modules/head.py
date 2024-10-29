@@ -651,6 +651,63 @@ class v10Detect3d(nn.Module):
         else:
             return Conv(in_channels, out_channels, kernel_size,  deform=deform)
 
+    def unravel_index(self, index, shape):
+        out = []
+        for dim in reversed(shape):
+            out.append(index % dim)
+            index = index // dim
+        return tuple(reversed(out))
+
+    def extract_patches(self, x, indices, patch_size=5):
+        b, c, w, h = x.shape
+        pad = patch_size//2
+
+        patches = []
+        for i in range(b):
+            img = x[i].unsqueeze(0)  # Shape [1, c, w, h]
+            padded_img = torch.nn.functional.pad(img, (pad, pad, pad, pad))
+
+            xs = indices[i, :, 0] + pad # offset the padding
+            ys = indices[i, :, 1] + pad # offset the padding
+
+            for xi, yi in zip(xs, ys):
+                patch = padded_img[:, :, xi - pad:xi + 1 + pad, yi - pad:yi + 1 + pad]  # Extract 3x3 patch around (xi, yi)
+                patches.append(patch)
+
+        # Stack patches along the batch dimension [b*k, c, 3, 3]
+        patches = torch.stack(patches).view(b * self.max_det, c, patch_size, patch_size)
+
+        return patches
+
+    def select_candidates(self, scores, batch_size):
+        cls_scores_max = torch.max(scores, dim=1)[0]
+        topk_indices = torch.zeros((batch_size, self.max_det, 2), dtype=torch.long)
+        for b in range(batch_size):
+            _, topk_ind = torch.topk(cls_scores_max[b].view(-1), self.max_det, dim=0, largest=True)
+            topk_indices[b, :, 0], topk_indices[b, :, 1] = self.unravel_index(topk_ind, cls_scores_max[b].shape)
+        return topk_indices
+
+    def inference_forward_feat(self, x, heads, patch_size=5):
+        y = []
+        batch_sz = x[0].shape[0]
+        head_names = list(self.output_channels.keys())
+        for i in range(self.nl):
+            outputs = {}
+            outputs[head_names[0]] = heads[0][i](x[i])
+
+            candidate_indices = self.select_candidates(outputs[head_names[0]], batch_sz)
+
+            inputs = self.extract_patches(x[i], candidate_indices, patch_size=patch_size)
+            for j, module in enumerate(heads[1:]):
+                output_shape = (x[i].shape[0], list(self.output_channels.values())[j+1], x[i].shape[2], x[i].shape[3])
+                head_output = torch.zeros(output_shape, device=x[i].device)
+                out = module[i](inputs)[:, :, patch_size//2, patch_size//2].view(output_shape[0], self.max_det, output_shape[1]).transpose(1, 2)
+                for b in range(batch_sz):
+                    head_output[b, :, candidate_indices[b, :, 0], candidate_indices[b, :, 1]] = out[b]
+                outputs[head_names[j+1]] = head_output
+            y.append(torch.cat(list(outputs.values()), dim=1))
+        return y
+
     def forward_feat(self, x, heads):
         y = []
         embs = [None] * self.nl
@@ -748,20 +805,23 @@ class v10Detect3d(nn.Module):
         return self.inference(y), embs, depth_maps
 
     def forward(self, x):
-        one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
-        if not self.export:
-            one2many, o2m_embs, depth_maps = self._forward(x)
+        if not self.training:
+            one2one, o2o_embs = self.inference_forward_feat([xi.detach() for xi in x], self.o2o_heads, patch_size=5), None
+            #one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
+        else:
+            one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
 
         if not self.training:
             one2one = self.inference(one2one)
             if not self.export:
-                return {"one2many": one2many, "one2one": one2one, "o2m_embs": o2m_embs, "o2o_embs": o2o_embs, "depth_maps": depth_maps}
+                return {"one2one": one2one, "o2o_embs": o2o_embs}
             else:
                 raise NotImplementedError("TODO")
                 assert(self.max_det != -1)
                 boxes, scores, labels = ops.v10postprocess(one2one.permute(0, 2, 1), self.max_det, self.nc)
                 return torch.cat([boxes, scores.unsqueeze(-1), labels.unsqueeze(-1).to(boxes.dtype)], dim=-1)
         else:
+            one2many, o2m_embs, depth_maps = self._forward(x)
             return {"one2many": one2many, "one2one": one2one, "o2m_embs": o2m_embs, "o2o_embs": o2o_embs, "depth_maps": depth_maps}
 
 
