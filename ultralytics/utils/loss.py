@@ -746,17 +746,22 @@ class DetectLoss3d:
             self.fgdm_loss_func = ForegroundDepthMapLoss(self.model)
 
     def __call__(self, preds, batch):
-        one2many, o2m_embs = preds["one2many"], preds["o2m_embs"]
-        loss_one2many = self.one2many(one2many, batch, embeddings=o2m_embs)
         one2one, o2o_embs = preds["one2one"], preds["o2o_embs"]
         loss_one2one = self.one2one(one2one, batch, embeddings=o2o_embs)
-        if self.model.args.fgdm_loss:
-            gt_depth_maps = batch["depth_map"].to(preds["depth_maps"][0].device)
-            depth_logits = preds["depth_maps"][0]
-            fgdm_loss = self.fgdm_loss_func(depth_logits, gt_depth_maps) * self.model.args.fgdm_loss_weight
-            return loss_one2many[0] + loss_one2one[0] + fgdm_loss, torch.cat((loss_one2many[1], loss_one2one[1], fgdm_loss.unsqueeze(0)))
+
+        if preds.get("one2many", None):
+            one2many, o2m_embs = preds["one2many"], preds["o2m_embs"]
+            loss_one2many = self.one2many(one2many, batch, embeddings=o2m_embs)
+
+            if self.model.args.fgdm_loss:
+                gt_depth_maps = batch["depth_map"].to(preds["depth_maps"][0].device)
+                depth_logits = preds["depth_maps"][0]
+                fgdm_loss = self.fgdm_loss_func(depth_logits, gt_depth_maps) * self.model.args.fgdm_loss_weight
+                return loss_one2many[0] + loss_one2one[0] + fgdm_loss, torch.cat((loss_one2many[1], loss_one2one[1], fgdm_loss.unsqueeze(0)))
+            else:
+                return loss_one2many[0] + loss_one2one[0], torch.cat((loss_one2many[1], loss_one2one[1]))
         else:
-            return loss_one2many[0] + loss_one2one[0], torch.cat((loss_one2many[1], loss_one2one[1]))
+            return torch.zeros(1), torch.cat((loss_one2one[1], torch.zeros_like(loss_one2one[1])))
 
 
 class DDDetectionLoss:
