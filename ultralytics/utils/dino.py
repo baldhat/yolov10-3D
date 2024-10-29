@@ -284,6 +284,7 @@ def main(save_dir):
     #freeze_backbone(model)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=5e-5)
+
     lr_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer=optimizer, start_factor=1.0, end_factor=0.1, total_iters=100)
 
     best_eval_loss = 100000
