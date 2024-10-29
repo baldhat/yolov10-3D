@@ -54,7 +54,6 @@ class CenterPadding(torch.nn.Module):
         pad_size_right = pad_size - pad_size_left
         return pad_size_left, pad_size_right
 
-    @torch.inference_mode()
     def forward(self, x):
         pads = list(itertools.chain.from_iterable(self._get_pad(m) for m in x.shape[:1:-1]))
         output = F.pad(x, pads)
@@ -86,7 +85,7 @@ def load_config_from_url(url: str) -> str:
     with urllib.request.urlopen(url) as f:
         return f.read().decode()
 
-class DinoDepther(torch.nn.Module, ):
+class DinoDepther(torch.nn.Module):
     def __init__(self, backbone_size="small"):
         super().__init__()
         self.backbone = self.load_backbone(backbone_size)
@@ -276,15 +275,15 @@ def main(save_dir):
     args = Args()
     train_dataset = KITTIDataset(train_file_path, "train", args)
     val_dataset = KITTIDataset(val_file_path, "val", args)
-    train_dataloader = build_dataloader(train_dataset, 24, 4, shuffle=True)
-    val_dataloader = build_dataloader(val_dataset, 32, 4, shuffle=False)
+    train_dataloader = build_dataloader(train_dataset, 12, 4, shuffle=True)
+    val_dataloader = build_dataloader(val_dataset, 12, 4, shuffle=False)
 
     model = DinoDepther("small")
     model.train()
 
-    freeze_backbone(model)
+    #freeze_backbone(model)
 
-    optimizer = torch.optim.Adam(model.head.parameters(), lr=1e-5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=5e-5)
     lr_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer=optimizer, start_factor=1.0, end_factor=0.1, total_iters=100)
 
     best_eval_loss = 100000

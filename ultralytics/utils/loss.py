@@ -753,7 +753,7 @@ class DetectLoss3d:
         if self.model.args.fgdm_loss:
             gt_depth_maps = batch["depth_map"].to(preds["depth_maps"][0].device)
             depth_logits = preds["depth_maps"][0]
-            fgdm_loss = self.fgdm_loss_func(depth_logits, gt_depth_maps)
+            fgdm_loss = self.fgdm_loss_func(depth_logits, gt_depth_maps) * self.model.args.fgdm_loss_weight
             return loss_one2many[0] + loss_one2one[0] + fgdm_loss, torch.cat((loss_one2many[1], loss_one2one[1], fgdm_loss.unsqueeze(0)))
         else:
             return loss_one2many[0] + loss_one2one[0], torch.cat((loss_one2many[1], loss_one2one[1]))
