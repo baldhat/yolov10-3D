@@ -14,6 +14,8 @@ common_head: False
 num_scales: 3
 half_channels: False
 fgdm_predictor: False
+kernel_size_1: 3
+kernel_size_2: 3
 channels:
   cls_c: 128
   o2d_c: 128
