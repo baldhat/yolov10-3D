@@ -701,9 +701,12 @@ class v10Detect3d(nn.Module):
 
             inputs = self.extract_patches(x[i], candidate_indices)
             for j, module in enumerate(heads[1:]):
+                for layer in module[i]:
+                    if isinstance(layer, Conv):
+                        layer.conv.padding = 0
                 output_shape = (x[i].shape[0], list(self.output_channels.values())[j+1], x[i].shape[2], x[i].shape[3])
                 head_output = torch.zeros(output_shape, device=x[i].device)
-                out = module[i](inputs)[:, :, self.patch_size//2, self.patch_size//2].view(output_shape[0], self.max_det, output_shape[1]).transpose(1, 2)
+                out = module[i](inputs)[:, :, 0, 0].view(output_shape[0], self.max_det, output_shape[1]).transpose(1, 2)
                 for b in range(batch_sz):
                     head_output[b, :, candidate_indices[b, :, 0], candidate_indices[b, :, 1]] = out[b]
                 outputs[head_names[j+1]] = head_output
