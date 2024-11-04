@@ -180,7 +180,10 @@ class BaseValidator:
             # Loss
             with dt[2]:
                 if self.training:
-                    self.loss += model.loss(batch, preds)[1]
+                    loss = model.loss(batch, preds)[1]
+                    if loss.shape[0] != self.loss.shape[0]:
+                        loss = torch.cat((loss, torch.zeros(self.loss.shape[0] - loss.shape[0], device=loss.device)))
+                    self.loss += loss
 
             # Postprocess
             with dt[3]:

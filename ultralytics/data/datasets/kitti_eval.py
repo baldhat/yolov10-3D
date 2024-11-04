@@ -1270,7 +1270,7 @@ def eval_from_scrach(gt_dir, det_dir, eval_cls_list=None, ap_mode=40):
     AP_mode = ap_mode
 
     if eval_cls_list == None:
-        eval_cls_list = ['Car']
+        eval_cls_list = ['Cyclist', 'Pedestrian', 'Car']
 
     all_gt, all_det = [], []
     all_f = sorted(os.listdir(det_dir))

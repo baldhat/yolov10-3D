@@ -40,6 +40,8 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
 
         if self.args.fgdm_loss:
             self.loss_names += ["fgdm"]
+            if self.args.fgdm_supervision:
+                self.loss_names += ["fgdm_sup"]
 
         return YOLOv10_3DDetectionValidator(
             self.test_loader, save_dir=self.save_dir, args=copy(self.args), _callbacks=self.callbacks

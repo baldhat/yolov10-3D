@@ -552,7 +552,8 @@ class v10Detect3d(nn.Module):
     strides = torch.empty(0)  # init
 
     def __init__(self, nc=80, ch=(), dsconv=False, channels=None, use_predecessors=False, detach_predecessors=True,
-                 deform=False, common_head=False, num_scales=3, half_channels=False, fgdm_predictor=False):
+                 deform=False, common_head=False, num_scales=3, half_channels=False, fgdm_predictor=False,
+                 kernel_size_1=3, kernel_size_2=3):
         super().__init__()
         assert (channels is not None)
         self.nc = nc  # number of classes
@@ -573,6 +574,9 @@ class v10Detect3d(nn.Module):
         self.stride = torch.zeros(self.nl)  # strides computed during build
         self.deform = deform
         self.common_head = common_head
+        self.kernel_size_1 = kernel_size_1
+        self.kernel_size_2 = kernel_size_2
+        self.patch_size = (kernel_size_1 - 1) + (kernel_size_2 - 1) + 1
 
         self.fgdm_pred = fgdm_predictor
 
@@ -602,23 +606,23 @@ class v10Detect3d(nn.Module):
 
         if self.common_head:
             self.common = nn.ModuleList(v10Detect3d.build_conv(ch_, ch_, 3, dsconv) for ch_ in ch)
-            self.cls = self.build_small_head(ch, channels["cls_c"], self.nc, self.dsconv)
-            self.o2d = self.build_small_head(ch, channels["o2d_c"], 2, self.dsconv)
-            self.s2d = self.build_small_head(ch, channels["s2d_c"], 2, self.dsconv)
-            self.o3d = self.build_small_head(ch, channels["o3d_c"], 2, self.dsconv)
-            self.s3d = self.build_small_head(ch, channels["s3d_c"], 3, self.dsconv)
-            self.hd = self.build_small_head(ch, channels["hd_c"], 24, self.dsconv)
-            self.dep = self.build_small_head(ch, channels["dep_c"], 1, self.dsconv)
-            self.dep_un = self.build_small_head(ch, channels["dep_un_c"], 1, self.dsconv)
+            self.cls = self.build_small_head(ch, channels["cls_c"], self.nc)
+            self.o2d = self.build_small_head(ch, channels["o2d_c"], 2)
+            self.s2d = self.build_small_head(ch, channels["s2d_c"], 2)
+            self.o3d = self.build_small_head(ch, channels["o3d_c"], 2)
+            self.s3d = self.build_small_head(ch, channels["s3d_c"], 3)
+            self.hd = self.build_small_head(ch, channels["hd_c"], 24)
+            self.dep = self.build_small_head(ch, channels["dep_c"], 1)
+            self.dep_un = self.build_small_head(ch, channels["dep_un_c"], 1)
         else:
-            self.cls = self.build_head(self.cls_in_ch, channels["cls_c"], self.nc, self.dsconv, self.deform, half_channels=self.half_channels)
-            self.o2d = self.build_head(self.o2d_in_ch, channels["o2d_c"], 2, self.dsconv, self.deform, half_channels=self.half_channels)
-            self.s2d = self.build_head(self.s2d_in_ch, channels["s2d_c"], 2, self.dsconv, self.deform, half_channels=self.half_channels)
-            self.o3d = self.build_head(self.o3d_in_ch, channels["o3d_c"], 2, self.dsconv, self.deform, half_channels=self.half_channels)
-            self.s3d = self.build_head(self.s3d_in_ch, channels["s3d_c"], 3, self.dsconv, self.deform, half_channels=self.half_channels)
-            self.hd = self.build_head(self.hd_in_ch, channels["hd_c"], 24, self.dsconv, self.deform, half_channels=self.half_channels)
-            self.dep = self.build_head(self.dep_in_ch, channels["dep_c"], 1, self.dsconv, self.deform, half_channels=self.half_channels)
-            self.dep_un = self.build_head(self.dep_un_in_ch, channels["dep_un_c"], 1, self.dsconv, self.deform, half_channels=self.half_channels)
+            self.cls = self.build_head(self.cls_in_ch, channels["cls_c"], self.nc)
+            self.o2d = self.build_head(self.o2d_in_ch, channels["o2d_c"], 2)
+            self.s2d = self.build_head(self.s2d_in_ch, channels["s2d_c"], 2)
+            self.o3d = self.build_head(self.o3d_in_ch, channels["o3d_c"], 2)
+            self.s3d = self.build_head(self.s3d_in_ch, channels["s3d_c"], 3)
+            self.hd = self.build_head(self.hd_in_ch, channels["hd_c"], 24)
+            self.dep = self.build_head(self.dep_in_ch, channels["dep_c"], 1)
+            self.dep_un = self.build_head(self.dep_un_in_ch, channels["dep_un_c"], 1)
 
         self.o2o_heads = nn.ModuleList(
             [self.cls, self.o2d, self.s2d, self.o3d, self.s3d, self.hd, self.dep, self.dep_un])
@@ -627,18 +631,16 @@ class v10Detect3d(nn.Module):
         if self.fgdm_pred:
             self.fgdm_predictor = DepthPredictor(ch)
 
-    @staticmethod
-    def build_head(in_channels, mid_channels, output_channels, dsconv, deform, half_channels=False):
-        return nn.ModuleList(nn.Sequential(v10Detect3d.build_conv(x, mid_channels, 3, dsconv,  deform=deform),
-                                           v10Detect3d.build_conv(mid_channels, mid_channels // 2 if half_channels else mid_channels, 3, dsconv),
-                                           nn.Conv2d(mid_channels // 2 if half_channels else mid_channels, output_channels, 1)
+    def build_head(self, in_channels, mid_channels, output_channels):
+        return nn.ModuleList(nn.Sequential(v10Detect3d.build_conv(x, mid_channels, self.kernel_size_1, self.dsconv,  deform=self.deform),
+                                           v10Detect3d.build_conv(mid_channels, mid_channels // 2 if self.half_channels else mid_channels, self.kernel_size_2, self.dsconv),
+                                           nn.Conv2d(mid_channels // 2 if self.half_channels else mid_channels, output_channels, 1)
                                            )
                              for x in in_channels
         )
 
-    @staticmethod
-    def build_small_head(in_channels, mid_channels, output_channels, dsconv):
-        return nn.ModuleList(nn.Sequential(v10Detect3d.build_conv(x, mid_channels, 3, dsconv),
+    def build_small_head(self, in_channels, mid_channels, output_channels):
+        return nn.ModuleList(nn.Sequential(v10Detect3d.build_conv(x, mid_channels, self.kernel_size_1, self.dsconv),
                                            nn.Conv2d(mid_channels, output_channels, 1)
                                            )
                              for x in in_channels
@@ -650,6 +652,68 @@ class v10Detect3d(nn.Module):
             return nn.Sequential(Conv(in_channels, in_channels, kernel_size, g=in_channels, deform=deform), Conv(in_channels, out_channels, 1))
         else:
             return Conv(in_channels, out_channels, kernel_size,  deform=deform)
+
+    def unravel_index(self, index, shape):
+        out = []
+        for dim in reversed(shape):
+            out.append(index % dim)
+            index = index // dim
+        return tuple(reversed(out))
+
+    def extract_patches(self, x, indices):
+        b, c, w, h = x.shape
+        if not hasattr(self, "patch_size"):
+            self.patch_size = 5
+        pad = self.patch_size//2
+
+        patches = []
+        for i in range(b):
+            img = x[i].unsqueeze(0)  # Shape [1, c, w, h]
+            padded_img = torch.nn.functional.pad(img, (pad, pad, pad, pad))
+
+            xs = indices[i, :, 0] + pad # offset the padding
+            ys = indices[i, :, 1] + pad # offset the padding
+
+            for xi, yi in zip(xs, ys):
+                patch = padded_img[:, :, xi - pad:xi + 1 + pad, yi - pad:yi + 1 + pad]  # Extract 3x3 patch around (xi, yi)
+                patches.append(patch)
+
+        # Stack patches along the batch dimension [b*k, c, 3, 3]
+        patches = torch.stack(patches).view(b * self.max_det, c, self.patch_size, self.patch_size)
+
+        return patches
+
+    def select_candidates(self, scores, batch_size):
+        cls_scores_max = torch.max(scores, dim=1)[0]
+        topk_indices = torch.zeros((batch_size, self.max_det, 2), dtype=torch.long)
+        for b in range(batch_size):
+            _, topk_ind = torch.topk(cls_scores_max[b].view(-1), self.max_det, dim=0, largest=True)
+            topk_indices[b, :, 0], topk_indices[b, :, 1] = self.unravel_index(topk_ind, cls_scores_max[b].shape)
+        return topk_indices
+
+    def inference_forward_feat(self, x, heads):
+        y = []
+        batch_sz = x[0].shape[0]
+        head_names = list(self.output_channels.keys())
+        for i in range(self.nl):
+            outputs = {}
+            outputs[head_names[0]] = heads[0][i](x[i])
+
+            candidate_indices = self.select_candidates(outputs[head_names[0]], batch_sz)
+
+            inputs = self.extract_patches(x[i], candidate_indices)
+            for j, module in enumerate(heads[1:]):
+                for layer in module[i]:
+                    if isinstance(layer, Conv):
+                        layer.conv.padding = 0
+                output_shape = (x[i].shape[0], list(self.output_channels.values())[j+1], x[i].shape[2], x[i].shape[3])
+                head_output = torch.zeros(output_shape, device=x[i].device)
+                out = module[i](inputs)[:, :, 0, 0].view(output_shape[0], self.max_det, output_shape[1]).transpose(1, 2)
+                for b in range(batch_sz):
+                    head_output[b, :, candidate_indices[b, :, 0], candidate_indices[b, :, 1]] = out[b]
+                outputs[head_names[j+1]] = head_output
+            y.append(torch.cat(list(outputs.values()), dim=1))
+        return y
 
     def forward_feat(self, x, heads):
         y = []
@@ -738,7 +802,7 @@ class v10Detect3d(nn.Module):
         y, embs = self.forward_feat(x, self.o2m_heads)
 
         if hasattr(self, "fgdm_pred") and self.fgdm_pred:
-            depth_maps = self.fgdm_predictor(x)
+            depth_maps = self.fgdm_predictor(x, return_embeddings=True)
         else:
             depth_maps = torch.empty(1)
 
@@ -748,20 +812,24 @@ class v10Detect3d(nn.Module):
         return self.inference(y), embs, depth_maps
 
     def forward(self, x):
-        one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
-        if not self.export:
-            one2many, o2m_embs, depth_maps = self._forward(x)
+        if not self.training:
+            one2one, o2o_embs = self.inference_forward_feat([xi.detach() for xi in x], self.o2o_heads), None
+            # self.get_head_ranks()
+            # one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
+        else:
+            one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
 
         if not self.training:
             one2one = self.inference(one2one)
             if not self.export:
-                return {"one2many": one2many, "one2one": one2one, "o2m_embs": o2m_embs, "o2o_embs": o2o_embs, "depth_maps": depth_maps}
+                return {"one2one": one2one, "o2o_embs": o2o_embs}
             else:
                 raise NotImplementedError("TODO")
                 assert(self.max_det != -1)
                 boxes, scores, labels = ops.v10postprocess(one2one.permute(0, 2, 1), self.max_det, self.nc)
                 return torch.cat([boxes, scores.unsqueeze(-1), labels.unsqueeze(-1).to(boxes.dtype)], dim=-1)
         else:
+            one2many, o2m_embs, depth_maps = self._forward(x)
             return {"one2many": one2many, "one2one": one2one, "o2m_embs": o2m_embs, "o2o_embs": o2o_embs, "depth_maps": depth_maps}
 
 
@@ -780,6 +848,9 @@ class v10Detect3d(nn.Module):
         if self.nl == 1:
             deps = [40]
             ranges = [[-3.5, 3.5]]
+        elif self.nl == 2:
+            deps = [45, 20]
+            ranges = [[-2, 2], [-2, 2]]
         elif self.nl == 3:
             deps = [45, 25, 10]
             ranges = [[-2, 2], [-1.5, 1.5], [-1, 1]]
@@ -805,6 +876,103 @@ class v10Detect3d(nn.Module):
                 nn.init.normal_(m.weight, std=0.001)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
+
+    def calc_rank(self, layer):
+        weight_tensor = layer[0].conv.weight
+        output_channels, input_channels, k1, k2 = weight_tensor.shape
+        wght_matrix = np.transpose(weight_tensor.cpu().numpy(), (1, 2, 3, 0))
+        wght_matrix = wght_matrix.reshape(output_channels,
+                                          input_channels * k1 * k2)
+        U, S, V_t = np.linalg.svd(wght_matrix, full_matrices=True)
+        rank = np.linalg.matrix_rank(wght_matrix, tol=S[0] / 2) / input_channels
+        svalues = S / S[0]
+        return rank, svalues
+
+    def calc_weight_distri(self, layer):
+        weight_tensor = layer[0].conv.weight
+        center = weight_tensor[:, :, 1, 1].abs().mean()
+        others = weight_tensor[:, :, [0, 0, 0, 1, 1, 2, 2, 2], [0, 1, 2, 0, 2, 0, 1, 2]].abs().mean()
+        return center, others
+
+    def get_head_ranks(self):
+        head_names = list(self.output_channels.keys())
+        scales = [8, 16, 32]
+        ranks = np.zeros((2, 3, 8), dtype=np.float32)
+        svalues = np.zeros((2, 3, 8, 128))
+        weight_distri = np.zeros((2, 3, 8, 2)) # center, others
+        for i, head in enumerate(self.o2o_heads):
+            for j, scale in enumerate(head):
+                ranks[0, j, i],  svalues[0, j, i, :] = self.calc_rank(scale)
+                weight_distri[0, j, i, 0], weight_distri[0, j, i, 1] = self.calc_weight_distri(scale)
+        for i, head in enumerate(self.o2m_heads):
+            for j, scale in enumerate(head):
+                ranks[1, j, i], svalues[1, j, i, :] = self.calc_rank(scale)
+                weight_distri[1, j, i, 0], weight_distri[1, j, i, 1] = self.calc_weight_distri(scale)
+
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        plt.style.use('dark_background')
+
+        def get_cmap(n, name='hsv'):
+            '''Returns a function that maps each index in 0, 1, ..., n-1 to a distinct
+            RGB color; the keyword argument name must be a standard mpl colormap name.'''
+            return plt.cm.get_cmap(name, n)
+
+        fig, axes = plt.subplots(3, 2, figsize=(14, 12))
+        cmap = get_cmap(8, "Pastel1")
+        colors = [cmap(i) for i in range(8)]
+        rows = [f"Subsampling {scale}" for scale in scales]
+        cols = ["o2o", "o2m"]
+        for ax, col in zip(axes[0], cols):
+            ax.set_title(col)
+        for ax, row in zip(axes[:, 0], rows):
+            ax.set_ylabel(row, rotation=0, size='large')
+
+        for mapping in range(2):
+            for scale in range(3):
+                axes[scale, mapping].bar(np.arange(8), ranks[mapping, scale, :].reshape(8), tick_label=head_names, color=colors)
+        fig.tight_layout()
+        plt.show()
+
+        fig, axes = plt.subplots(3, 2, figsize=(15, 12))
+        cmap = get_cmap(8, "jet")
+        colors = [cmap(i) for i in range(8)]
+        rows = [f"Subsampling {scale}" for scale in scales]
+        cols = ["o2o", "o2m"]
+        for ax, col in zip(axes[0], cols):
+            ax.set_title(col)
+        for ax, row in zip(axes[:, 0], rows):
+            ax.set_ylabel(row, rotation=0, size='large')
+
+        for mapping in range(2):
+            for scale in range(3):
+                for head in range(8):
+                    axes[scale, mapping].set_ylim((0, 1))
+                    axes[scale, mapping].plot(np.arange(128)/128, svalues[mapping, scale, head],
+                                              label=head_names[head], color=colors[head], linewidth=2)
+        plt.legend()
+        fig.tight_layout()
+        plt.show()
+
+        fig, axes = plt.subplots(3, 2, figsize=(14, 12))
+        cmap = get_cmap(8, "Pastel1")
+        colors = [x for xs in [[cmap(i), cmap(i)] for i in range(8)] for x in xs]
+        rows = [f"Subsampling {scale}" for scale in scales]
+        cols = ["o2o", "o2m"]
+        for ax, col in zip(axes[0], cols):
+            ax.set_title(col)
+        for ax, row in zip(axes[:, 0], rows):
+            ax.set_ylabel(row, rotation=0, size='large')
+
+        labels = head_names * 2
+        for mapping in range(2):
+            for scale in range(3):
+                axes[scale, mapping].bar(np.arange(16), weight_distri[mapping, scale].reshape(16), tick_label=labels,
+                                         color=colors)
+        plt.legend()
+        fig.tight_layout()
+        plt.show()
+        print()
 
 
 class DepthPredictor(nn.Module):
@@ -845,7 +1013,7 @@ class DepthPredictor(nn.Module):
 
         self.depth_classifier = nn.Conv2d(hidden_dim, self.depth_bins + 1, kernel_size=(1, 1))
 
-    def forward(self, feature):
+    def forward(self, feature, return_embeddings=False):
         assert len(feature) == 3
 
         src_8 = self.downsample(feature[0])
@@ -858,14 +1026,20 @@ class DepthPredictor(nn.Module):
         ####
         src = (src_8 + src_16 + src_32) / 3
 
-        src = self.depth_head(src)
+        for i, layer in enumerate(self.depth_head):
+            src = layer(src)
+            if i == 2 and return_embeddings:
+                features = src
         # ipdb.set_trace()
         depth_logits = self.depth_classifier(src)
 
         depth_probs = torch.nn.functional.softmax(depth_logits, dim=1)
         weighted_depth = (depth_probs * self.depth_bin_values.reshape(1, -1, 1, 1)).sum(dim=1)
 
-        return depth_logits, weighted_depth
+        if return_embeddings:
+            return depth_logits, weighted_depth, features
+        else:
+            return depth_logits, weighted_depth
 
     def interpolate_depth_embed(self, depth):
         depth = depth.clamp(min=0, max=self.depth_max)

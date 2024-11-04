@@ -537,6 +537,9 @@ def entrypoint(debug=""):
     if mode == "train" and os.path.exists(os.path.join(overrides.get("save_dir", ""), "weights/last.pt")):
         overrides["resume"] = True
         overrides["model"] = os.path.join(overrides.get("save_dir", ""), "weights/last.pt")
+        print(f"Trying to resume model {overrides['model']}")
+    else:
+        print(f"New training run at {overrides['model']}")
 
     # Model
     model = overrides.pop("model", DEFAULT_CFG.model)

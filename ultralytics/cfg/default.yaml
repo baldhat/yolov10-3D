@@ -7,9 +7,9 @@ mode: train # (str) YOLO mode, i.e. train, val, predict, export, track, benchmar
 # Train settings -------------------------------------------------------------------------------------------------------
 model: # (str, optional) path to model file, i.e. yolov8n.pt, yolov8n.yaml
 data: # (str, optional) path to data file, i.e. coco128.yaml
-epochs: 100 # (int) number of epochs to train for
+epochs: 400 # (int) number of epochs to train for
 time: # (float, optional) number of hours to train for, overrides epochs if supplied
-patience: 100 # (int) epochs to wait for no observable improvement for early stopping of training
+patience: 150 # (int) epochs to wait for no observable improvement for early stopping of training
 batch: 32 # (int) number of images per batch (-1 for AutoBatch)
 imgsz: [960, 640] # (int | list) input images size as int for train and val modes, or list[w,h] for predict and export modes
 save: True # (bool) save train checkpoints and predict results
@@ -17,7 +17,7 @@ save_period: -1 # (int) Save checkpoint every x epochs (disabled if < 1)
 val_period: 1 # (int) Validation every x epochs
 cache: False # (bool) True/ram, disk or False. Use cache for data loading
 device: # (int | str | list, optional) device to run on, i.e. cuda device=0 or device=0,1,2,3 or device=cpu
-workers: 6 # (int) number of worker threads for data loading (per RANK if DDP)
+workers: 4 # (int) number of worker threads for data loading (per RANK if DDP)
 project: # (str, optional) project name
 name: # (str, optional) experiment name, results saved to 'project/name' directory
 exist_ok: False # (bool) whether to overwrite existing experiment
@@ -67,7 +67,7 @@ retina_masks: False # (bool) use high-resolution segmentation masks
 embed: # (list[int], optional) return feature vectors/embeddings from given layers
 use_o2m_depth: False
 use_dino_depth: False
-dino_path:
+dino_path: /home/stud/mijo/experiments/results/dino_mask_fix_noMixup/dino/best.pt
 
 # Visualize settings ---------------------------------------------------------------------------------------------------
 show: False # (bool) show predicted images and videos if environment allows
@@ -127,14 +127,18 @@ min_depth_threshold: 1
 min_scale: 0.6
 max_scale: 1.4
 overfit: False
-distillation: False
+distillation: True
 distillation_temp: 2
-distillation_weight: 0.25
+distillation_weight: 0.75
 distillation_loss: "cos"
 distillation_no_mixup: True
+
 load_depth_maps: True
 
 fgdm_loss: True
+fgdm_loss_weight: 2
+fgdm_supervision: True
+fgdm_supervision_weight: 1
 
 dfl: 1.5 # (float) dfl loss gain
 pose: 12.0 # (float) pose loss gain

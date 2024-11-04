@@ -51,7 +51,9 @@ class KITTIDataset(data.Dataset):
         # path configuration
         self.data_dir = os.path.join(root_dir, 'testing' if self.mode == 'test' else 'training')
         self.image_dir = os.path.join(self.data_dir, 'image_2')
-        self.depth_dir = os.path.join(self.data_dir, 'depth')
+        self.depth_dir = os.path.join(root_dir, 'deepseg', "training", "image_2") \
+            if os.path.exists(os.path.join(root_dir, 'deepseg', "training", "image_2")) \
+            else os.path.join(self.data_dir, 'image_2')
         self.calib_dir = os.path.join(self.data_dir, 'calib')
         self.label_dir = os.path.join(self.data_dir, 'label_2')
 
@@ -83,12 +85,12 @@ class KITTIDataset(data.Dataset):
         return get_objects_from_label(label_file)
 
     def get_segmentation(self, idx):
-        segmentation_file = os.path.join(self.image_dir, '%06d_seg.png' % idx)
+        segmentation_file = os.path.join(self.depth_dir, '%06d_seg.png' % idx)
         assert os.path.exists(segmentation_file)
         return Image.fromarray(cv2.imread(segmentation_file, -1))
 
     def get_depth_map(self, idx):
-        depth_file = os.path.join(self.image_dir, '%06d_depth.exr' % idx)
+        depth_file = os.path.join(self.depth_dir, '%06d_depth.exr' % idx)
         assert os.path.exists(depth_file)
         file = cv2.imread(depth_file, -1)
         return Image.fromarray(np.where(file <= 0, self.max_depth_threshold + 1, file))
@@ -403,6 +405,7 @@ class KITTIDataset(data.Dataset):
         calib = torch.tensor(np.array([calib.cu * ratio_pad[0, 0], calib.cv * ratio_pad[0, 1],
                                        calib.fu * ratio_pad[0, 0], calib.fv * ratio_pad[0, 1],
                                        calib.tx * ratio_pad[0, 0], calib.ty * ratio_pad[0, 1]]))
+
         if self.load_depth_maps:
             if len(depth_maps) == 0:
                 depth_map = torch.tensor(np.zeros_like(seg_mask))

@@ -937,6 +937,8 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                 args.append(d.get("num_scales"))
                 args.append(d.get("half_channels"))
                 args.append(d.get("fgdm_predictor"))
+                args.append(d.get("kernel_size_1"))
+                args.append(d.get("kernel_size_2"))
         elif m is RTDETRDecoder:  # special case, channels arg must be passed in index 1
             args.insert(1, [ch[x] for x in f])
         elif m is CBLinear:

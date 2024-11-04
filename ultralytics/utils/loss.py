@@ -744,19 +744,31 @@ class DetectLoss3d:
         self.model = model
         if self.model.args.fgdm_loss:
             self.fgdm_loss_func = ForegroundDepthMapLoss(self.model)
+        if self.model.args.fgdm_supervision:
+            self.fgdm_supervisor = SupervisionLoss(self.model)
 
     def __call__(self, preds, batch):
-        one2many, o2m_embs = preds["one2many"], preds["o2m_embs"]
-        loss_one2many = self.one2many(one2many, batch, embeddings=o2m_embs)
         one2one, o2o_embs = preds["one2one"], preds["o2o_embs"]
         loss_one2one = self.one2one(one2one, batch, embeddings=o2o_embs)
-        if self.model.args.fgdm_loss:
-            gt_depth_maps = batch["depth_map"].to(preds["depth_maps"][0].device)
-            depth_logits = preds["depth_maps"][0]
-            fgdm_loss = self.fgdm_loss_func(depth_logits, gt_depth_maps)
-            return loss_one2many[0] + loss_one2one[0] + fgdm_loss, torch.cat((loss_one2many[1], loss_one2one[1], fgdm_loss.unsqueeze(0)))
+
+        if preds.get("one2many", None):
+            one2many, o2m_embs = preds["one2many"], preds["o2m_embs"]
+            loss_one2many = self.one2many(one2many, batch, embeddings=o2m_embs)
+            if self.model.args.fgdm_loss:
+                gt_depth_maps = batch["depth_map"].to(preds["depth_maps"][0].device)
+                depth_logits = preds["depth_maps"][0]
+                fgdm_loss = self.fgdm_loss_func(depth_logits, gt_depth_maps) * self.model.args.fgdm_loss_weight
+                if self.model.args.fgdm_supervision:
+                    depth_embeddings = preds["depth_maps"][2]
+                    fgdm_supervision_loss = self.fgdm_supervisor.forward_fgdm(batch["img"], depth_embeddings, batch["depth_map"].to(depth_embeddings.device))
+                    return (loss_one2many[0] + loss_one2one[0] + fgdm_loss + fgdm_supervision_loss,
+                            torch.cat((loss_one2many[1], loss_one2one[1], fgdm_loss.unsqueeze(0), fgdm_supervision_loss.unsqueeze(0))))
+                else:
+                    return loss_one2many[0] + loss_one2one[0] + fgdm_loss, torch.cat((loss_one2many[1], loss_one2one[1], fgdm_loss.unsqueeze(0)))
+            else:
+                return loss_one2many[0] + loss_one2one[0], torch.cat((loss_one2many[1], loss_one2one[1]))
         else:
-            return loss_one2many[0] + loss_one2one[0], torch.cat((loss_one2many[1], loss_one2one[1]))
+            return torch.zeros(1), loss_one2one[1]
 
 
 class DDDetectionLoss:
@@ -880,7 +892,7 @@ class DDDetectionLoss:
 
         if self.hyp.distillation:
             embeddings = torch.cat([emb.view(feats[0].shape[0], 128, -1) for emb in embeddings], dim=2)
-            loss[6] = self.supervisor.forward(
+            loss[6] = self.supervisor.forward_head(
                 batch["img"].detach(), gt_center_3d, embeddings, fg_mask.bool(),
                 target_gt_idx, mask_gt.bool().squeeze(-1), batch["mixed"].bool()
             ) / target_scores_sum
@@ -1133,6 +1145,7 @@ class SupervisionLoss:
         self.foundation_model.load(self.args.dino_path)
         self.T = self.args.distillation_temp
         self.weight = self.args.distillation_weight
+        self.fgdm_supervision_weight = self.args.fgdm_supervision_weight
         self.criterion = self.args.distillation_loss
         self.no_mixup = self.args.distillation_no_mixup
         if self.criterion == "cos":
@@ -1140,7 +1153,7 @@ class SupervisionLoss:
         elif self.criterion == "mse":
             self.loss = nn.MSELoss()
 
-    def forward(self, imgs, gt_center_3d, pred_embeddings, fg_mask, target_gt_idx, mask_gt, mixed_mask):
+    def forward_head(self, imgs, gt_center_3d, pred_embeddings, fg_mask, target_gt_idx, mask_gt, mixed_mask):
         loss = torch.zeros(imgs.shape[0], device=imgs.device)
 
         with torch.no_grad():
@@ -1174,6 +1187,28 @@ class SupervisionLoss:
                 loss[batch_idx] = 0
         return loss.sum() * self.weight
 
+    def forward_fgdm(self, imgs, fgdm_embeddings, gt_depth_maps):
+        with torch.no_grad():
+            _, dino_embeddings = self.foundation_model(imgs)
+
+        transform = transforms.Resize(size=(fgdm_embeddings.shape[2], fgdm_embeddings.shape[3]),
+                          interpolation=InterpolationMode.NEAREST_EXACT)
+        chs = fgdm_embeddings.shape[1]
+        mask = (transform(gt_depth_maps) > 0).unsqueeze(1).repeat(1, chs, 1, 1)
+        dino_emb = transform(dino_embeddings)[mask]
+        pred_emb = fgdm_embeddings[mask]
+
+        if self.criterion == "soft":
+            soft_targets = nn.functional.softmax(dino_emb / self.T, dim=1)
+            soft_prob = nn.functional.log_softmax(pred_emb / self.T, dim=1)
+            loss = torch.sum(soft_targets * (soft_targets.log() - soft_prob)) / soft_prob.size()[0] * (
+                    self.T ** 2)
+        elif self.criterion == "mse":
+            loss = self.loss(pred_emb, dino_emb)
+        elif self.criterion == "cos":
+            loss = self.loss(pred_emb, dino_emb, target=torch.tensor(1).to(dino_emb.device))
+
+        return loss * self.fgdm_supervision_weight
 
     def plot_depth_maps(self, depth_maps, imgs):
         fig ,axes = plt.subplots(2, 2, figsize=(18, 12))
@@ -1275,7 +1310,7 @@ class ForegroundDepthMapLoss(nn.Module):
         """
 
         # downsample depth_maps by 16
-        depth_maps = transforms.Resize(size=[depth_maps.shape[1] // 16, depth_maps.shape[2] // 16], interpolation=InterpolationMode.NEAREST)(depth_maps)
+        depth_maps = transforms.Resize(size=[depth_maps.shape[1] // 16, depth_maps.shape[2] // 16], interpolation=InterpolationMode.NEAREST_EXACT)(depth_maps)
         # Bin depth map to create target
         depth_target = self.bin_depths(depth_maps,
                                        target=True,
