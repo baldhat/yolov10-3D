@@ -662,6 +662,8 @@ class v10Detect3d(nn.Module):
 
     def extract_patches(self, x, indices):
         b, c, w, h = x.shape
+        if not hasattr(self, "patch_size"):
+            self.patch_size = 5
         pad = self.patch_size//2
 
         patches = []
@@ -800,7 +802,7 @@ class v10Detect3d(nn.Module):
         y, embs = self.forward_feat(x, self.o2m_heads)
 
         if hasattr(self, "fgdm_pred") and self.fgdm_pred:
-            depth_maps = self.fgdm_predictor(x)
+            depth_maps = self.fgdm_predictor(x, return_embeddings=True)
         else:
             depth_maps = torch.empty(1)
 
@@ -812,7 +814,8 @@ class v10Detect3d(nn.Module):
     def forward(self, x):
         if not self.training:
             one2one, o2o_embs = self.inference_forward_feat([xi.detach() for xi in x], self.o2o_heads), None
-            #one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
+            # self.get_head_ranks()
+            # one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
         else:
             one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
 
@@ -845,6 +848,9 @@ class v10Detect3d(nn.Module):
         if self.nl == 1:
             deps = [40]
             ranges = [[-3.5, 3.5]]
+        elif self.nl == 2:
+            deps = [45, 20]
+            ranges = [[-2, 2], [-2, 2]]
         elif self.nl == 3:
             deps = [45, 25, 10]
             ranges = [[-2, 2], [-1.5, 1.5], [-1, 1]]
@@ -870,6 +876,103 @@ class v10Detect3d(nn.Module):
                 nn.init.normal_(m.weight, std=0.001)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
+
+    def calc_rank(self, layer):
+        weight_tensor = layer[0].conv.weight
+        output_channels, input_channels, k1, k2 = weight_tensor.shape
+        wght_matrix = np.transpose(weight_tensor.cpu().numpy(), (1, 2, 3, 0))
+        wght_matrix = wght_matrix.reshape(output_channels,
+                                          input_channels * k1 * k2)
+        U, S, V_t = np.linalg.svd(wght_matrix, full_matrices=True)
+        rank = np.linalg.matrix_rank(wght_matrix, tol=S[0] / 2) / input_channels
+        svalues = S / S[0]
+        return rank, svalues
+
+    def calc_weight_distri(self, layer):
+        weight_tensor = layer[0].conv.weight
+        center = weight_tensor[:, :, 1, 1].abs().mean()
+        others = weight_tensor[:, :, [0, 0, 0, 1, 1, 2, 2, 2], [0, 1, 2, 0, 2, 0, 1, 2]].abs().mean()
+        return center, others
+
+    def get_head_ranks(self):
+        head_names = list(self.output_channels.keys())
+        scales = [8, 16, 32]
+        ranks = np.zeros((2, 3, 8), dtype=np.float32)
+        svalues = np.zeros((2, 3, 8, 128))
+        weight_distri = np.zeros((2, 3, 8, 2)) # center, others
+        for i, head in enumerate(self.o2o_heads):
+            for j, scale in enumerate(head):
+                ranks[0, j, i],  svalues[0, j, i, :] = self.calc_rank(scale)
+                weight_distri[0, j, i, 0], weight_distri[0, j, i, 1] = self.calc_weight_distri(scale)
+        for i, head in enumerate(self.o2m_heads):
+            for j, scale in enumerate(head):
+                ranks[1, j, i], svalues[1, j, i, :] = self.calc_rank(scale)
+                weight_distri[1, j, i, 0], weight_distri[1, j, i, 1] = self.calc_weight_distri(scale)
+
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        plt.style.use('dark_background')
+
+        def get_cmap(n, name='hsv'):
+            '''Returns a function that maps each index in 0, 1, ..., n-1 to a distinct
+            RGB color; the keyword argument name must be a standard mpl colormap name.'''
+            return plt.cm.get_cmap(name, n)
+
+        fig, axes = plt.subplots(3, 2, figsize=(14, 12))
+        cmap = get_cmap(8, "Pastel1")
+        colors = [cmap(i) for i in range(8)]
+        rows = [f"Subsampling {scale}" for scale in scales]
+        cols = ["o2o", "o2m"]
+        for ax, col in zip(axes[0], cols):
+            ax.set_title(col)
+        for ax, row in zip(axes[:, 0], rows):
+            ax.set_ylabel(row, rotation=0, size='large')
+
+        for mapping in range(2):
+            for scale in range(3):
+                axes[scale, mapping].bar(np.arange(8), ranks[mapping, scale, :].reshape(8), tick_label=head_names, color=colors)
+        fig.tight_layout()
+        plt.show()
+
+        fig, axes = plt.subplots(3, 2, figsize=(15, 12))
+        cmap = get_cmap(8, "jet")
+        colors = [cmap(i) for i in range(8)]
+        rows = [f"Subsampling {scale}" for scale in scales]
+        cols = ["o2o", "o2m"]
+        for ax, col in zip(axes[0], cols):
+            ax.set_title(col)
+        for ax, row in zip(axes[:, 0], rows):
+            ax.set_ylabel(row, rotation=0, size='large')
+
+        for mapping in range(2):
+            for scale in range(3):
+                for head in range(8):
+                    axes[scale, mapping].set_ylim((0, 1))
+                    axes[scale, mapping].plot(np.arange(128)/128, svalues[mapping, scale, head],
+                                              label=head_names[head], color=colors[head], linewidth=2)
+        plt.legend()
+        fig.tight_layout()
+        plt.show()
+
+        fig, axes = plt.subplots(3, 2, figsize=(14, 12))
+        cmap = get_cmap(8, "Pastel1")
+        colors = [x for xs in [[cmap(i), cmap(i)] for i in range(8)] for x in xs]
+        rows = [f"Subsampling {scale}" for scale in scales]
+        cols = ["o2o", "o2m"]
+        for ax, col in zip(axes[0], cols):
+            ax.set_title(col)
+        for ax, row in zip(axes[:, 0], rows):
+            ax.set_ylabel(row, rotation=0, size='large')
+
+        labels = head_names * 2
+        for mapping in range(2):
+            for scale in range(3):
+                axes[scale, mapping].bar(np.arange(16), weight_distri[mapping, scale].reshape(16), tick_label=labels,
+                                         color=colors)
+        plt.legend()
+        fig.tight_layout()
+        plt.show()
+        print()
 
 
 class DepthPredictor(nn.Module):
@@ -910,7 +1013,7 @@ class DepthPredictor(nn.Module):
 
         self.depth_classifier = nn.Conv2d(hidden_dim, self.depth_bins + 1, kernel_size=(1, 1))
 
-    def forward(self, feature):
+    def forward(self, feature, return_embeddings=False):
         assert len(feature) == 3
 
         src_8 = self.downsample(feature[0])
@@ -923,14 +1026,20 @@ class DepthPredictor(nn.Module):
         ####
         src = (src_8 + src_16 + src_32) / 3
 
-        src = self.depth_head(src)
+        for i, layer in enumerate(self.depth_head):
+            src = layer(src)
+            if i == 2 and return_embeddings:
+                features = src
         # ipdb.set_trace()
         depth_logits = self.depth_classifier(src)
 
         depth_probs = torch.nn.functional.softmax(depth_logits, dim=1)
         weighted_depth = (depth_probs * self.depth_bin_values.reshape(1, -1, 1, 1)).sum(dim=1)
 
-        return depth_logits, weighted_depth
+        if return_embeddings:
+            return depth_logits, weighted_depth, features
+        else:
+            return depth_logits, weighted_depth
 
     def interpolate_depth_embed(self, depth):
         depth = depth.clamp(min=0, max=self.depth_max)

@@ -8,6 +8,8 @@ from pathlib import Path
 REPO_PATH = os.environ["DINO_PATH"]
 sys.path.append(REPO_PATH)
 
+from torchvision.transforms.functional import InterpolationMode
+
 import torch
 import mmcv
 from mmcv.runner import load_checkpoint
@@ -139,7 +141,7 @@ class DinoDepther(torch.nn.Module):
 
     def transform_back(self, depth_maps):
         t = transforms.Compose([
-            transforms.Resize(size=self.img_size)
+            transforms.Resize(size=self.img_size, interpolation=InterpolationMode.NEAREST_EXACT)
         ])
         return t(depth_maps)
 

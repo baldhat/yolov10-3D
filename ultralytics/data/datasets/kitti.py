@@ -51,7 +51,9 @@ class KITTIDataset(data.Dataset):
         # path configuration
         self.data_dir = os.path.join(root_dir, 'testing' if self.mode == 'test' else 'training')
         self.image_dir = os.path.join(self.data_dir, 'image_2')
-        self.depth_dir = os.path.join(root_dir, 'deepseg', "training", "image_2")
+        self.depth_dir = os.path.join(root_dir, 'deepseg', "training", "image_2") \
+            if os.path.exists(os.path.join(root_dir, 'deepseg', "training", "image_2")) \
+            else os.path.join(self.data_dir, 'image_2')
         self.calib_dir = os.path.join(self.data_dir, 'calib')
         self.label_dir = os.path.join(self.data_dir, 'label_2')
 
