@@ -409,7 +409,7 @@ class TaskAlignedAssigner3d(nn.Module):
             target_gt_idx (Tensor): shape(bs, num_total_anchors)
         """
         gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin, gt_heading_res = gts
-        pd_o3d, pd_s3d, pd_hd, pd_dep, _ = pd_3d.split((2, 3, 24, 1, 1), dim=-1)
+        pd_o3d, pd_s3d, pd_hd, pd_dep = pd_3d.split((2, 3, 24, 81), dim=-1)
 
         self.bs = pd_scores.shape[0]
         self.n_max_boxes = gt_bboxes.shape[1]
@@ -430,6 +430,7 @@ class TaskAlignedAssigner3d(nn.Module):
         pd_heading_bin, pd_heading_res = pd_hd.split((12, 12), dim=-1)
         gt_size_3d = self.add_cls_mean_size(gt_size_3d, gt_labels, mean_sizes)
 
+        pd_dep = self.decode_depth(pd_dep)
         gt_keypoints = get_3d_keypoints(gt_center_3d, gt_depth, gt_size_3d, gt_heading_bin, gt_heading_res, calibs)
         pd_keypoints = get_3d_keypoints(pd_center_3d, pd_dep, pd_size3d, pd_heading_bin, pd_heading_res, calibs)
 
@@ -450,6 +451,18 @@ class TaskAlignedAssigner3d(nn.Module):
         targets[1] = targets[1] * norm_align_metric
 
         return targets, fg_mask.bool(), target_gt_idx, pd_keypoints, gt_keypoints
+
+    def decode_depth(self, logits):
+        depth_max = 70
+        depth_min = 1
+        depth_bins = 80
+        bin_size = 2 * (depth_max - depth_min) / (depth_bins * (1 + depth_bins))
+        bin_indice = torch.linspace(0, depth_bins - 1, depth_bins)
+        depth_bin_values = (bin_indice + 0.5).pow(2) * bin_size / 2 - bin_size / 8 + depth_min
+        depth_bin_values = torch.cat([depth_bin_values, torch.tensor([depth_max])], dim=0).to(logits.device)
+        depth_probs = torch.nn.functional.softmax(logits, dim=2)
+        weighted_depth = (depth_probs * depth_bin_values.reshape(1, 1, -1)).sum(dim=-1).unsqueeze(-1)
+        return weighted_depth
 
     def decode_3d_center(self, pd_o3d, anc_points, stride_tensor):
         center3d = anc_points + (pd_o3d * stride_tensor)

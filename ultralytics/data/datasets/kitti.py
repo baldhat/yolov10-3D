@@ -6,6 +6,7 @@ import torch
 import pathlib
 from ultralytics.data.datasets.decode_helper import  *
 from ultralytics.data.datasets.kitti_eval import eval_from_scrach
+from pathlib import Path
 
 import torch.utils.data as data
 from PIL import Image
@@ -56,6 +57,9 @@ class KITTIDataset(data.Dataset):
             else os.path.join(self.data_dir, 'image_2')
         self.calib_dir = os.path.join(self.data_dir, 'calib')
         self.label_dir = os.path.join(self.data_dir, 'label_2')
+        self.cache_dir = os.path.join(args.dataset_cache_dir, "KITTI")
+        if not os.path.exists(self.cache_dir):
+            Path(self.cache_dir).mkdir(parents=True, exist_ok=True)
 
         self.im_files = self.get_im_files()
         self.labels = self.get_labels()
@@ -116,6 +120,11 @@ class KITTIDataset(data.Dataset):
     def __getitem__(self, item):
         #  ============================   get inputs   ===========================
         index = int(self.idx_list[item])  # index mapping, get real data id
+
+        cache_file = os.path.join(self.cache_dir, '%06d.pt' % index)
+        if not self.data_augmentation and os.path.exists(cache_file):
+            return torch.load(cache_file)
+
         ori_img = self.get_image(index)
         img = ori_img
         img_size = np.array(ori_img.size)
@@ -418,7 +427,7 @@ class KITTIDataset(data.Dataset):
         else:
             depth_map = torch.empty(1)
 
-        return {
+        data = {
             "img": inputs,
             "ori_img": ori_img,
             "calib": calib,
@@ -440,6 +449,10 @@ class KITTIDataset(data.Dataset):
             "heading_res": torch.tensor(np.array(gt_heading_res)),
             "mixed": torch.tensor(np.array(random_mix_flag, dtype=np.uint8))
         }
+        if not self.data_augmentation:
+            torch.save(data, cache_file)
+
+        return data
 
     def get_stats(self, results, save_dir):
         self.save_results(results, output_dir=save_dir)
@@ -544,8 +557,8 @@ class KITTIDataset(data.Dataset):
                 dimensions += self.cls_mean_size[int(cls_id)]
 
                 depth = pred_dep[i, j].numpy()
-                sigma = torch.exp(-pred_dep_un[i, j]).item()
-
+                #sigma = torch.exp(-pred_dep_un[i, j]).item()
+                sigma = pred_dep_un[i, j].item()
                 if undo_augment:
                     x3d = pred_center3d[i, j, 0].numpy()
                     y3d = pred_center3d[i, j, 1].numpy()

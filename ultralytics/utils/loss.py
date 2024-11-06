@@ -783,6 +783,8 @@ class DDDetectionLoss:
         self.nc = m.nc  # number of classes
         self.no = m.no
         self.device = device
+        self.depth_loss = DepthBinLoss(model)
+        self.output_channels = m.output_channels
 
         self.assigner = TaskAlignedAssigner3d(topk=tal_topk, num_classes=self.nc,
                                               alpha=model.args.tal_alpha, beta=model.args.tal_beta,
@@ -822,9 +824,10 @@ class DDDetectionLoss:
         """Calculate the sum of the loss for box, cls and dfl multiplied by batch size."""
         loss = torch.zeros(7 if self.hyp.distillation else 6, device=self.device)  # box, cls, dep, o3d, s3d, hd
         feats = preds[1] if isinstance(preds, tuple) else preds
-        pred_scores, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un = (
+        pred_scores, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep = (
             torch.cat([xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2).split(
-            (self.nc, 2, 2, 2, 3, 24, 1, 1), 1
+            (self.nc, self.output_channels["o2d"], self.output_channels["s2d"], self.output_channels["o3d"],
+                     self.output_channels["s3d"], self.output_channels["hd"], self.output_channels["dep"]), 1
         ))
 
         # num classes
@@ -832,11 +835,11 @@ class DDDetectionLoss:
         # offset 2d (2), size 2d (2) = 4
         pred_2d = torch.cat((pred_o2d.permute(0, 2, 1).contiguous(), pred_s2d.permute(0, 2, 1).contiguous()), -1)
         # offset 3d (2), size 3d (3) = 5
-        pred_3d = torch.cat((pred_o3d.permute(0, 2, 1).contiguous(),     # offset 3d (2)
-                             pred_s3d.permute(0, 2, 1).contiguous(),            # size 3d (3)
-                             pred_hd.permute(0, 2, 1).contiguous(),             # heading bins (12) + heading res (12)
-                             pred_dep.permute(0, 2, 1).contiguous(),            # depth (1)
-                             pred_dep_un.permute(0, 2, 1).contiguous()), -1)    # depth uncertainty (1)
+        pred_3d = torch.cat((pred_o3d.permute(0, 2, 1).contiguous(),          # offset 3d (2)
+                             pred_s3d.permute(0, 2, 1).contiguous(),          # size 3d (3)
+                             pred_hd.permute(0, 2, 1).contiguous(),           # heading bins (12) + heading res (12)
+                             pred_dep.permute(0, 2, 1).contiguous()), -1)     # depth
+                               # depth uncertainty (1)
         # = 38
 
         dtype = pred_scores.dtype
@@ -926,11 +929,13 @@ class DDDetectionLoss:
         return (size2d_loss + offset2d_loss) / num_targets
 
     def compute_box3d_loss(self, targets_3d, pred_3d, anchor_points, stride_tensor, fg_mask, num_targets):
-        pred_depth = pred_3d[fg_mask][..., -2]
-        pred_depth_un = pred_3d[fg_mask][..., -1]
+        pred_depth = pred_3d[fg_mask][..., -82:-1]
+        #pred_depth_un = pred_3d[fg_mask][..., -1]
         target_depth = targets_3d[-3][fg_mask].squeeze()
-        depth_loss = (laplacian_aleatoric_uncertainty_loss_new(pred_depth, target_depth, pred_depth_un).sum()
-                      / num_targets * self.hyp.depth)
+        #pred_depth = self.decode_depth(pred_depth)
+        depth_loss = self.depth_loss(pred_depth, target_depth) / num_targets * self.hyp.depth
+        #depth_loss = (laplacian_aleatoric_uncertainty_loss_new(pred_depth, target_depth, pred_depth_un).sum()
+        #              / num_targets * self.hyp.depth)
 
         anchor_points = anchor_points * stride_tensor
         pred_offset = (pred_3d[..., :2] * stride_tensor)[fg_mask]
@@ -961,6 +966,18 @@ class DDDetectionLoss:
             print('badNAN----------------heading_loss', heading_loss)
 
         return torch.stack((depth_loss, offset3d_loss, size3d_loss, heading_loss))
+
+    def decode_depth(self, logits):
+        depth_max = 70
+        depth_min = 1
+        depth_bins = 80
+        bin_size = 2 * (depth_max - depth_min) / (depth_bins * (1 + depth_bins))
+        bin_indice = torch.linspace(0, depth_bins - 1, depth_bins)
+        depth_bin_values = (bin_indice + 0.5).pow(2) * bin_size / 2 - bin_size / 8 + depth_min
+        depth_bin_values = torch.cat([depth_bin_values, torch.tensor([depth_max])], dim=0).to(logits.device)
+        depth_probs = torch.nn.functional.softmax(logits, dim=1)
+        weighted_depth = (depth_probs * depth_bin_values.reshape(1, -1)).sum(dim=-1)
+        return weighted_depth
 
     def debug_show_assigned_targets2d(self, batch, targets_2d, fg_mask, pred_bboxes, stride_tensor):
         target_center_2d, target_size_2d = targets_2d
@@ -1325,6 +1342,89 @@ class ForegroundDepthMapLoss(nn.Module):
         return loss
 
 
+class DepthBinLoss(nn.Module):
+
+    def __init__(self,
+                 model,
+                 alpha=0.25,
+                 gamma=2.0):
+        """
+        Initializes DDNLoss module
+        Args:
+            weight [float]: Loss function weight
+            alpha [float]: Alpha value for Focal Loss
+            gamma [float]: Gamma value for Focal Loss
+        """
+        super().__init__()
+        self.device = next(model.parameters()).device  # get model device
+        self.args = model.args
+        self.num_bins = 80
+
+        # Set loss function
+        self.alpha = alpha
+        self.gamma = gamma
+        self.loss_func = LogitFocalLoss(alpha=self.alpha, gamma=self.gamma, reduction="sum")
+
+    def bin_depths(self, gt_depths):
+        mode = "LID"
+        """
+        Converts depth map into bin indices
+        Args:
+            depth_map [torch.Tensor(H, W)]: Depth Map
+            mode [string]: Discretiziation mode (See https://arxiv.org/pdf/2005.13423.pdf for more details)
+                UD: Uniform discretiziation
+                LID: Linear increasing discretiziation
+                SID: Spacing increasing discretiziation
+            depth_min [float]: Minimum depth value
+            depth_max [float]: Maximum depth value
+            num_bins [int]: Number of depth bins
+            target [bool]: Whether the depth bins indices will be used for a target tensor in loss comparison
+        Returns:
+            indices [torch.Tensor(H, W)]: Depth bin indices
+        """
+        depth_max = 70
+        depth_min = 1
+        depth_bins = 80
+        bin_size = 2 * (depth_max - depth_min) / (depth_bins * (1 + depth_bins))
+        #indices = -0.5 + 0.5 * torch.sqrt(1 + 8 * (gt_depths - depth_min) / bin_size)
+        bin_indice = torch.linspace(0, depth_bins - 1, depth_bins)
+        depth_bin_values = (bin_indice + 0.5).pow(2) * bin_size / 2 - bin_size / 8 + depth_min
+        depth_bin_values = torch.cat([depth_bin_values, torch.tensor([depth_max])], dim=0).to(gt_depths.device)
+
+        right_neighbor_indices = (depth_bin_values.unsqueeze(0).repeat(gt_depths.shape[0], 1) <= gt_depths.unsqueeze(-1)).sum(dim=1)
+        left_neighbor_indices = right_neighbor_indices - 1
+        left_values = depth_bin_values[left_neighbor_indices]
+        right_values = depth_bin_values[right_neighbor_indices]
+
+        left_weights = (gt_depths - right_values) / (left_values - right_values)
+        right_weights = 1 - left_weights
+
+        logits = torch.zeros((gt_depths.shape[0], 81), device=gt_depths.device)
+        logits[torch.arange(gt_depths.shape[0]), left_neighbor_indices] = left_weights
+        logits[torch.arange(gt_depths.shape[0]), right_neighbor_indices] = right_weights
+
+        return logits
+
+    def forward(self, depth_logits, gt_depths):
+        """
+        Gets depth_map loss
+        Args:
+            depth_logits: torch.Tensor(B, D+1, H, W)]: Predicted depth logits
+            gt_boxes2d [torch.Tensor (B, N, 4)]: 2D box labels for foreground/background balancing
+            num_gt_per_img:
+            gt_center_depth:
+        Returns:
+            loss [torch.Tensor(1)]: Depth classification network loss
+        """
+
+        # Bin depth map to create target
+        depth_target = self.bin_depths(gt_depths)
+        # Compute loss
+        loss = self.loss_func(depth_logits, depth_target, target_logits=True)
+
+        return loss
+
+
 class Balancer(nn.Module):
     def __init__(self, fg_weight, bg_weight, downsample_factor=1):
         """
@@ -1447,6 +1547,7 @@ def focal_loss(
         gamma: float = 2.0,
         reduction: str = 'none',
         eps: Optional[float] = None,
+        target_logits=False
 ) -> torch.Tensor:
     r"""Criterion that computes Focal loss.
     According to :cite:`lin2018focal`, the Focal loss is computed as follows:
@@ -1493,7 +1594,7 @@ def focal_loss(
 
     n = input.size(0)
     out_size = (n,) + input.size()[2:]
-    if target.size()[1:] != input.size()[2:]:
+    if not target_logits and target.size()[1:] != input.size()[2:]:
         raise ValueError(f'Expected target size {out_size}, got {target.size()}')
 
     if not input.device == target.device:
@@ -1504,13 +1605,16 @@ def focal_loss(
     log_input_soft: torch.Tensor = F.log_softmax(input, dim=1)
     # ipdb.set_trace()
     # create the labels one hot tensor
-    target_one_hot: torch.Tensor = one_hot(target, num_classes=input.shape[1], device=input.device, dtype=input.dtype)
+    if not target_logits:
+        targets: torch.Tensor = one_hot(target, num_classes=input.shape[1], device=input.device, dtype=input.dtype)
+    else:
+        targets = target
 
     # compute the actual focal loss
     weight = torch.pow(-input_soft + 1.0, gamma)
 
     focal = -alpha * weight * log_input_soft
-    loss_tmp = torch.einsum('bc...,bc...->b...', (target_one_hot, focal))
+    loss_tmp = torch.einsum('bc...,bc...->b...', (targets, focal))
     # ipdb.set_trace()
     if reduction == 'none':
         loss = loss_tmp
@@ -1561,6 +1665,6 @@ class LogitFocalLoss(nn.Module):
         self.reduction: str = reduction
         self.eps: Optional[float] = eps
 
-    def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        return focal_loss(input, target, self.alpha, self.gamma, self.reduction, self.eps)
+    def forward(self, input: torch.Tensor, target: torch.Tensor, target_logits=False) -> torch.Tensor:
+        return focal_loss(input, target, self.alpha, self.gamma, self.reduction, self.eps, target_logits)
 
