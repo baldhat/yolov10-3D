@@ -135,6 +135,8 @@ class Omni3Dataset(data.Dataset):
                 shift_1 = img_size[1] * np.clip(np.random.randn() * self.shift, -2 * self.shift, 2 * self.shift)
                 center[0] += shift_0
                 center[1] += shift_1
+                calib.cu += shift_0
+                calib.cv += shift_1
 
         if random_mix_flag == True:
             count_num = 0
@@ -166,7 +168,6 @@ class Omni3Dataset(data.Dataset):
                             method=Image.AFFINE,
                             data=tuple(trans_inv.reshape(-1).tolist()),
                             resample=Image.BILINEAR)
-
         # image encoding
         img = np.array(img).astype(np.float32) / 255.0
         img = img.transpose(2, 0, 1)  # C * H * W
@@ -248,14 +249,12 @@ class Omni3Dataset(data.Dataset):
         else:
             bboxes = torch.empty(0)
         ratio_pad = np.array([self.resolution / img_size, np.array([0, 0])])
-        calib = torch.tensor(np.array([calib.cu * ratio_pad[0, 0], calib.cv * ratio_pad[0, 1],
-                                       calib.fu * ratio_pad[0, 0], calib.fv * ratio_pad[0, 1],
-                                       calib.tx * ratio_pad[0, 0], calib.ty * ratio_pad[0, 1]]))
+        calib_tensor = torch.tensor(calib.P2)
 
         data = {
             "img": inputs,
             "ori_img": ori_img,
-            "calib": calib,
+            "calib": calib_tensor,
             "info": info,
             "cls": torch.tensor(np.array(gt_cls)),
             "bboxes": bboxes,
@@ -335,10 +334,11 @@ class Omni3Dataset(data.Dataset):
         # encoding heading angle
         # heading_angle = objects[i].alpha
 
-        _rot_mat = egoc_to_alloc_rot_matrix_torch(amodal_center=torch.from_numpy(_center3d).unsqueeze(0).float(),
+        _rot_mat = object_.rot_mat
+        '''egoc_to_alloc_rot_matrix_torch(amodal_center=torch.from_numpy(_center3d).unsqueeze(0).float(),
                                                   egoc_rot_matrix=torch.from_numpy(object_.rot_mat).unsqueeze(0).float(),
                                                   calib=torch.from_numpy(calib.P2).unsqueeze(0).float())[0].numpy().reshape(9)
-
+        '''
         _size3d = (np.array([object_.h, object_.w, object_.l], dtype=np.float32)
                    - self.cls_mean_size[self.cls2train_id[object_.cls_type]])
 
@@ -446,21 +446,22 @@ class Omni3Dataset(data.Dataset):
                         locations = calibs[i].camera_dis_to_rect(x3d, y3d, depth).reshape(-1)
                     else:
                         locations = calibs[i].img_to_rect(x3d, y3d, depth).reshape(-1)
-
+                '''
                 egoc_rot_mat = alloc_to_egoc_rot_matrix_torch(
                     amodal_center=batch["center_3d"][mask][j].unsqueeze(0),
                     alloc_rot_matrix=batch["rot_mat"][mask][j].unsqueeze(0).reshape(1, 3, 3),
                     calib=torch.tensor(calibs[i].P2).unsqueeze(0)
                 )[0].numpy()
+                '''
 
                 locations = convert_location_gravity2ground(
                     gravity_center=torch.tensor(locations)[None].float(),
-                    egoc_rot_matrix=torch.tensor(egoc_rot_mat).unsqueeze(0).float(),
+                    egoc_rot_matrix=torch.tensor(batch["rot_mat"][mask][j].reshape(3, 3)).unsqueeze(0).float(),
                     dim=torch.tensor(dimensions).unsqueeze(0).float())[0].numpy()
 
                 score = 1
 
-                targets.append([cls_id] + egoc_rot_mat.ravel().tolist() + bbox + dimensions.tolist() + locations.tolist() + [score])
+                targets.append([cls_id] + batch["rot_mat"][mask][j].reshape(3, 3).numpy().ravel().tolist() + bbox + dimensions.tolist() + locations.tolist() + [score])
 
             results[batch["im_file"][i]] = targets
         return results

@@ -8,7 +8,6 @@ from typing import Tuple, Dict, Any, Optional, List
 from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 
-
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
@@ -22,7 +21,7 @@ import seaborn as sn
 from ultralytics.utils import LOGGER, TryExcept, ops, plt_settings, threaded
 from .checks import check_font, check_version, is_ascii
 from .files import increment_path
-from ultralytics.data.datasets.kitti_utils import Object3d
+from ultralytics.data.datasets.kitti_utils import Object3d, Calibration
 from ultralytics.data.raycasting import project_to_image
 
 
@@ -1231,7 +1230,8 @@ class KITTIVisualizer():
 
     def plot_batch(self, batch, dataset, filename):
         infos_ = self.collate_infos(batch)
-        calibs = [dataset.get_calib(info) for info in infos_['img_id']]
+        calibs = [Calibration(calib) for calib in batch["calib"]]
+
         targets = dataset.decode_batch(batch, calibs, undo_augment=False)
         images, infos = batch["img"], batch["info"]
 

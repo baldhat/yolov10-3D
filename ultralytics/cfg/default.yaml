@@ -127,15 +127,15 @@ min_depth_threshold: 1
 min_scale: 0.6
 max_scale: 1.4
 overfit: False
-distillation: True
+distillation: False
 distillation_temp: 2
 distillation_weight: 0.75
 distillation_loss: "cos"
 distillation_no_mixup: True
 
-load_depth_maps: True
+load_depth_maps: False
 
-fgdm_loss: True
+fgdm_loss: False
 fgdm_loss_weight: 2
 fgdm_supervision: True
 fgdm_supervision_weight: 1

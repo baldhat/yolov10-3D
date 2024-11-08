@@ -179,7 +179,16 @@ def get_calib_from_file(calib_file):
 
 class Calibration(object):
     def __init__(self, calib_file):
-        if isinstance(calib_file, str):
+        if isinstance(calib_file, torch.Tensor):
+            self.P2 = calib_file.cpu().numpy()
+            self.cu = self.P2[0, 2]
+            self.cv = self.P2[1, 2]
+            self.fu = self.P2[0, 0]
+            self.fv = self.P2[1, 1]
+            self.tx = self.P2[0, 3] / (-self.fu)
+            self.ty = self.P2[1, 3] / (-self.fv)
+            return
+        elif isinstance(calib_file, str):
             calib = get_calib_from_file(calib_file)
         else:
             calib = calib_file

@@ -288,7 +288,7 @@ class KITTIDataset(data.Dataset):
 
                 # encoding heading angle
                 # heading_angle = objects[i].alpha
-                heading_angle = calib.ry2alpha(objects[i].ry, (objects[i].box2d[0] + objects[i].box2d[2]) / 2)
+                heading_angle = calib.ry2alpha(objects[i].ry, center_3d[0])
                 if heading_angle > np.pi:  heading_angle -= 2 * np.pi  # check range
                 if heading_angle < -np.pi: heading_angle += 2 * np.pi
 
@@ -370,7 +370,7 @@ class KITTIDataset(data.Dataset):
                     gt_size_2d.append(gt_size_2d_)
 
                     # encoding heading angle
-                    heading_angle = calib.ry2alpha(objects[i].ry, (objects[i].box2d[0] + objects[i].box2d[2]) / 2)
+                    heading_angle = calib.ry2alpha(objects[i].ry, center_3d[0])
                     if heading_angle > np.pi:  heading_angle -= 2 * np.pi  # check range
                     if heading_angle < -np.pi: heading_angle += 2 * np.pi
                     heading_bin, heading_res = angle2class(heading_angle)
