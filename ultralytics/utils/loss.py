@@ -967,18 +967,6 @@ class DDDetectionLoss:
 
         return torch.stack((depth_loss, offset3d_loss, size3d_loss, heading_loss))
 
-    def decode_depth(self, logits):
-        depth_max = 70
-        depth_min = 1
-        depth_bins = 80
-        bin_size = 2 * (depth_max - depth_min) / (depth_bins * (1 + depth_bins))
-        bin_indice = torch.linspace(0, depth_bins - 1, depth_bins)
-        depth_bin_values = (bin_indice + 0.5).pow(2) * bin_size / 2 - bin_size / 8 + depth_min
-        depth_bin_values = torch.cat([depth_bin_values, torch.tensor([depth_max])], dim=0).to(logits.device)
-        depth_probs = torch.nn.functional.softmax(logits, dim=1)
-        weighted_depth = (depth_probs * depth_bin_values.reshape(1, -1)).sum(dim=-1)
-        return weighted_depth
-
     def debug_show_assigned_targets2d(self, batch, targets_2d, fg_mask, pred_bboxes, stride_tensor):
         target_center_2d, target_size_2d = targets_2d
         target_bboxes = torch.cat(
@@ -1363,7 +1351,7 @@ class DepthBinLoss(nn.Module):
         # Set loss function
         self.alpha = alpha
         self.gamma = gamma
-        self.loss_func = LogitFocalLoss(alpha=self.alpha, gamma=self.gamma, reduction="sum")
+        self.loss_func = LogitFocalLoss(alpha=self.alpha, gamma=self.gamma, reduction="none")
 
     def bin_depths(self, gt_depths):
         mode = "LID"
@@ -1399,29 +1387,21 @@ class DepthBinLoss(nn.Module):
         left_weights = (gt_depths - right_values) / (left_values - right_values)
         right_weights = 1 - left_weights
 
+        '''
         logits = torch.zeros((gt_depths.shape[0], 81), device=gt_depths.device)
         logits[torch.arange(gt_depths.shape[0]), left_neighbor_indices] = left_weights
         logits[torch.arange(gt_depths.shape[0]), right_neighbor_indices] = right_weights
 
         return logits
+        '''
+        left_targets = torch.zeros((gt_depths.shape[0], 81), device=gt_depths.device)
+        right_targets = torch.zeros((gt_depths.shape[0], 81), device=gt_depths.device)
+
+        return left_weights, left_neighbor_indices, right_weights, right_neighbor_indices
 
     def forward(self, depth_logits, gt_depths):
-        """
-        Gets depth_map loss
-        Args:
-            depth_logits: torch.Tensor(B, D+1, H, W)]: Predicted depth logits
-            gt_boxes2d [torch.Tensor (B, N, 4)]: 2D box labels for foreground/background balancing
-            num_gt_per_img:
-            gt_center_depth:
-        Returns:
-            loss [torch.Tensor(1)]: Depth classification network loss
-        """
-
-        # Bin depth map to create target
-        depth_target = self.bin_depths(gt_depths)
-        # Compute loss
-        loss = self.loss_func(depth_logits, depth_target, target_logits=True)
-
+        left_weights, left_targets, right_weights, right_targets = self.bin_depths(gt_depths)
+        loss = left_weights @ self.loss_func(depth_logits, left_targets) + right_weights @ self.loss_func(depth_logits, right_targets)
         return loss
 
 
@@ -1464,37 +1444,6 @@ class Balancer(nn.Module):
         # Get total loss
         loss = fg_loss + bg_loss
         return loss
-
-
-def compute_fg_mask(gt_boxes2d, shape, num_gt_per_img, downsample_factor=1, device=torch.device("cpu")):
-    """
-    Compute foreground mask for images
-    Args:
-        gt_boxes2d [torch.Tensor(B, N, 4)]: 2D box labels
-        shape [torch.Size or tuple]: Foreground mask desired shape
-        downsample_factor [int]: Downsample factor for image
-        device [torch.device]: Foreground mask desired device
-    Returns:
-        fg_mask [torch.Tensor(shape)]: Foreground mask
-    """
-    #ipdb.set_trace()
-    fg_mask = torch.zeros(shape, dtype=torch.bool, device=device)
-
-    # Set box corners
-    gt_boxes2d /= downsample_factor
-    gt_boxes2d[:, :2] = torch.floor(gt_boxes2d[:, :2])
-    gt_boxes2d[:, 2:] = torch.ceil(gt_boxes2d[:, 2:])
-    gt_boxes2d = gt_boxes2d.long()
-
-    # Set all values within each box to True
-    gt_boxes2d = gt_boxes2d.split(num_gt_per_img, dim=0)
-    B = len(gt_boxes2d)
-    for b in range(B):
-        for n in range(gt_boxes2d[b].shape[0]):
-            u1, v1, u2, v2 = gt_boxes2d[b][n]
-            fg_mask[b, v1:v2, u1:u2] = True
-
-    return fg_mask
 
 
 def one_hot(

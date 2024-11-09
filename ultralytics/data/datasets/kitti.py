@@ -58,6 +58,7 @@ class KITTIDataset(data.Dataset):
         self.calib_dir = os.path.join(self.data_dir, 'calib')
         self.label_dir = os.path.join(self.data_dir, 'label_2')
         self.cache_dir = os.path.join(args.dataset_cache_dir, "KITTI")
+        self.cache_validation_data = args.cache_validation_data
         if not os.path.exists(self.cache_dir):
             Path(self.cache_dir).mkdir(parents=True, exist_ok=True)
 
@@ -122,7 +123,7 @@ class KITTIDataset(data.Dataset):
         index = int(self.idx_list[item])  # index mapping, get real data id
 
         cache_file = os.path.join(self.cache_dir, '%06d.pt' % index)
-        if not self.data_augmentation and os.path.exists(cache_file):
+        if self.cache_validation_data and not self.data_augmentation and os.path.exists(cache_file):
             return torch.load(cache_file)
 
         ori_img = self.get_image(index)
