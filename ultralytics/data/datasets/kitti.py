@@ -450,7 +450,7 @@ class KITTIDataset(data.Dataset):
             "heading_res": torch.tensor(np.array(gt_heading_res)),
             "mixed": torch.tensor(np.array(random_mix_flag, dtype=np.uint8))
         }
-        if not self.data_augmentation:
+        if self.cache_validation_data and not self.data_augmentation:
             torch.save(data, cache_file)
 
         return data
