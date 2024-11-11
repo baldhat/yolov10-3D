@@ -106,7 +106,7 @@ box: 5 # (float) 2dbox loss gain
 # Losses
 cls: 1 # (float) cls loss gain (scale with pixels)
 loss2d: 2 # (float) box loss gain
-depth: 2 # (float) depth loss gain
+depth: 5 # (float) depth loss gain
 offset3d: 10 # (float) 3d pixel offset loss gain
 size3d: 1 # (float) 3d size loss gain
 heading: 1 # (float) 3d heading loss gain
@@ -133,7 +133,7 @@ distillation_weight: 0.75
 distillation_loss: "cos"
 distillation_no_mixup: True
 
-load_depth_maps: True
+load_depth_maps: False
 
 fgdm_loss: False
 fgdm_loss_weight: 2

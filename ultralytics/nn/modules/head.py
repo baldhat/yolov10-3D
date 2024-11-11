@@ -768,7 +768,7 @@ class v10Detect3d(nn.Module):
         bin_indice = torch.linspace(0, depth_bins - 1, depth_bins)
         depth_bin_values = (bin_indice + 0.5).pow(2) * bin_size / 2 - bin_size / 8 + depth_min
         depth_bin_values = torch.cat([depth_bin_values, torch.tensor([depth_max])], dim=0).to(pred_dep.device)
-        depth_probs = torch.nn.functional.softmax(pred_dep, dim=2)
+        depth_probs = torch.nn.functional.softmax(pred_dep, dim=1)
         weighted_depth = (depth_probs * depth_bin_values.reshape(1, -1, 1)).sum(dim=1).unsqueeze(1)
         dep_prob = torch.topk(depth_probs, 2, dim=1)[0].sum(dim=1).unsqueeze(1) #FIXME: top2 or top1?
 
