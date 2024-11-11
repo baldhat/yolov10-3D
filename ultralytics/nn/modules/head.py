@@ -14,6 +14,7 @@ from .transformer import MLP, DeformableTransformerDecoder, DeformableTransforme
 from .utils import bias_init_with_prob, linear_init
 import copy
 from ultralytics.utils import ops
+from ultralytics.utils.kfe import KFE
 import numpy as np
 
 __all__ = "Detect", "Segment", "Pose", "Classify", "OBB", "RTDETRDecoder"
@@ -631,6 +632,8 @@ class v10Detect3d(nn.Module):
         if self.fgdm_pred:
             self.fgdm_predictor = DepthPredictor(ch)
 
+        self.keypoint_feature_extractor = KFE()
+
     def build_head(self, in_channels, mid_channels, output_channels):
         return nn.ModuleList(nn.Sequential(v10Detect3d.build_conv(x, mid_channels, self.kernel_size_1, self.dsconv,  deform=self.deform),
                                            v10Detect3d.build_conv(mid_channels, mid_channels // 2 if self.half_channels else mid_channels, self.kernel_size_2, self.dsconv),
@@ -717,36 +720,22 @@ class v10Detect3d(nn.Module):
 
     def forward_feat(self, x, heads):
         y = []
-        embs = [None] * self.nl
+        embs = []
         head_names = list(self.output_channels.keys())
         for i in range(self.nl):
             outputs = {}
-            if self.common_head:
-                x[i] = self.common[i](x[i])
+            ems = {}
             for j, module in enumerate(heads):
-                if self.use_predecessors and len(self.predecessors[head_names[j]]) > 0:
-                    inputs = [x[i]]
-                    predecessors = [outputs[key] if key != "dep"
-                                                else outputs[key] / self.dep_norm
-                                   for key in self.predecessors[head_names[j]]]
-                    inputs.extend([predecessor.detach() for predecessor in predecessors])
-                    if head_names[j] == "dep":
-                        outputs[head_names[j]], embs[i] = self.single_head_forward(module[i], (torch.cat(inputs, dim=1)))
-                    else:
-                        outputs[head_names[j]] = module[i](torch.cat(inputs, dim=1))
-                else:
-                    if head_names[j] == "dep":
-                        outputs[head_names[j]], embs[i] = self.single_head_forward(module[i], x[i])
-                    else:
-                        outputs[head_names[j]] = module[i](x[i])
+                    outputs[head_names[j]], ems[head_names[j]] = self.single_head_forward(module[i], x[i])
             y.append(torch.cat(list(outputs.values()), dim=1))
+            embs.append(torch.cat(list(ems.values()), dim=1))
         return y, embs
 
     def single_head_forward(self, head, features):
         assert len(head) == 3
-        embeddings = head[0](features)
-        output = head[1](embeddings)
-        return head[2](output), embeddings
+        o1 = head[0](features)
+        embeddings = head[1](o1)
+        return head[2](embeddings), embeddings.detach()
 
 
     def sum_predecessor_chs(self, predecessors):
@@ -818,6 +807,7 @@ class v10Detect3d(nn.Module):
             # one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
         else:
             one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
+        kp_feats = self.extract_kp_feats(one2one, x)
 
         if not self.training:
             one2one = self.inference(one2one)
@@ -831,6 +821,27 @@ class v10Detect3d(nn.Module):
         else:
             one2many, o2m_embs, depth_maps = self._forward(x)
             return {"one2many": one2many, "one2one": one2one, "o2m_embs": o2m_embs, "o2o_embs": o2o_embs, "depth_maps": depth_maps}
+
+    def extract_kp_feats(self, output, backbone_features):
+        if backbone_features[0].shape[3] in [80, 32]:
+            return
+        cls, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un = (
+            torch.cat([xi.view(output[0].shape[0], self.no, -1) for xi in output], 2).split(
+                (self.nc, 2, 2, 2, 3, 24, 1, 1), 1
+            ))
+        self.anchors, self.strides = (x.transpose(0, 1) for x in make_anchors(output, self.stride, 0.5))
+        preds = self.decode(cls, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un)
+        #FIXME!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        calib = torch.tensor(np.array([ 6.5179e+02,  1.7700e+02,  7.4361e+02,  7.3885e+02,  6.4071e-02, -3.0708e-04]), dtype=torch.float64)
+        calibs = calib.unsqueeze(0).repeat(backbone_features[0].shape[0], 1).to(backbone_features[0].device)
+        mean_sizes = torch.tensor(np.array([
+            [1.52563191462, 1.62856739989, 3.88311640418],
+            [1.76255119, 0.66068622, 0.84422524],
+            [1.73698127, 0.59706367, 1.76282397]]))
+        #FIXME!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        return self.keypoint_feature_extractor.forward(backbone_features, preds, calibs, mean_sizes,
+                                                           stride_tensor=self.strides,
+                                                           strides=self.stride)
 
 
     def decode_bboxes(self, bboxes, anchors):

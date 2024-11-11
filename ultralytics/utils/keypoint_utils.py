@@ -117,3 +117,23 @@ def img_to_rect(center_3d, dep, calibs):
     y = ((center_3d[..., 1].unsqueeze(-1) - cv) * dep) / fv + ty
     locations = torch.cat((x, y, dep), dim=-1)
     return locations
+
+def get_P2s(calibs):
+    P2s = torch.zeros((calibs.shape[0], 3, 4))
+    P2s[:, 0, 2] = calibs[:, 0]
+    P2s[:, 1, 2] = calibs[:, 1]
+    P2s[:, 0, 0] = calibs[:, 2]
+    P2s[:, 1, 1] = calibs[:, 3]
+    P2s[:, 0, 3] = calibs[:, 4]
+    P2s[:, 1, 3] = calibs[:, 5]
+    P2s[:, 2, 2] = 1
+    return P2s
+
+def rect_to_img(center_3d, calibs):
+    pts_rect_hom = torch.cat((center_3d, torch.ones((center_3d.shape[0], center_3d.shape[1], center_3d.shape[2], 1), device=center_3d.device)), dim=-1)
+    P2s = get_P2s(calibs).to(center_3d.device)
+    P2s_T = P2s.transpose(1, 2)
+    pts_2d_hom = torch.einsum("bnli,bij->bnlj", pts_rect_hom.float(), P2s_T.float())
+    pts_img = (pts_2d_hom[..., 0:2] / pts_rect_hom[..., 2].unsqueeze(-1))
+    #pts_rect_depth = pts_2d_hom[:, 2] - P2s_T[3, 2]  # depth in rect camera coord
+    return pts_img
