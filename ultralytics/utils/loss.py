@@ -739,8 +739,10 @@ class v10DetectLoss:
 
 class DetectLoss3d:
     def __init__(self, model):
-        self.one2many = DDDetectionLoss(model, tal_topk=model.args.tal_topk)
-        self.one2one = DDDetectionLoss(model, tal_topk=1)
+        self.one2many = DDDetectionLoss(model, tal_topk=model.args.tal_topk, name="o2m")
+        self.one2one = DDDetectionLoss(model, tal_topk=1, name="o2o")
+        self.one2many_refined = DDDetectionLoss(model, tal_topk=model.args.tal_topk, name="o2m_ref")
+        self.one2one_refined = DDDetectionLoss(model, tal_topk=1, name="o2o_ref")
         self.model = model
         if self.model.args.fgdm_loss:
             self.fgdm_loss_func = ForegroundDepthMapLoss(self.model)
@@ -751,7 +753,13 @@ class DetectLoss3d:
         one2one, o2o_embs = preds["one2one"], preds["o2o_embs"]
         loss_one2one = self.one2one(one2one, batch, embeddings=o2o_embs)
 
+        o2o_ref = preds["refined_o2o"]
+        loss_o2o_ref = self.one2one_refined(o2o_ref, batch)
+
         if preds.get("one2many", None):
+            o2m_ref = preds["refined_o2m"]
+            loss_o2m_ref = self.one2many_refined(o2m_ref, batch)
+
             one2many, o2m_embs = preds["one2many"], preds["o2m_embs"]
             loss_one2many = self.one2many(one2many, batch, embeddings=o2m_embs)
             if self.model.args.fgdm_loss:
@@ -766,13 +774,14 @@ class DetectLoss3d:
                 else:
                     return loss_one2many[0] + loss_one2one[0] + fgdm_loss, torch.cat((loss_one2many[1], loss_one2one[1], fgdm_loss.unsqueeze(0)))
             else:
-                return loss_one2many[0] + loss_one2one[0], torch.cat((loss_one2many[1], loss_one2one[1]))
+                return (loss_one2many[0] + loss_one2one[0] + loss_o2o_ref[0] * self.model.args.refine + loss_o2m_ref[0] * self.model.args.refine,
+                        torch.cat((loss_one2many[1], loss_one2one[1], loss_o2o_ref[1] * self.model.args.refine, loss_o2m_ref[1] * self.model.args.refine)))
         else:
             return torch.zeros(1), loss_one2one[1]
 
 
 class DDDetectionLoss:
-    def __init__(self, model, tal_topk=10):  # model must be de-paralleled
+    def __init__(self, model, tal_topk=10, name="loss"):  # model must be de-paralleled
         device = next(model.parameters()).device  # get model device
         h = model.args  # hyperparameters
 
@@ -783,6 +792,7 @@ class DDDetectionLoss:
         self.nc = m.nc  # number of classes
         self.no = m.no
         self.device = device
+        self.name = name
 
         self.assigner = TaskAlignedAssigner3d(topk=tal_topk, num_classes=self.nc,
                                               alpha=model.args.tal_alpha, beta=model.args.tal_beta,
@@ -818,7 +828,7 @@ class DDDetectionLoss:
         xy2 = centers + size / 2
         return torch.cat((xy1, xy2), dim=-1) * stride_tensor
 
-    def __call__(self, preds, batch, embeddings):
+    def __call__(self, preds, batch, embeddings=None):
         """Calculate the sum of the loss for box, cls and dfl multiplied by batch size."""
         loss = torch.zeros(7 if self.hyp.distillation else 6, device=self.device)  # box, cls, dep, o3d, s3d, hd
         feats = preds[1] if isinstance(preds, tuple) else preds
@@ -890,7 +900,7 @@ class DDDetectionLoss:
         loss[2:6] = self.compute_box3d_loss(targets_3d, pred_3d, anchor_points, stride_tensor,
                                             fg_mask, target_scores_sum)
 
-        if self.hyp.distillation:
+        if self.hyp.distillation and embeddings is not None:
             embeddings = torch.cat([emb.view(feats[0].shape[0], 128, -1) for emb in embeddings], dim=2)
             loss[6] = self.supervisor.forward_head(
                 batch["img"].detach(), gt_center_3d, embeddings, fg_mask.bool(),

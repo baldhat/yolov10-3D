@@ -32,7 +32,7 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
 
     def postprocess(self, preds):
         if isinstance(preds, dict):
-            predsO = preds["one2one"]
+            predsO = preds["refined_o2o"] if self.args.use_refine else preds["one2one"]
 
         if isinstance(predsO, (list, tuple)):
             predsO = predsO[0]

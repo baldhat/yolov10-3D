@@ -46,7 +46,10 @@ class KITTIDataset(data.Dataset):
         self.mode = mode
         root_dir = pathlib.Path(image_file_path).parent.parent
         split_dir = image_file_path
+
         self.idx_list = [x.strip() for x in open(split_dir).readlines()]
+        if args.overfit:
+            self.idx_list = self.idx_list[:24]
 
         # path configuration
         self.data_dir = os.path.join(root_dir, 'testing' if self.mode == 'test' else 'training')

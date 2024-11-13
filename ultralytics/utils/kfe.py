@@ -6,7 +6,11 @@ import matplotlib.pyplot as plt
 
 from ultralytics.utils.keypoint_utils import get_3d_keypoints, rect_to_img
 
-class KFE:
+class KFE(nn.Module):
+    def __init__(self, in_channels):
+        super(KFE, self).__init__()
+        self.out_channels = 256
+        self.projections = nn.ModuleList(nn.Conv2d(in_ch, 256, 1, 1, (0, 0)) for in_ch in in_channels)
 
     def forward(self, backbone_features, predictions, calibs, mean_sizes, stride_tensor, strides):
         kps_3d = self.extract_3d_kps(predictions, calibs, mean_sizes)
@@ -16,15 +20,20 @@ class KFE:
         features = []
         scale_offset = 0
         for i, stride_ in enumerate(strides):
-            num_anchors_in_scale =  backbone_features[i].shape[2] * backbone_features[i].shape[3]
-            features.append(self.bilinear_interpolation(backbone_features[i], kps_2d[:, scale_offset:scale_offset+num_anchors_in_scale]))
+            bs, ch, h, w = backbone_features[i].shape
+            num_kp = kps_2d.shape[2]
+            num_anchors_in_scale =  w * h
+            proj_features = self.projections[i](backbone_features[i])
+            features.append(
+                self.bilinear_interpolation(proj_features, kps_2d[:, scale_offset:scale_offset+num_anchors_in_scale])
+                    .reshape(bs, self.out_channels, h, w, num_kp))
             scale_offset += num_anchors_in_scale
         return features
 
     def bilinear_interpolation(self, feature_maps, kps_2d):
         kps_2d[..., 0] = (kps_2d[..., 0] / (feature_maps.shape[3] / 2)) - 1
         kps_2d[..., 1] = (kps_2d[..., 1] / (feature_maps.shape[2] / 2)) - 1
-        return nn.functional.grid_sample(feature_maps.float(), kps_2d.float(), mode='bilinear')
+        return nn.functional.grid_sample(feature_maps.float(), kps_2d.float(), mode='bilinear', padding_mode="border")
 
     def vis_keypoints(self, kps_2d):
         plt.clf()

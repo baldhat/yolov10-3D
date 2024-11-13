@@ -19,6 +19,9 @@ import numpy as np
 
 __all__ = "Detect", "Segment", "Pose", "Classify", "OBB", "RTDETRDecoder"
 
+from ...utils.kprefiner import KeypointRefiner
+from ...utils.query_embedder import QueryEmbedder
+
 
 class Detect(nn.Module):
     """YOLOv8 Detect head for detection models."""
@@ -571,6 +574,7 @@ class v10Detect3d(nn.Module):
             "dep": 1,
             "dep_un": 1
         }
+        self.head_names = list(self.output_channels.keys())
         self.no = sum(self.output_channels.values())
         self.stride = torch.zeros(self.nl)  # strides computed during build
         self.deform = deform
@@ -632,7 +636,10 @@ class v10Detect3d(nn.Module):
         if self.fgdm_pred:
             self.fgdm_predictor = DepthPredictor(ch)
 
-        self.keypoint_feature_extractor = KFE()
+        self.keypoint_feature_extractor = KFE(ch)
+        self.query_embedder = QueryEmbedder([channels[head_name + "_c"] if not self.half_channels else channels[head_name + "_c"] // 2 for head_name in self.head_names])
+        self.kp_embedder = torch.nn.Embedding(8, 256)
+        self.refiner = KeypointRefiner()
 
     def build_head(self, in_channels, mid_channels, output_channels):
         return nn.ModuleList(nn.Sequential(v10Detect3d.build_conv(x, mid_channels, self.kernel_size_1, self.dsconv,  deform=self.deform),
@@ -696,11 +703,13 @@ class v10Detect3d(nn.Module):
 
     def inference_forward_feat(self, x, heads):
         y = []
+        head_features = []
         batch_sz = x[0].shape[0]
         head_names = list(self.output_channels.keys())
         for i in range(self.nl):
             outputs = {}
-            outputs[head_names[0]] = heads[0][i](x[i])
+            head_feats = {}
+            outputs[head_names[0]], head_feats[head_names[0]], _ = self.single_head_forward(heads[0][i], x[i])
 
             candidate_indices = self.select_candidates(outputs[head_names[0]], batch_sz)
 
@@ -709,33 +718,53 @@ class v10Detect3d(nn.Module):
                 for layer in module[i]:
                     if isinstance(layer, Conv):
                         layer.conv.padding = 0
-                output_shape = (x[i].shape[0], list(self.output_channels.values())[j+1], x[i].shape[2], x[i].shape[3])
+                out_, feats, _ = self.single_head_forward(module[i], inputs)
+
+                output_shape = (x[i].shape[0], out_.shape[1], x[i].shape[2], x[i].shape[3])
                 head_output = torch.zeros(output_shape, device=x[i].device)
-                out = module[i](inputs)[:, :, 0, 0].view(output_shape[0], self.max_det, output_shape[1]).transpose(1, 2)
+                feat_output_shape = (x[i].shape[0], feats.shape[1], x[i].shape[2], x[i].shape[3])
+                feat_output = torch.zeros(feat_output_shape, device=x[i].device)
+
+                out = out_[:, :, 0, 0].view(output_shape[0], self.max_det, output_shape[1]).transpose(1, 2)
+                feats = feats.view(output_shape[0], self.max_det, feats.shape[1]).transpose(1,2)
+
                 for b in range(batch_sz):
                     head_output[b, :, candidate_indices[b, :, 0], candidate_indices[b, :, 1]] = out[b]
+                    feat_output[b, :, candidate_indices[b, :, 0], candidate_indices[b, :, 1]] = feats[b]
+
                 outputs[head_names[j+1]] = head_output
+                head_feats[head_names[j+1]] = feat_output
             y.append(torch.cat(list(outputs.values()), dim=1))
-        return y
+            head_features.append(list(head_feats.values()))
+        # Refinement
+        refined_preds = self.refine_preds([yi.detach() for yi in y], [xi for xi in x], head_features)
+        return y, refined_preds
 
     def forward_feat(self, x, heads):
         y = []
-        embs = []
+        depth_features = []
+        head_features = []
         head_names = list(self.output_channels.keys())
         for i in range(self.nl):
             outputs = {}
             ems = {}
             for j, module in enumerate(heads):
-                    outputs[head_names[j]], ems[head_names[j]] = self.single_head_forward(module[i], x[i])
+                outputs[head_names[j]], ems[head_names[j]], dep_embs = self.single_head_forward(module[i], x[i])
+                if head_names[j] == "dep":
+                    depth_features.append(dep_embs)
+
             y.append(torch.cat(list(outputs.values()), dim=1))
-            embs.append(torch.cat(list(ems.values()), dim=1))
-        return y, embs
+            head_features.append(list(ems.values()))
+
+        # Refinement
+        refined_preds = self.refine_preds([yi.detach() for yi in y], [xi for xi in x], head_features)
+        return y, refined_preds, depth_features
 
     def single_head_forward(self, head, features):
         assert len(head) == 3
         o1 = head[0](features)
         embeddings = head[1](o1)
-        return head[2](embeddings), embeddings.detach()
+        return head[2](embeddings), embeddings.detach(), o1
 
 
     def sum_predecessor_chs(self, predecessors):
@@ -785,52 +814,61 @@ class v10Detect3d(nn.Module):
         y = preds
         return y if self.export else (y, x)
 
-
-    def _forward(self, x):
-        """Concatenates and returns predicted bounding boxes and class probabilities."""
-        y, embs = self.forward_feat(x, self.o2m_heads)
-
-        if hasattr(self, "fgdm_pred") and self.fgdm_pred:
-            depth_maps = self.fgdm_predictor(x, return_embeddings=True)
-        else:
-            depth_maps = torch.empty(1)
-
-        if self.training:
-            return y, embs, depth_maps
-
-        return self.inference(y), embs, depth_maps
-
     def forward(self, x):
-        if not self.training:
-            one2one, o2o_embs = self.inference_forward_feat([xi.detach() for xi in x], self.o2o_heads), None
-            # self.get_head_ranks()
-            # one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
-        else:
-            one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
-        kp_feats = self.extract_kp_feats(one2one, x)
+        if self.training:
+            one2one,  refined_o2o, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
+            one2many, refined_o2m, o2m_embs = self.forward_feat(x, self.o2m_heads)
 
-        if not self.training:
+            if hasattr(self, "fgdm_pred") and self.fgdm_pred:
+                depth_maps = self.fgdm_predictor(x, return_embeddings=True)
+            else:
+                depth_maps = torch.empty(1)
+
+            return {"one2many": one2many, "refined_o2m": refined_o2m, "o2m_embs": o2m_embs,
+                    "one2one": one2one, "refined_o2o": refined_o2o, "o2o_embs": o2o_embs,
+                    "depth_maps": depth_maps}
+        else:
+            (one2one, refined_o2o), o2o_embs = self.inference_forward_feat([xi.detach() for xi in x], self.o2o_heads), None
+            # self.get_head_ranks()
             one2one = self.inference(one2one)
+            refined_o2o = self.inference(refined_o2o)
             if not self.export:
-                return {"one2one": one2one, "o2o_embs": o2o_embs}
+                return {"one2one": one2one, "refined_o2o": refined_o2o, "o2o_embs": o2o_embs}
             else:
                 raise NotImplementedError("TODO")
-                assert(self.max_det != -1)
+                assert (self.max_det != -1)
                 boxes, scores, labels = ops.v10postprocess(one2one.permute(0, 2, 1), self.max_det, self.nc)
                 return torch.cat([boxes, scores.unsqueeze(-1), labels.unsqueeze(-1).to(boxes.dtype)], dim=-1)
-        else:
-            one2many, o2m_embs, depth_maps = self._forward(x)
-            return {"one2many": one2many, "one2one": one2one, "o2m_embs": o2m_embs, "o2o_embs": o2o_embs, "depth_maps": depth_maps}
 
-    def extract_kp_feats(self, output, backbone_features):
-        if backbone_features[0].shape[3] in [80, 32]:
-            return
+
+    def refine_preds(self, output, backbone_features, head_features):
         cls, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un = (
             torch.cat([xi.view(output[0].shape[0], self.no, -1) for xi in output], 2).split(
                 (self.nc, 2, 2, 2, 3, 24, 1, 1), 1
             ))
         self.anchors, self.strides = (x.transpose(0, 1) for x in make_anchors(output, self.stride, 0.5))
         preds = self.decode(cls, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un)
+
+        kp_feats = self.extract_kp_feats(preds, backbone_features)
+        queries = self.query_embedder(head_features)
+        embeddings = self.get_kp_embeddings(kp_feats)
+
+        refined_output = self.refiner(embeddings, kp_feats, queries)
+
+        refined = []
+        for out, ref in zip(output, refined_output):
+            refined.append(torch.cat((out[:, :9], ref), dim=1))
+
+        return refined
+
+    def get_kp_embeddings(self, kp_feats):
+        embeddings = []
+        for scale in kp_feats:
+            embedding = self.kp_embedder(torch.arange(8, device=scale.device).unsqueeze(0))
+            embeddings.append(embedding.transpose(1, 2).unsqueeze(2).unsqueeze(2).repeat(scale.shape[0], 1, scale.shape[2], scale.shape[3], 1))
+        return embeddings
+
+    def extract_kp_feats(self, preds, backbone_features):
         #FIXME!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         calib = torch.tensor(np.array([ 6.5179e+02,  1.7700e+02,  7.4361e+02,  7.3885e+02,  6.4071e-02, -3.0708e-04]), dtype=torch.float64)
         calibs = calib.unsqueeze(0).repeat(backbone_features[0].shape[0], 1).to(backbone_features[0].device)
