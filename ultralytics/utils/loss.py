@@ -1193,10 +1193,9 @@ class SupervisionLoss:
 
         transform = transforms.Resize(size=(fgdm_embeddings.shape[2], fgdm_embeddings.shape[3]),
                           interpolation=InterpolationMode.NEAREST_EXACT)
-        chs = fgdm_embeddings.shape[1]
-        mask = (transform(gt_depth_maps) > 0).unsqueeze(1).repeat(1, chs, 1, 1)
-        dino_emb = transform(dino_embeddings)[mask]
-        pred_emb = fgdm_embeddings[mask]
+        mask = (transform(gt_depth_maps) > 0)
+        dino_emb = transform(dino_embeddings).transpose(1, 2).transpose(2, 3)[mask]
+        pred_emb = fgdm_embeddings.transpose(1, 2).transpose(2, 3)[mask]
 
         if self.criterion == "soft":
             soft_targets = nn.functional.softmax(dino_emb / self.T, dim=1)
