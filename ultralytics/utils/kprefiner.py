@@ -14,10 +14,10 @@ class KeypointRefiner(nn.Module):
         self.lin2 = nn.Linear(512, 256)
         self.dropout = nn.Dropout(0.1)
         self.heads = nn.ModuleList([
-            nn.Sequential(Conv(256, 128), nn.Conv2d(128, 3, kernel_size=1)),   # size 3d
-            nn.Sequential(Conv(256, 128), nn.Conv2d(128, 24, kernel_size=1)),  # rotation
-            nn.Sequential(Conv(256, 128), nn.Conv2d(128, 1, kernel_size=1)),   # depth
-            nn.Sequential(Conv(256, 128), nn.Conv2d(128, 1, kernel_size=1)),   # depth uncertainty
+            nn.Sequential(Conv(256, 64), nn.Conv2d(64, 3, kernel_size=1)),   # size 3d
+            nn.Sequential(Conv(256, 64), nn.Conv2d(64, 24, kernel_size=1)),  # rotation
+            nn.Sequential(Conv(256, 64), nn.Conv2d(64, 1, kernel_size=1)),   # depth
+            nn.Sequential(Conv(256, 64), nn.Conv2d(64, 1, kernel_size=1)),   # depth uncertainty
         ])
         self.heads[0][-1].bias.data.fill_(0.0)
         nn.init.normal_(self.heads[0][-1].weight, std=0.05)
