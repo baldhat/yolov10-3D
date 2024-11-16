@@ -84,4 +84,14 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
             on_plot=self.on_plot,
             max_subplots=9
         )
-        self.visualizer.plot_batch(batch, self.train_loader.dataset, self.save_dir / f"train_batch3d{ni}.jpg")
+        self.visualizer.plot_batch(
+            batch,
+            self.train_loader.dataset,
+            self.save_dir / f"train_batch3d{ni}.jpg"
+        )
+        self.visualizer.plot_bev(
+            batch,
+            None,
+            self.train_loader.dataset,
+            fname=self.save_dir / f"train_batch{ni}_bev.jpg"
+        )

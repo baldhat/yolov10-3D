@@ -71,6 +71,7 @@ class KITTIDataset(data.Dataset):
         self.mixup = args.mixup
         self.max_depth_threshold = args.max_depth_threshold
         self.min_depth_thres = args.min_depth_threshold
+        self.pred_rot_mat = False
 
         os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 
@@ -133,6 +134,7 @@ class KITTIDataset(data.Dataset):
         random_mix_flag = False
         calib = self.get_calib(index)
         scale = 1
+        shift = [0, 0]
 
         if self.data_augmentation:
             if np.random.random() < 0.5 and self.mixup:
@@ -155,6 +157,7 @@ class KITTIDataset(data.Dataset):
                 shift_1 = img_size[1] * np.clip(np.random.randn() * self.shift, -2 * self.shift, 2 * self.shift)
                 center[0] += shift_0
                 center[1] += shift_1
+                shift = [shift_0, shift_1]
 
         if random_mix_flag == True:
             count_num = 0
@@ -349,8 +352,8 @@ class KITTIDataset(data.Dataset):
                     center_3d = objects[i].pos + [0, -objects[i].h / 2, 0]  # real 3D center in 3D space
                     r_center_3d = center_3d.reshape(-1, 3)  # shape adjustment (N, 3)
                     center_3d, _ = calib.rect_to_img(r_center_3d)  # project 3D center to image plane
-                    center_3d = center_3d[0]  # shape adjustment
-                    center_3d = affine_transform(center_3d.reshape(-1), trans)
+                    center_3d_ = center_3d[0]  # shape adjustment
+                    center_3d = affine_transform(center_3d_.reshape(-1), trans)
 
                     # generate the center of gaussian heatmap [optional: 3d center or 2d center]
                     center_heatmap = center_3d.astype(np.int32)
@@ -401,7 +404,7 @@ class KITTIDataset(data.Dataset):
             bboxes = torch.clip(torch.tensor(np.array(gt_boxes_2d) / self.resolution[[0, 1, 0, 1]]), 0, 1)
         else:
             bboxes = torch.empty(0)
-        ratio_pad = np.array([self.resolution /img_size, np.array([0, 0])])
+        ratio_pad = np.array([self.resolution / img_size, np.array([0, 0])])
         calib = torch.tensor(np.array([calib.cu * ratio_pad[0, 0], calib.cv * ratio_pad[0, 1],
                                        calib.fu * ratio_pad[0, 0], calib.fv * ratio_pad[0, 1],
                                        calib.tx * ratio_pad[0, 0], calib.ty * ratio_pad[0, 1]]))

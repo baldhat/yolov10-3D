@@ -226,9 +226,7 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
             batch,
             preds,
             self.dataloader.dataset,
-            paths=batch["im_file"],
-            fname=self.save_dir / f"val_batch{ni}_pred_bev.jpg",
-            names=self.names
+            fname=self.save_dir / f"val_batch{ni}_pred_bev.jpg"
         )
 
     def plot_val_samples(self, batch, ni):

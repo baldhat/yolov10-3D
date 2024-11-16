@@ -1230,7 +1230,7 @@ class KITTIVisualizer():
 
     def plot_batch(self, batch, dataset, filename):
         infos_ = self.collate_infos(batch)
-        calibs = [Calibration(calib) for calib in batch["calib"]]
+        calibs = [dataset.get_calib(info) for info in infos_["img_id"]]
 
         targets = dataset.decode_batch(batch, calibs, undo_augment=False)
         images, infos = batch["img"], batch["info"]
@@ -1264,7 +1264,7 @@ class KITTIVisualizer():
                 self.plot_3d_obj(img,
                                  VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
                                              dimensions, bbox2d, cls),
-                                 calib.P2, gt=True)
+                                 np.copy(calib.P2), gt=True)
 
             ax[i].imshow(img)
             ax[i].axis("off")
@@ -1315,7 +1315,7 @@ class KITTIVisualizer():
                 self.plot_3d_obj(img,
                                  VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
                                              dimensions, bbox2d, cls),
-                                 calib.P2, bbox2d=False)
+                                 np.copy(calib.P2), bbox2d=False)
 
             for object in target:
                 cls = object[0]
@@ -1328,27 +1328,29 @@ class KITTIVisualizer():
                 self.plot_3d_obj(img,
                                  VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
                                              dimensions, bbox2d, cls),
-                                 calib.P2, bbox2d=False, gt=True)
+                                 np.copy(calib.P2), bbox2d=False, gt=True)
 
             ax[i].imshow(img)
             ax[i].axis("off")
 
         plt.savefig(fname, dpi=300, bbox_inches="tight")
 
-    def plot_bev(self, batch, preds, dataset, paths, fname, names, threshold=0.1):
+    def plot_bev(self, batch, preds, dataset, fname, threshold=0.1):
         infos_ = self.collate_infos(batch)
         calibs = [dataset.get_calib(info) for info in infos_['img_id']]
-        preds = dataset.decode_preds(preds, calibs, batch["im_file"], batch["ratio_pad"],
-                                     infos_['trans_inv'], threshold=threshold, undo_augment=False)
         targets = dataset.decode_batch(batch, calibs, undo_augment=False)
-        images, infos = batch["img"], batch["info"]
+        if preds is not None:
+            preds = dataset.decode_preds(preds, calibs, batch["im_file"], batch["ratio_pad"],
+                                         infos_['trans_inv'], threshold=threshold, undo_augment=False)
+        else:
+            preds = {key: None for key in targets.keys()}
 
         plt.clf()
         fig, ax = plt.subplots(math.ceil(self.max_imgs ** 0.5), math.ceil(self.max_imgs ** 0.5),
                                figsize=(24, 12), gridspec_kw={'wspace': 0, 'hspace': 0}, constrained_layout=True)
         ax = ax.ravel()
 
-        for i, (image, calib, (img_id, result), (_, target), info) in enumerate(zip(images, calibs, preds.items(), targets.items(), infos)):
+        for i, ((img_id, result), (_, target)) in enumerate(zip(preds.items(), targets.items())):
             if i >= self.max_imgs:
                 break
             MAX_DIST = 60
@@ -1371,27 +1373,35 @@ class KITTIVisualizer():
             space = space[:R, :, :]
 
             for object in target:
-                dimensions = np.array([object[8], object[7]]) * SCALE
-                translation = np.array((object[9], object[11])) * SCALE
-                translation[1] *= -1
-                translation += R
-                ry = object[12]
+                if dataset.pred_rot_mat:
+                    egoc_rot_matrix = np.array(object[1:10]).reshape(3, 3)
+                    dimensions = np.array([object[16], object[15]]) * SCALE
+                    translation = np.array((object[17], object[19])) * SCALE
+                    translation[1] *= -1
+                    translation += R
+                    ry = -Rotation.from_matrix(egoc_rot_matrix).as_euler("xyz")[1]
+                else:
+                    dimensions = np.array([object[8], object[7]]) * SCALE
+                    translation = np.array((object[9], object[11])) * SCALE
+                    translation[1] *= -1
+                    translation += R
+                    ry = object[12]
 
                 bev = np.concatenate((translation, dimensions, np.expand_dims(ry, 0)))
                 box = cv2.boxPoints((bev[:2], bev[2:4], bev[4] * 180 / np.pi)).astype(np.int32)
                 space = cv2.drawContours(space, [box], -1, (0, 255, 0), thickness=-1, lineType=cv2.LINE_AA)
 
+            if result is not None:
+                for object in result:
+                    dimensions = np.array([object[8], object[7]]) * SCALE
+                    translation = np.array((object[9], object[11])) * SCALE
+                    translation[1] *= -1
+                    translation += R
+                    ry = object[12]
 
-            for object in result:
-                dimensions = np.array([object[8], object[7]]) * SCALE
-                translation = np.array((object[9], object[11])) * SCALE
-                translation[1] *= -1
-                translation += R
-                ry = object[12]
-
-                bev = np.concatenate((translation, dimensions, np.expand_dims(ry, 0)))
-                box = cv2.boxPoints((bev[:2], bev[2:4], bev[4] * 180 / np.pi)).astype(np.int32)
-                space = cv2.drawContours(space, [box], -1, (255, 0, 0), thickness=-1, lineType=cv2.LINE_AA)
+                    bev = np.concatenate((translation, dimensions, np.expand_dims(ry, 0)))
+                    box = cv2.boxPoints((bev[:2], bev[2:4], bev[4] * 180 / np.pi)).astype(np.int32)
+                    space = cv2.drawContours(space, [box], -1, (255, 0, 0), thickness=-1, lineType=cv2.LINE_AA)
 
             ax[i].imshow(space)
             ax[i].axis("off")
@@ -1399,10 +1409,20 @@ class KITTIVisualizer():
         plt.savefig(fname, dpi=300, bbox_inches="tight")
 
     def plot_3d_obj(self, img: np.ndarray, obj: VisObject3D, camera_matrix: np.ndarray, thickness: int = 1, gt: bool = False,
-                 bbox2d=True):
+                 bbox2d=True, shift=torch.tensor(np.array([0, 0]))):
+        if shift[0] != 0:
+            print(camera_matrix)
+        camera_matrix[0, 2] -= shift[0].item()
+        camera_matrix[1, 2] -= shift[1].item()
+        if shift[0]!=0:
+            print(camera_matrix)
         box_corners = project_to_image(obj.get_box_corners(), camera_matrix).astype(np.int32)
         tip_corners = project_to_image(obj.get_tip_corners(), camera_matrix).astype(np.int32)
         color_none_bottom, color_bottom = ((0, 1, 0), (0, 0, 1)) if gt else ((1, 0, 0), (1, 0, 0))
+        box_corners[:, 0] += shift[0].item()
+        box_corners[:, 1] += shift[1].item()
+        tip_corners[:, 0] += shift[0].item()
+        tip_corners[:, 1] += shift[1].item()
         cv2.polylines(img, [box_corners[obj.box_idxs[:5]]], isClosed=False, color=color_none_bottom,
                       thickness=thickness,
                       lineType=cv2.LINE_AA)
