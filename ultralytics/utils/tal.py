@@ -408,8 +408,8 @@ class TaskAlignedAssigner3d(nn.Module):
             fg_mask (Tensor): shape(bs, num_total_anchors)
             target_gt_idx (Tensor): shape(bs, num_total_anchors)
         """
-        gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin, gt_heading_res = gts
-        pd_o3d, pd_s3d, pd_hd, pd_dep, _ = pd_3d.split((2, 3, 24, 1, 1), dim=-1)
+        gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_rot_mat = gts
+        pd_o3d, pd_s3d, pd_rot_mat, pd_dep, _ = pd_3d.split((2, 3, 9, 1, 1), dim=-1)
 
         self.bs = pd_scores.shape[0]
         self.n_max_boxes = gt_bboxes.shape[1]
@@ -427,11 +427,10 @@ class TaskAlignedAssigner3d(nn.Module):
 
         pd_center_3d = self.decode_3d_center(pd_o3d, anc_points, stride_tensor)
         pd_size3d = self.decode_3d_size(pd_s3d, pd_scores, mean_sizes)
-        pd_heading_bin, pd_heading_res = pd_hd.split((12, 12), dim=-1)
         gt_size_3d = self.add_cls_mean_size(gt_size_3d, gt_labels, mean_sizes)
 
-        gt_keypoints = get_3d_keypoints(gt_center_3d, gt_depth, gt_size_3d, gt_heading_bin, gt_heading_res, calibs)
-        pd_keypoints = get_3d_keypoints(pd_center_3d, pd_dep, pd_size3d, pd_heading_bin, pd_heading_res, calibs)
+        gt_keypoints = get_3d_keypoints(gt_center_3d, gt_depth, gt_size_3d, gt_rot_mat.reshape(self.bs, self.n_max_boxes, 3, 3), calibs)
+        pd_keypoints = get_3d_keypoints(pd_center_3d, pd_dep, pd_size3d, pd_rot_mat.reshape(self.bs, self.num_anchors, 3, 3), calibs)
 
         mask_pos, align_metric, overlaps = self.get_pos_mask(
             pd_scores, pd_bboxes, pd_keypoints, gt_labels, gt_bboxes, gt_keypoints, anc_points, mask_gt
@@ -672,7 +671,7 @@ class TaskAlignedAssigner3d(nn.Module):
                                           for positive anchor points, where num_classes is the number
                                           of object classes.
         """
-        gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin, gt_heading_res = gts
+        gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_rot_mat = gts
 
         # Assigned target labels, (b, 1)
         batch_ind = torch.arange(end=self.bs, dtype=torch.int64, device=gt_labels.device)[..., None]
@@ -685,8 +684,7 @@ class TaskAlignedAssigner3d(nn.Module):
         target_center_3d = gt_center_3d.view(-1, gt_center_3d.shape[-1])[target_gt_idx]
         target_size_3d = gt_size_3d.view(-1, gt_size_3d.shape[-1])[target_gt_idx]
         target_depth = gt_depth.view(-1, gt_depth.shape[-1])[target_gt_idx]
-        target_heading_bin = gt_heading_bin.view(-1, gt_heading_bin.shape[-1])[target_gt_idx]
-        target_heading_res = gt_heading_res.view(-1, gt_heading_res.shape[-1])[target_gt_idx]
+        gt_rot_mat = gt_rot_mat.view(-1, gt_rot_mat.shape[-1])[target_gt_idx]
 
         # Assigned target scores
         target_labels.clamp_(0)
@@ -703,7 +701,7 @@ class TaskAlignedAssigner3d(nn.Module):
         target_scores = torch.where(fg_scores_mask > 0, target_scores, 0)
 
         return [target_labels, target_scores, target_center_2d, target_size_2d, target_center_3d,
-                target_size_3d, target_depth, target_heading_bin, target_heading_res]
+                target_size_3d, target_depth, gt_rot_mat]
 
     @staticmethod
     def select_candidates_in_gts(xy_centers, gt_bboxes, eps=1e-9):

@@ -566,7 +566,7 @@ class v10Detect3d(nn.Module):
             "s2d": 2,
             "o3d": 2,
             "s3d": 3,
-            "hd": 24,
+            "hd": 6,
             "dep": 1,
             "dep_un": 1
         }
@@ -607,22 +607,22 @@ class v10Detect3d(nn.Module):
         if self.common_head:
             self.common = nn.ModuleList(v10Detect3d.build_conv(ch_, ch_, 3, dsconv) for ch_ in ch)
             self.cls = self.build_small_head(ch, channels["cls_c"], self.nc)
-            self.o2d = self.build_small_head(ch, channels["o2d_c"], 2)
-            self.s2d = self.build_small_head(ch, channels["s2d_c"], 2)
-            self.o3d = self.build_small_head(ch, channels["o3d_c"], 2)
-            self.s3d = self.build_small_head(ch, channels["s3d_c"], 3)
-            self.hd = self.build_small_head(ch, channels["hd_c"], 24)
-            self.dep = self.build_small_head(ch, channels["dep_c"], 1)
-            self.dep_un = self.build_small_head(ch, channels["dep_un_c"], 1)
+            self.o2d = self.build_small_head(ch, channels["o2d_c"], self.output_channels["o2d"])
+            self.s2d = self.build_small_head(ch, channels["s2d_c"], self.output_channels["s2d"])
+            self.o3d = self.build_small_head(ch, channels["o3d_c"], self.output_channels["o3d"])
+            self.s3d = self.build_small_head(ch, channels["s3d_c"], self.output_channels["s3d"])
+            self.hd = self.build_small_head(ch, channels["hd_c"], self.output_channels["hd"])
+            self.dep = self.build_small_head(ch, channels["dep_c"], self.output_channels["dep"])
+            self.dep_un = self.build_small_head(ch, channels["dep_un_c"], self.output_channels["dep_un"])
         else:
             self.cls = self.build_head(self.cls_in_ch, channels["cls_c"], self.nc)
-            self.o2d = self.build_head(self.o2d_in_ch, channels["o2d_c"], 2)
-            self.s2d = self.build_head(self.s2d_in_ch, channels["s2d_c"], 2)
-            self.o3d = self.build_head(self.o3d_in_ch, channels["o3d_c"], 2)
-            self.s3d = self.build_head(self.s3d_in_ch, channels["s3d_c"], 3)
-            self.hd = self.build_head(self.hd_in_ch, channels["hd_c"], 24)
-            self.dep = self.build_head(self.dep_in_ch, channels["dep_c"], 1)
-            self.dep_un = self.build_head(self.dep_un_in_ch, channels["dep_un_c"], 1)
+            self.o2d = self.build_head(self.o2d_in_ch, channels["o2d_c"], self.output_channels["o2d"])
+            self.s2d = self.build_head(self.s2d_in_ch, channels["s2d_c"], self.output_channels["s2d"])
+            self.o3d = self.build_head(self.o3d_in_ch, channels["o3d_c"], self.output_channels["o3d"])
+            self.s3d = self.build_head(self.s3d_in_ch, channels["s3d_c"], self.output_channels["s3d"])
+            self.hd = self.build_head(self.hd_in_ch, channels["hd_c"], self.output_channels["hd"])
+            self.dep = self.build_head(self.dep_in_ch, channels["dep_c"], self.output_channels["dep"])
+            self.dep_un = self.build_head(self.dep_un_in_ch, channels["dep_un_c"], self.output_channels["dep_un"])
 
         self.o2o_heads = nn.ModuleList(
             [self.cls, self.o2d, self.s2d, self.o3d, self.s3d, self.hd, self.dep, self.dep_un])
@@ -752,7 +752,16 @@ class v10Detect3d(nn.Module):
     def sum_predecessor_chs(self, predecessors):
         return sum([self.output_channels[predecessor] for predecessor in predecessors]) if len(predecessors) > 0 else 0
 
-    def decode(self, cls, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un):
+    def decode_rot_mat_pred(self, pred_rot):
+        a1 = pred_rot[:, 0:3]
+        a2 = pred_rot[:, 3:6]
+        b1 = torch.nn.functional.normalize(a1, dim=1)
+        b2 = torch.nn.functional.normalize(a2 - (torch.einsum("bva,bva->ba", b1, a2).unsqueeze(1)*b1), dim=1)
+        b3 = torch.cross(b1, b2, dim=1)
+        rot_mat = torch.cat((b1,b2,b3), dim=1)
+        return rot_mat
+
+    def decode(self, cls, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_rot, pred_dep, pred_dep_un):
         s2d = pred_s2d * self.strides
         o2d = (pred_o2d + self.anchors) * self.strides
         xy1 = o2d - s2d / 2
@@ -761,7 +770,9 @@ class v10Detect3d(nn.Module):
 
         center3d = (pred_o3d + self.anchors) * self.strides
 
-        return torch.cat((cls, bbox, center3d, pred_s3d, pred_hd, pred_dep, pred_dep_un), dim=1)
+        pred_rot = self.decode_rot_mat_pred(pred_rot)
+
+        return torch.cat((cls, bbox, center3d, pred_s3d, pred_rot, pred_dep, pred_dep_un), dim=1)
 
     def inference(self, x):
         shape = x[0].shape  # BCHW
@@ -775,11 +786,13 @@ class v10Detect3d(nn.Module):
             box = x_cat[:, : self.reg_max * 4]
             cls = x_cat[:, self.reg_max * 4:]
         else:
-            cls, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un = (
+            cls, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_rot, pred_dep, pred_dep_un = (
                 torch.cat([xi.view(x[0].shape[0], self.no, -1) for xi in x], 2).split(
-                    (self.nc, 2, 2, 2, 3, 24, 1, 1), 1
+                    (self.nc, self.output_channels["o2d"], self.output_channels["s2d"],
+                     self.output_channels["o3d"], self.output_channels["s3d"],
+                     self.output_channels["hd"], self.output_channels["dep"], self.output_channels["dep_un"]), 1
                 ))
-            preds = self.decode(cls, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un)
+            preds = self.decode(cls, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_rot, pred_dep, pred_dep_un)
 
         if self.export and self.format in ("tflite", "edgetpu"):
             # Precompute normalization factor to increase numerical stability

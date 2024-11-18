@@ -3,19 +3,40 @@ from idlelib.pyparse import trans
 import torch
 import numpy as np
 
+from ultralytics.utils.ops import alloc_to_egoc_rot_matrix_torch
+
+
 def get_object_keypoints(center_3d, size3d, roty):
     pts3d = get_box_corners(torch.tensor(size3d))
     return transform_to_camera(pts3d, torch.tensor(center_3d), torch.tensor(roty, device="cpu", dtype=torch.float32).unsqueeze(-1))
 
 
-def get_3d_keypoints(center_3d, dep, size3d, heading_bin, heading_res, calibs):
+def get_3d_keypoints(center_3d, dep, size3d, alloc_rot_mat, calibs):
     calibs = calibs.unsqueeze(1).repeat(1, center_3d.shape[1], 1)
     locations = img_to_rect(center_3d, dep, calibs)
     boxes_object_frame = get_box_corners(size3d)
-    rotations = get_roty(center_3d, heading_bin, heading_res, calibs)
-    boxes_camera_frame = transform_to_camera(boxes_object_frame, locations, rotations)
+    #rotations = get_roty(center_3d, heading_bin, heading_res, calibs)
+    egoc_rot_mat = alloc_to_egoc_rot_mat(alloc_rot_mat, center_3d, calibs)
+    boxes_camera_frame = transform_to_camera(boxes_object_frame, locations, egoc_rot_mat)
     return boxes_camera_frame
 
+def to_intrinsic_matrix(calibs):
+    p2 = torch.zeros(calibs.shape[0], calibs.shape[1], 3, 4)
+    p2[:, :, 0, 3] = calibs[:, :, 0]
+    p2[:, :, 1, 2] = calibs[:, :, 1]
+    p2[:, :, 0, 0] = calibs[:, :, 2]
+    p2[:, :, 1, 1] = calibs[:, :, 3]
+    p2[:, :, 0, 3] = calibs[:, :, 4] * -calibs[:, :, 2]
+    p2[:, :, 1, 3] = calibs[:, :, 5] * -calibs[:, :, 3]
+    p2[:, :, 2, 2] = 1
+    return p2
+
+def alloc_to_egoc_rot_mat(alloc_rot_mat, center_3d, calibs):
+    return alloc_to_egoc_rot_matrix_torch(
+        amodal_center=center_3d.reshape(-1, 2),
+        alloc_rot_matrix=alloc_rot_mat.reshape(-1, 3, 3),
+        calib=to_intrinsic_matrix(calibs).to(center_3d.device)
+    ).reshape(center_3d.shape[0], center_3d.shape[1], 3, 3)
 
 def get_box_corners(size3d):
     hl, hw, hh = (size3d[..., 2].unsqueeze(-1) / 2, size3d[..., 1].unsqueeze(-1) / 2, size3d[..., 0].unsqueeze(-1) / 2)
@@ -101,12 +122,12 @@ def alpha2ry(alpha, xs, calibs):
     return ry
 
 
-def transform_to_camera(boxes_object_frame, locations, ry):
-    rot_mat = to_egoc_rot_mat(ry)
+def transform_to_camera(boxes_object_frame, locations, rot_mat):
+    #rot_mat = to_egoc_rot_mat(ry)
     if len(rot_mat.shape) == 2:
         rot_mat = rot_mat.unsqueeze(0).unsqueeze(0).float()
         boxes_object_frame = boxes_object_frame.unsqueeze(0).unsqueeze(0).float()
-    boxes = torch.einsum("bnji,bnkj->bnki", rot_mat, boxes_object_frame) + locations.unsqueeze(-2)
+    boxes = torch.einsum("bnji,bnkj->bnki", rot_mat.double(), boxes_object_frame.double()) + locations.unsqueeze(-2).double()
     return boxes
 
 

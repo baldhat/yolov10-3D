@@ -196,8 +196,8 @@ class Calibration(object):
                 self.tx = calib_file[4]
                 self.ty = calib_file[5]
                 self.P2 = np.array([
-                    [self.fu, 0, self.cu, self.tx],
-                    [0, self.fv, self.cv, self.ty],
+                    [self.fu, 0, self.cu, self.tx * -self.fu],
+                    [0, self.fv, self.cv, self.ty * -self.fv],
                     [0, 0, 1, 0]
                 ])
             return

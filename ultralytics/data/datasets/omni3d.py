@@ -335,7 +335,7 @@ class Omni3Dataset(data.Dataset):
 
         _cls = [self.cls2train_id[object_.cls_type]]
 
-        in_pos = np.array([_center3d[0] + shift[0]*ratio_pad[0, 0], _center3d[1] + shift[1]*ratio_pad[0, 1]])
+        in_pos = np.array([_center3d[0] + shift[0]*trans[0, 0], _center3d[1] + shift[1]*trans[1, 1]])
         _rot_mat = egoc_to_alloc_rot_matrix_torch(amodal_center=torch.from_numpy(in_pos).unsqueeze(0).float(),
                                                   egoc_rot_matrix=torch.from_numpy(object_.rot_mat).unsqueeze(0).float(),
                                                   calib=torch.from_numpy(calib.P2*ratio_pad[0, 0]).unsqueeze(0).float())[0].numpy().reshape(9)
@@ -422,9 +422,7 @@ class Omni3Dataset(data.Dataset):
             num_targets = mask.sum()
             for j in range(num_targets):
                 cls_id = batch["cls"][mask][j].item()
-
                 bbox = batch["bboxes"][mask][j].cpu().numpy()
-                x = bbox[0] * batch["ori_shape"][i][1]  # Always in ori frame because calib is defined there
                 bbox = (xywh2xyxy(bbox) * batch["ori_shape"][i][[1, 0, 1, 0]]).tolist()
 
                 dimensions = batch["size_3d"][mask][j].cpu().numpy()
@@ -470,7 +468,7 @@ class Omni3Dataset(data.Dataset):
     def decode_preds(self, preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=True,
                      threshold=0.001):
         preds = preds.detach().cpu()
-        bbox, pred_center3d, pred_s3d, pred_rot_mat, pred_dep, pred_dep_un, scores, labels = preds.split(
+        bboxes, pred_center3d, pred_s3d, pred_rot_mat, pred_dep, pred_dep_un, scores, labels = preds.split(
             (4, 2, 3, 9, 1, 1, 1, 1), dim=-1)
 
         scores = scores.sigmoid()
@@ -480,14 +478,10 @@ class Omni3Dataset(data.Dataset):
             targets = []
             for j, pred in enumerate(img):
                 cls_id = labels[i, j].item()
-
-                bbox_ = (bbox[i, j].numpy() / np.array([ratio_pad[i][0, 0], ratio_pad[i][0, 1], ratio_pad[i][0, 0],
-                                                        ratio_pad[i]
-                                                            [0, 1]])).tolist()
-                x = (bbox_[0] + bbox_[2]) / 2
-
                 dimensions = pred_s3d[i, j].numpy()
                 dimensions += self.cls_mean_size[int(cls_id)]
+                bbox = bboxes[i, j].cpu().numpy()
+                bbox = (xywh2xyxy(bbox) / ratio_pad[i][0, [1, 0, 1, 0]]).tolist()
 
                 depth = pred_dep[i, j].numpy()
                 sigma = torch.exp(-pred_dep_un[i, j]).item()
@@ -509,21 +503,21 @@ class Omni3Dataset(data.Dataset):
                         locations = calibs[i].img_to_rect(x3d, y3d, depth).reshape(-1)
 
                 egoc_rot_mat = alloc_to_egoc_rot_matrix_torch(
-                    amodal_center=torch.tensor(locations).unsqueeze(0),
+                    amodal_center=torch.tensor(np.array([x3d, y3d])).unsqueeze(0),
                     alloc_rot_matrix=pred_rot_mat[i, j].unsqueeze(0).reshape(1, 3, 3),
                     calib=torch.tensor(calibs[i].P2).unsqueeze(0)
                 )[0].numpy()
 
                 locations = convert_location_gravity2ground(
                     gravity_center=torch.tensor(locations)[None].float(),
-                    egoc_rot_matrix=torch.tensor(egoc_rot_mat).unsqueeze(0).float(),
+                    egoc_rot_matrix=torch.tensor(egoc_rot_mat)[None].float(),
                     dim=torch.tensor(dimensions).unsqueeze(0).float())[0].numpy()
 
                 score = scores[i, j].item() * sigma
                 if score < threshold:
                     continue
 
-                targets.append([cls_id, egoc_rot_mat.ravel()] + bbox_ + dimensions.tolist() + locations.tolist() + [score])
+                targets.append([cls_id] + egoc_rot_mat.ravel().tolist() + bbox + dimensions.tolist() + locations.tolist() + [score])
 
             results[im_files[i]] = targets
         return results
