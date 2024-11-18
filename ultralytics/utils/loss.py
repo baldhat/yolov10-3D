@@ -881,8 +881,11 @@ class DDDetectionLoss:
             calibs,
             mean_sizes
         )
-        (_, target_scores, target_center_2d, target_size_2d, target_center_3d,
-         target_size_3d, target_depth, target_rot_mat) = targets
+        try:
+            (_, target_scores, target_center_2d, target_size_2d, target_center_3d,
+             target_size_3d, target_depth, target_rot_mat) = targets
+        except Exception as e:
+            return loss.sum() * batch_size, loss
 
         target_scores_sum = max(target_scores.sum(), 1)
 
