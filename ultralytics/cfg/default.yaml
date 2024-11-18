@@ -137,7 +137,7 @@ load_depth_maps: False
 
 fgdm_loss: False
 fgdm_loss_weight: 2
-fgdm_supervision: True
+fgdm_supervision: False
 fgdm_supervision_weight: 1
 
 dfl: 1.5 # (float) dfl loss gain

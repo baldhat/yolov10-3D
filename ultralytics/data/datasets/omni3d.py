@@ -28,8 +28,8 @@ class Omni3Dataset(data.Dataset):
         print("Loading Omni3D Dataset...")
         self.raw_split = json.load(open(filepath, 'r'))
         if args.overfit:
-            self.raw_split["images"] = [image for image in self.raw_split["images"] if image["id"] < 50]
-            self.raw_split["annotations"] = [anns for anns in self.raw_split["annotations"] if anns["image_id"] < 50]
+            self.raw_split["images"] = [image for image in self.raw_split["images"] if image["id"] < 703600]
+            self.raw_split["annotations"] = [anns for anns in self.raw_split["annotations"] if anns["image_id"] < 703600]
 
         self.imgs = {img['id']: img for img in sorted(self.raw_split['images'], key=lambda img: img['id'])}
         self.idx_to_img_id = {idx: img_id for idx, img_id in enumerate(self.imgs)}
@@ -372,7 +372,7 @@ class Omni3Dataset(data.Dataset):
                 pred_annos["score"].append(score)
 
             for gt in self.anns_by_img[frame_id]:
-                cls = self.cls2eval_id[self.data_id2cls[gt["category_id"]]]
+                cls = self.cls2eval_id[self.data_id2data_cls[gt["category_id"]]]
                 dim = gt["dim"]
                 location = gt["translation"]
                 ry = [gt["rotation_y"]]
@@ -447,16 +447,15 @@ class Omni3Dataset(data.Dataset):
                         locations = calibs[i].img_to_rect(x3d, y3d, depth).reshape(-1)
 
                 egoc_rot_mat = alloc_to_egoc_rot_matrix_torch(
-                    amodal_center=torch.tensor(np.array([x3d, y3d])).unsqueeze(0),
-                    alloc_rot_matrix=batch["rot_mat"][mask][j].unsqueeze(0).reshape(1, 3, 3),
-                    calib=torch.tensor(calibs[i].P2).unsqueeze(0)
+                    amodal_center=torch.tensor(np.array([x3d, y3d])).cpu().unsqueeze(0),
+                    alloc_rot_matrix=batch["rot_mat"][mask][j].cpu().unsqueeze(0).reshape(1, 3, 3),
+                    calib=torch.tensor(calibs[i].P2).unsqueeze(0).cpu()
                 )[0].numpy()
 
-
                 locations = convert_location_gravity2ground(
-                    gravity_center=torch.tensor(locations)[None].float(),
-                    egoc_rot_matrix=torch.tensor(egoc_rot_mat)[None].float(),
-                    dim=torch.tensor(dimensions).unsqueeze(0).float())[0].numpy()
+                    gravity_center=torch.tensor(locations)[None].float().cpu(),
+                    egoc_rot_matrix=torch.tensor(egoc_rot_mat)[None].float().cpu(),
+                    dim=torch.tensor(dimensions).unsqueeze(0).float().cpu())[0].numpy()
 
                 score = 1
 
@@ -503,15 +502,16 @@ class Omni3Dataset(data.Dataset):
                         locations = calibs[i].img_to_rect(x3d, y3d, depth).reshape(-1)
 
                 egoc_rot_mat = alloc_to_egoc_rot_matrix_torch(
-                    amodal_center=torch.tensor(np.array([x3d, y3d])).unsqueeze(0),
-                    alloc_rot_matrix=pred_rot_mat[i, j].unsqueeze(0).reshape(1, 3, 3),
-                    calib=torch.tensor(calibs[i].P2).unsqueeze(0)
+                    amodal_center=torch.tensor(np.array([x3d, y3d])).unsqueeze(0).cpu(),
+                    alloc_rot_matrix=pred_rot_mat[i, j].unsqueeze(0).reshape(1, 3, 3).cpu(),
+                    calib=torch.tensor(calibs[i].P2).unsqueeze(0).cpu()
                 )[0].numpy()
 
                 locations = convert_location_gravity2ground(
-                    gravity_center=torch.tensor(locations)[None].float(),
-                    egoc_rot_matrix=torch.tensor(egoc_rot_mat)[None].float(),
-                    dim=torch.tensor(dimensions).unsqueeze(0).float())[0].numpy()
+                    gravity_center=torch.tensor(locations)[None].float().cpu(),
+                    egoc_rot_matrix=torch.tensor(egoc_rot_mat)[None].float().cpu(),
+                    dim=torch.tensor(dimensions).unsqueeze(0).float().cpu()
+                )[0].numpy()
 
                 score = scores[i, j].item() * sigma
                 if score < threshold:

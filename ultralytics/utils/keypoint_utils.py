@@ -1,8 +1,5 @@
-from idlelib.pyparse import trans
-
 import torch
 import numpy as np
-
 from ultralytics.utils.ops import alloc_to_egoc_rot_matrix_torch
 
 
@@ -21,8 +18,8 @@ def get_3d_keypoints(center_3d, dep, size3d, alloc_rot_mat, calibs):
     return boxes_camera_frame
 
 def to_intrinsic_matrix(calibs):
-    p2 = torch.zeros(calibs.shape[0], calibs.shape[1], 3, 4)
-    p2[:, :, 0, 3] = calibs[:, :, 0]
+    p2 = torch.zeros(calibs.shape[0], calibs.shape[1], 3, 4, dtype=torch.float32)
+    p2[:, :, 0, 2] = calibs[:, :, 0]
     p2[:, :, 1, 2] = calibs[:, :, 1]
     p2[:, :, 0, 0] = calibs[:, :, 2]
     p2[:, :, 1, 1] = calibs[:, :, 3]
@@ -33,15 +30,15 @@ def to_intrinsic_matrix(calibs):
 
 def alloc_to_egoc_rot_mat(alloc_rot_mat, center_3d, calibs):
     return alloc_to_egoc_rot_matrix_torch(
-        amodal_center=center_3d.reshape(-1, 2),
-        alloc_rot_matrix=alloc_rot_mat.reshape(-1, 3, 3),
+        amodal_center=center_3d.flatten(end_dim=-2),
+        alloc_rot_matrix=alloc_rot_mat.clone(),
         calib=to_intrinsic_matrix(calibs).to(center_3d.device)
     ).reshape(center_3d.shape[0], center_3d.shape[1], 3, 3)
 
 def get_box_corners(size3d):
     hl, hw, hh = (size3d[..., 2].unsqueeze(-1) / 2, size3d[..., 1].unsqueeze(-1) / 2, size3d[..., 0].unsqueeze(-1) / 2)
     corners_x = torch.cat((hl, hl, -hl, -hl, hl, hl, -hl, -hl), dim=-1)
-    corners_y = torch.cat((hw, -hw, hw, -hw, hw, -hw, hw, -hw), dim=-1)
+    corners_y = torch.cat((hw, -hw, -hw, hw, hw, -hw, -hw, hw), dim=-1)
     corners_z = torch.cat((-hh, -hh, -hh, -hh, hh, hh, hh, hh), dim=-1)
     box_corners = torch.cat((corners_x.unsqueeze(-1), corners_y.unsqueeze(-1), corners_z.unsqueeze(-1)), dim=-1)
     return box_corners
@@ -127,8 +124,8 @@ def transform_to_camera(boxes_object_frame, locations, rot_mat):
     if len(rot_mat.shape) == 2:
         rot_mat = rot_mat.unsqueeze(0).unsqueeze(0).float()
         boxes_object_frame = boxes_object_frame.unsqueeze(0).unsqueeze(0).float()
-    boxes = torch.einsum("bnji,bnkj->bnki", rot_mat.double(), boxes_object_frame.double()) + locations.unsqueeze(-2).double()
-    return boxes
+    boxes = torch.einsum("bnij,bnjk->bnik", rot_mat.double(), boxes_object_frame.transpose(-2, -1).double()) + locations.unsqueeze(-1).double()
+    return boxes.transpose(-2, -1)
 
 
 def img_to_rect(center_3d, dep, calibs):

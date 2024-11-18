@@ -59,9 +59,9 @@ class Object3d(object):
                 self.w = np.array(line["dimensions"])[0]
                 self.h = np.array(line["dimensions"])[1]
                 self.l = np.array(line["dimensions"])[2]
-                omni_euler = Rotation.from_matrix(line['R_cam']).as_euler('xyz')
-                dsc_euler = omni_euler + np.asarray([np.pi / 2, 0, 0])
-                self.rot_mat = Rotation.from_euler('xyz', dsc_euler).as_matrix()
+                euler = Rotation.from_matrix(line['R_cam']).as_euler('xyz')
+                euler = euler + np.asarray([np.pi / 2, 0, 0])
+                self.rot_mat = Rotation.from_euler('xyz', euler).as_matrix()
                 self.pos = convert_location_gravity2ground(
                     torch.Tensor([line['center_cam']]).float(),
                     torch.Tensor([self.rot_mat]).float(),

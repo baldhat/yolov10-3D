@@ -106,7 +106,7 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
         batch["img"] = batch["img"].to(self.device, non_blocking=True)
         batch["img"] = (batch["img"].half() if self.args.half else batch["img"].float())
         for k in ["batch_idx", "bboxes", "cls", "depth", "center_3d", "center_2d", "size_2d", "heading_bin",
-                  "heading_res", "size_3d", "calib"]:
+                  "heading_res", "size_3d", "calib", "rot_mat"]:
             batch[k] = batch[k].to(self.device)
         self.batch = batch
         return batch

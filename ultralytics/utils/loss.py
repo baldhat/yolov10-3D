@@ -779,7 +779,7 @@ class DDDetectionLoss:
         m = model.model[-1]  # Detect() module
         self.bce = nn.BCEWithLogitsLoss(reduction="none")
         self.hyp = h
-        self.stride = m.stride  # model strides
+        self.stride = m.stride.to(device)  # model strides
         self.nc = m.nc  # number of classes
         self.no = m.no
         self.device = device
@@ -809,14 +809,16 @@ class DDDetectionLoss:
             out[..., 1:5] = xywh2xyxy(out[..., 1:5].mul_(scale_tensor))
         return out
 
+    '''
+    https://arxiv.org/pdf/1812.07035
+    '''
     def decode_rot_pred(self, rot_pred):
-        a1 = rot_pred[:, :, 0:3]
-        a2 = rot_pred[:, :, 3:6]
-        b1 = torch.nn.functional.normalize(a1, dim=2)
-        b2 = torch.nn.functional.normalize(a2 - (torch.einsum("bva,bva->ba", b1, a2).unsqueeze(1) * b1), dim=2)
-        b3 = torch.cross(b1, b2, dim=2)
-        rot_mat = torch.cat((b1, b2, b3), dim=2)
-        return rot_mat
+        a1, a2 = rot_pred[..., :3], rot_pred[..., 3:]
+        b1 = F.normalize(a1, dim=-1)
+        b2 = a2 - (b1 * a2).sum(-1, keepdim=True) * b1
+        b2 = F.normalize(b2, dim=-1)
+        b3 = torch.cross(b1, b2, dim=-1)
+        return torch.cat((b1, b2, b3), dim=-1)
 
     def bbox_decode(self, anchor_points, pred_2d, stride_tensor):
         # anchor_points:
@@ -879,11 +881,8 @@ class DDDetectionLoss:
             calibs,
             mean_sizes
         )
-        try:
-            (_, target_scores, target_center_2d, target_size_2d, target_center_3d,
-             target_size_3d, target_depth, target_rot_mat) = targets
-        except Exception as e:
-            return loss.sum() * batch_size, loss
+        (_, target_scores, target_center_2d, target_size_2d, target_center_3d,
+         target_size_3d, target_depth, target_rot_mat) = targets
 
         target_scores_sum = max(target_scores.sum(), 1)
 
@@ -976,6 +975,7 @@ class DDDetectionLoss:
         return torch.stack((depth_loss, offset3d_loss, size3d_loss, rot_loss))
 
     def debug_show_assigned_targets2d(self, batch, targets_2d, fg_mask, pred_bboxes, stride_tensor):
+        plt.clf()
         target_center_2d, target_size_2d = targets_2d
         target_bboxes = torch.cat(
             (target_center_2d - target_size_2d / 2, target_center_2d + target_size_2d / 2), dim=-1)
@@ -985,6 +985,7 @@ class DDDetectionLoss:
         std = 1
         fig, axes = plt.subplots(2, 2, figsize=(18, 12), gridspec_kw={'wspace': 0, 'hspace': 0},
                                  constrained_layout=True)
+
         for i, ax in enumerate(np.ravel(axes)):
             img = batch["img"][i].detach().cpu().numpy().transpose(1, 2, 0).copy()
             img = np.clip((img * std + mean) * 255, 0, 255).astype(np.uint8)
@@ -1013,7 +1014,7 @@ class DDDetectionLoss:
 
     def debug_show_assigned_targets3d(self, batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt):
         target_center_3d, _, _, _ = targets_3d
-        box_idxs = [0, 2, 1, 3, 0,  # base
+        box_idxs = [0, 1, 2, 3, 0,  # base
                     4, 7, 3, 7,  # right
                     6, 2, 6,  # back
                     5,  # left
@@ -1079,21 +1080,19 @@ class DDDetectionLoss:
                 bottom_corners = (anchor[:4] * SCALE)
                 x = bottom_corners[:, 0] + R
                 y = -bottom_corners[:, 2] + R
-                pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1).astype(np.int32)[[0, 1, 3, 2]]
+                pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1).astype(np.int32)
                 space = cv2.polylines(space, pts=[pts], isClosed=True, color=c)
             for assigned in anchors[fg_mask[i]].cpu().numpy():
                 bottom_corners = (assigned[:4] * SCALE)
                 x = bottom_corners[:, 0] + R
                 y = -bottom_corners[:, 2] + R
-                pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1).astype(np.int32)[
-                    [0, 1, 3, 2]]
+                pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1).astype(np.int32)
                 space = cv2.polylines(space, pts=[pts], isClosed=True, color=(0, 0, 255), thickness=2)
             for gt in gt_kps[i][mask_gt[i].bool().squeeze(-1)].cpu().numpy():
                 bottom_corners = (gt[:4] * SCALE)
                 x = bottom_corners[:, 0] + R
                 y = -bottom_corners[:, 2] + R
-                pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1).astype(np.int32)[
-                    [0, 1, 3, 2]]
+                pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1).astype(np.int32)
                 space = cv2.polylines(space, pts=[pts], isClosed=True, color=(0, 255, 0), thickness=2)
 
             ax[i].imshow(space)

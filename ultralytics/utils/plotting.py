@@ -887,7 +887,7 @@ def plot_images(
                 boxes[..., 1::2] += y
                 for j, box in enumerate(boxes.astype(np.int64).tolist()):
                     if box[2] <= box[0] or box[3] <= box[1]:
-                        print("Warning: Invalid bounding box")
+                        print(f"Warning: Invalid bounding box (xyxy): {box}")
                         continue
                     c = classes[j]
                     color = colors(c)
@@ -1204,16 +1204,6 @@ class VisObject3D():
         # return bbox in COCO format (u_top_left, v_top_left, width, height)
         return np.array([u_min, v_min, u_max - u_min, v_max - v_min])
 
-    def get_coord_axes(self) -> np.ndarray:
-        return np.array([
-            [0, 0, 0],
-            [1, 0, 0],
-            [0, 0, 0],
-            [0, 1, 0],
-            [0, 0, 0],
-            [0, 0, 1]
-        ]) + self.translation
-
 
 def get_transform(translation: np.ndarray, rotation: np.ndarray) -> np.ndarray:
     transform = np.eye(4)
@@ -1306,11 +1296,17 @@ class KITTIVisualizer():
 
             for object in result:
                 cls = object[0]
-                bbox2d = np.array(object[2:6])
-                dimensions = np.array([object[8], object[7], object[6]])
-                translation = object[9:12]
-                ry = object[12]
-                egoc_rot_matrix = self.get_egoc_rot_matrix(ry)
+                if dataset.pred_rot_mat:
+                    egoc_rot_matrix = np.array(object[1:10]).reshape(3, 3)
+                    dimensions = np.array([object[16], object[15], object[14]])
+                    translation = object[17:20]
+                    bbox2d = object[10:14]
+                else:
+                    bbox2d = np.array(object[2:6])
+                    dimensions = np.array([object[8], object[7], object[6]])
+                    translation = object[9:12]
+                    ry = object[12]
+                    egoc_rot_matrix = self.get_egoc_rot_matrix(ry)
 
                 self.plot_3d_obj(img,
                                  VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
@@ -1319,11 +1315,17 @@ class KITTIVisualizer():
 
             for object in target:
                 cls = object[0]
-                bbox2d = np.array(object[2:6])
-                dimensions = np.array([object[8], object[7], object[6]])
-                translation = object[9:12]
-                ry = object[12]
-                egoc_rot_matrix = self.get_egoc_rot_matrix(ry)
+                if dataset.pred_rot_mat:
+                    egoc_rot_matrix = np.array(object[1:10]).reshape(3, 3)
+                    dimensions = np.array([object[16], object[15], object[14]])
+                    translation = object[17:20]
+                    bbox2d = object[10:14]
+                else:
+                    bbox2d = np.array(object[2:6])
+                    dimensions = np.array([object[8], object[7], object[6]])
+                    translation = object[9:12]
+                    ry = object[12]
+                    egoc_rot_matrix = self.get_egoc_rot_matrix(ry)
 
                 self.plot_3d_obj(img,
                                  VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
@@ -1393,12 +1395,19 @@ class KITTIVisualizer():
 
             if result is not None:
                 for object in result:
-                    dimensions = np.array([object[8], object[7]]) * SCALE
-                    translation = np.array((object[9], object[11])) * SCALE
-                    translation[1] *= -1
-                    translation += R
-                    ry = object[12]
-
+                    if dataset.pred_rot_mat:
+                        egoc_rot_matrix = np.array(object[1:10]).reshape(3, 3)
+                        dimensions = np.array([object[16], object[15]]) * SCALE
+                        translation = np.array((object[17], object[19])) * SCALE
+                        translation[1] *= -1
+                        translation += R
+                        ry = -Rotation.from_matrix(egoc_rot_matrix).as_euler("xyz")[1]
+                    else:
+                        dimensions = np.array([object[8], object[7]]) * SCALE
+                        translation = np.array((object[9], object[11])) * SCALE
+                        translation[1] *= -1
+                        translation += R
+                        ry = object[12]
                     bev = np.concatenate((translation, dimensions, np.expand_dims(ry, 0)))
                     box = cv2.boxPoints((bev[:2], bev[2:4], bev[4] * 180 / np.pi)).astype(np.int32)
                     space = cv2.drawContours(space, [box], -1, (255, 0, 0), thickness=-1, lineType=cv2.LINE_AA)
@@ -1409,20 +1418,10 @@ class KITTIVisualizer():
         plt.savefig(fname, dpi=300, bbox_inches="tight")
 
     def plot_3d_obj(self, img: np.ndarray, obj: VisObject3D, camera_matrix: np.ndarray, thickness: int = 1, gt: bool = False,
-                 bbox2d=True, shift=torch.tensor(np.array([0, 0]))):
-        if shift[0] != 0:
-            print(camera_matrix)
-        camera_matrix[0, 2] -= shift[0].item()
-        camera_matrix[1, 2] -= shift[1].item()
-        if shift[0]!=0:
-            print(camera_matrix)
+                 bbox2d=True):
         box_corners = project_to_image(obj.get_box_corners(), camera_matrix).astype(np.int32)
         tip_corners = project_to_image(obj.get_tip_corners(), camera_matrix).astype(np.int32)
         color_none_bottom, color_bottom = ((0, 1, 0), (0, 0, 1)) if gt else ((1, 0, 0), (1, 0, 0))
-        box_corners[:, 0] += shift[0].item()
-        box_corners[:, 1] += shift[1].item()
-        tip_corners[:, 0] += shift[0].item()
-        tip_corners[:, 1] += shift[1].item()
         cv2.polylines(img, [box_corners[obj.box_idxs[:5]]], isClosed=False, color=color_none_bottom,
                       thickness=thickness,
                       lineType=cv2.LINE_AA)
