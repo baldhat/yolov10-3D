@@ -785,12 +785,12 @@ class DDDetectionLoss:
         device = next(model.parameters()).device  # get model device
         h = model.args  # hyperparameters
 
-        m = model.model[-1]  # Detect() module
+        self.m = model.model[-1]  # Detect() module
         self.bce = nn.BCEWithLogitsLoss(reduction="none")
         self.hyp = h
-        self.stride = m.stride  # model strides
-        self.nc = m.nc  # number of classes
-        self.no = m.no
+        self.stride = self.m.stride  # model strides
+        self.nc = self.m.nc  # number of classes
+        self.no = self.m.no
         self.device = device
         self.name = name
 
@@ -832,6 +832,10 @@ class DDDetectionLoss:
         """Calculate the sum of the loss for box, cls and dfl multiplied by batch size."""
         loss = torch.zeros(7 if self.hyp.distillation else 6, device=self.device)  # box, cls, dep, o3d, s3d, hd
         feats = preds[1] if isinstance(preds, tuple) else preds
+        for feat in feats:
+            if torch.isnan(feat).any() or not torch.isfinite(feat).all():
+                print("Nan feats detected:", feat)
+
         pred_scores, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un = (
             torch.cat([xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2).split(
             (self.nc, 2, 2, 2, 3, 24, 1, 1), 1
@@ -963,6 +967,25 @@ class DDDetectionLoss:
 
         if depth_loss != depth_loss:
             print('badNAN----------------depth_loss', depth_loss)
+            print(f"fg_mask: {fg_mask}")
+            print(f"anchor_points: {anchor_points}")
+            print(f"stride_tensor: {stride_tensor}")
+            print(f"num_targets: {num_targets}")
+            print(f"pred_depth: {pred_depth}")
+            print(f"pred_depth_un: {pred_depth_un}")
+            print(f"target_depth: {target_depth}")
+            print(f"pred_offset: {pred_offset}")
+            print(f"target_center_3d: {target_center_3d}")
+            print(f"target_offset: {target_offset}")
+            print(f"pred_size: {pred_size}")
+            print(f"target_size: {target_size}")
+            print(f"pred_heading: {pred_heading}")
+            print(f"target_bin: {target_bin}")
+            print(f"target_res: {target_res}")
+            print(f"kprefiner.heads[0].conv.weight.isnan().any(): {self.m.refiner.heads[0].conv.weight.isnan().any()}")
+            print(f"kprefiner.heads[0].conv.weight.isnan().any(): {self.m.refiner.heads[1].conv.weight.isnan().any()}")
+            print(f"kprefiner.heads[0].conv.weight.isnan().any(): {self.m.refiner.heads[2].conv.weight.isnan().any()}")
+            print(f"kprefiner.heads[0].conv.weight.isnan().any(): {self.m.refiner.heads[3].conv.weight.isnan().any()}")
         if offset3d_loss != offset3d_loss:
             print('badNAN----------------offset3d_loss', offset3d_loss)
         if size3d_loss != size3d_loss:
