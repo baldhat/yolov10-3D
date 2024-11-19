@@ -5,6 +5,9 @@ import torch.utils.data as data
 from PIL import Image
 import subprocess
 from pathlib import Path
+
+from scipy.spatial.transform import Rotation
+
 from ultralytics.utils.ops import *
 
 from collections import defaultdict
@@ -361,28 +364,28 @@ class Omni3Dataset(data.Dataset):
 
             for pred in results[key]:
                 cls = self.cls2eval_id[self.train_id2cls[int(pred[0])]]
-                dim = pred[6:9][::-1] # h,w,l -> l,w,h
-                #dim = pred[6:9] # has to be length, width, height according to https://github.com/waymo-research/waymo-open-dataset/blob/master/src/waymo_open_dataset/metrics/python/detection_metrics.py
-                location = pred[9:12]
-                ry = [pred[12]]
-                score = float(pred[13])
+                egoc_rot_matrix = np.array(pred[1:10]).reshape(3, 3)
+                dim = [pred[16], pred[15], pred[14]] # h,w,l -> l,w,h
+                location = pred[17:20]
+                ry = [-Rotation.from_matrix(egoc_rot_matrix).as_euler("xyz")[1]]
+                score = float(pred[-1])
                 pred_annos["bbox"].append(location + dim + ry)
                 pred_annos["type"].append(cls)
                 pred_annos["frame_id"].append(frame_id)
                 pred_annos["score"].append(score)
 
             for gt in self.anns_by_img[frame_id]:
-                cls = self.cls2eval_id[self.data_id2data_cls[gt["category_id"]]]
-                dim = gt["dim"]
-                location = gt["translation"]
-                ry = [gt["rotation_y"]]
+                cls = self.data_cls2data_id[gt["category"]]
+                dim = gt["dimensions"]
+                location = gt["center_cam"]
+                ry = [-Rotation.from_matrix(gt['R_cam']).as_euler('xyz')[1]]
                 score = "1.0"
-                gt_annos["bbox"].append(location + dim[::-1] + ry) # h,w,l -> l,w,h
+                gt_annos["bbox"].append(location + [dim[2], dim[0], dim[1]] + ry) # h,w,l -> l,w,h
                 #gt_annos["bbox"].append(location + dim + ry)  FIXME
                 gt_annos["type"].append(cls)
                 gt_annos["frame_id"].append(frame_id)
                 gt_annos["score"].append(score)
-                gt_annos['diff'].append((2 if (gt['num_lidar'] <= 5 or gt['difficulty'] == 2) else 1))
+                gt_annos['diff'].append(2)
 
         return pred_annos, gt_annos
 
@@ -407,9 +410,9 @@ class Omni3Dataset(data.Dataset):
         return metric3d
 
     def decode_preds_eval(self, preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=True,
-                          threshold=0.001):
+                          threshold=0.001, ground_center=False):
         return self.decode_preds(preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=undo_augment,
-                                 threshold=threshold)
+                                 threshold=threshold, ground_center=False)
 
     def decode_batch_eval(self, batch, calibs, undo_augment=True):
         return self.decode_batch(batch, calibs, undo_augment=undo_augment)
@@ -465,7 +468,7 @@ class Omni3Dataset(data.Dataset):
         return results
 
     def decode_preds(self, preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=True,
-                     threshold=0.001):
+                     threshold=0.001, ground_center=True):
         preds = preds.detach().cpu()
         bboxes, pred_center3d, pred_s3d, pred_rot_mat, pred_dep, pred_dep_un, scores, labels = preds.split(
             (4, 2, 3, 9, 1, 1, 1, 1), dim=-1)
@@ -507,11 +510,12 @@ class Omni3Dataset(data.Dataset):
                     calib=torch.tensor(calibs[i].P2).unsqueeze(0).cpu()
                 )[0].numpy()
 
-                locations = convert_location_gravity2ground(
-                    gravity_center=torch.tensor(locations)[None].float().cpu(),
-                    egoc_rot_matrix=torch.tensor(egoc_rot_mat)[None].float().cpu(),
-                    dim=torch.tensor(dimensions).unsqueeze(0).float().cpu()
-                )[0].numpy()
+                if ground_center:
+                    locations = convert_location_gravity2ground(
+                        gravity_center=torch.tensor(locations)[None].float().cpu(),
+                        egoc_rot_matrix=torch.tensor(egoc_rot_mat)[None].float().cpu(),
+                        dim=torch.tensor(dimensions).unsqueeze(0).float().cpu()
+                    )[0].numpy()
 
                 score = scores[i, j].item() * sigma
                 if score < threshold:
