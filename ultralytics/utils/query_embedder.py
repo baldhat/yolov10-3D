@@ -11,9 +11,7 @@ class QueryEmbedder(nn.Module):
         )
         self.joint_part = nn.Sequential(
             nn.SiLU(),
-            nn.Conv2d(len(in_channels) * 64, 256, 1, 1,(0,0)),
-            nn.SiLU(),
-            nn.BatchNorm2d(256)
+            nn.Conv2d(len(in_channels) * 64, 256, 1, 1,(0,0))
         )
 
     def forward(self, x):
