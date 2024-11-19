@@ -982,10 +982,10 @@ class DDDetectionLoss:
             print(f"pred_heading: {pred_heading}")
             print(f"target_bin: {target_bin}")
             print(f"target_res: {target_res}")
-            print(f"kprefiner.heads[0].conv.weight.isnan().any(): {self.m.refiner.heads[0].conv.weight.isnan().any()}")
-            print(f"kprefiner.heads[0].conv.weight.isnan().any(): {self.m.refiner.heads[1].conv.weight.isnan().any()}")
-            print(f"kprefiner.heads[0].conv.weight.isnan().any(): {self.m.refiner.heads[2].conv.weight.isnan().any()}")
-            print(f"kprefiner.heads[0].conv.weight.isnan().any(): {self.m.refiner.heads[3].conv.weight.isnan().any()}")
+            print(f"kprefiner.heads[0][0].conv.weight.isnan().any(): {self.m.refiner.heads[0][0].conv.weight.isnan().any()}")
+            print(f"kprefiner.heads[0].conv.weight.isnan().any(): {self.m.refiner.heads[1][0].conv.weight.isnan().any()}")
+            print(f"kprefiner.heads[0].conv.weight.isnan().any(): {self.m.refiner.heads[2][0].conv.weight.isnan().any()}")
+            print(f"kprefiner.heads[0].conv.weight.isnan().any(): {self.m.refiner.heads[3][0].conv.weight.isnan().any()}")
         if offset3d_loss != offset3d_loss:
             print('badNAN----------------offset3d_loss', offset3d_loss)
         if size3d_loss != size3d_loss:

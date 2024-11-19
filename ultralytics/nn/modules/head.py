@@ -737,7 +737,7 @@ class v10Detect3d(nn.Module):
             y.append(torch.cat(list(outputs.values()), dim=1))
             head_features.append(list(head_feats.values()))
         # Refinement
-        refined_preds = self.refine_preds([yi.detach() for yi in y], [xi.detach() for xi in x], head_features)
+        refined_preds = self.refine_preds([yi.detach() for yi in y], [xi for xi in x], head_features)
         return y, refined_preds
 
     def forward_feat(self, x, heads):
@@ -757,7 +757,7 @@ class v10Detect3d(nn.Module):
             head_features.append(list(ems.values()))
 
         # Refinement
-        refined_preds = self.refine_preds([yi.detach() for yi in y], [xi.detach() for xi in x], head_features)
+        refined_preds = self.refine_preds([yi.detach() for yi in y], [xi for xi in x], head_features)
         return y, refined_preds, depth_features
 
     def single_head_forward(self, head, features):
