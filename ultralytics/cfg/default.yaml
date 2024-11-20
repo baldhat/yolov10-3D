@@ -109,7 +109,7 @@ depth: 1 # (float) depth loss gain
 offset3d: 10 # (float) 3d pixel offset loss gain
 size3d: 1 # (float) 3d size loss gain
 heading: 1 # (float) 3d heading loss gain
-refine: 0.5
+refine: 1.0
 # Task aligned learning
 tal_topk: 8 # (int) number of assignments per groundtruth for o2m head
 tal_alpha: 0.5 # class assignemnt score exponent

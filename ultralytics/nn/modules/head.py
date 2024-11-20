@@ -638,7 +638,7 @@ class v10Detect3d(nn.Module):
 
         self.keypoint_feature_extractor = KFE(ch)
         self.query_embedder = QueryEmbedder([channels[head_name + "_c"] if not self.half_channels else channels[head_name + "_c"] // 2 for head_name in self.head_names])
-        self.kp_embedder = torch.nn.Embedding(8, 256)
+        self.kp_embedder = torch.nn.Embedding(9, 256)
         self.refiner = KeypointRefiner()
 
     def build_head(self, in_channels, mid_channels, output_channels):
@@ -864,7 +864,7 @@ class v10Detect3d(nn.Module):
     def get_kp_embeddings(self, kp_feats):
         embeddings = []
         for scale in kp_feats:
-            embedding = self.kp_embedder(torch.arange(8, device=scale.device).unsqueeze(0))
+            embedding = self.kp_embedder(torch.arange(9, device=scale.device).unsqueeze(0))
             embeddings.append(embedding.transpose(1, 2).unsqueeze(2).unsqueeze(2).repeat(scale.shape[0], 1, scale.shape[2], scale.shape[3], 1))
         return embeddings
 
