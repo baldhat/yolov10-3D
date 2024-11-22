@@ -25,6 +25,7 @@ class Run:
         self.results = self.get_results()
         self.arch = self.get_architecture()
         self.model = model
+        self.gflops = 0
 
     def toProperties(self, current_properties):
         dict = {}
@@ -106,14 +107,14 @@ class Run:
             "number": float(np.max(self.results["metrics/3D"]))
         }
 
-    @staticmethod
-    def get_flops_(model, imgsz=[1280, 384]):
+    def get_flops_(self, model, imgsz=[1280, 384]):
         try:
             import torch
             from copy import deepcopy
             import thop
             p = next(model.parameters())
             im = torch.empty((1, p.shape[1], *imgsz), device=p.device)  # input image in BCHW format
+            model.eval()
             flops = thop.profile(deepcopy(model), inputs=[im], verbose=False)[0] / 1e9 * 2  # imgsz GFLOPs
             return flops
         except Exception as e:
