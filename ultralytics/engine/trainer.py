@@ -405,6 +405,8 @@ class BaseTrainer:
                     )
 
                 # Backward
+                for p in self.model.parameters():
+                    p.register_hook(lambda grad: torch.clamp(grad, -10, 10))
                 self.scaler.scale(self.loss).backward()
 
                 # Optimize - https://pytorch.org/docs/master/notes/amp_examples.html
