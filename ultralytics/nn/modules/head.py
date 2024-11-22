@@ -701,7 +701,7 @@ class v10Detect3d(nn.Module):
             topk_indices[b, :, 0], topk_indices[b, :, 1] = self.unravel_index(topk_ind, cls_scores_max[b].shape)
         return topk_indices
 
-    def inference_forward_feat(self, x, heads):
+    def inference_forward_feat(self, x, heads, calibs, mean_sizes):
         y = []
         head_features = []
         batch_sz = x[0].shape[0]
@@ -717,7 +717,7 @@ class v10Detect3d(nn.Module):
             for j, module in enumerate(heads[1:]):
                 for layer in module[i]:
                     if isinstance(layer, Conv):
-                        layer.conv.padding = 0
+                        layer.conv.padding = (0,)
                 out_, feats, _ = self.single_head_forward(module[i], inputs)
 
                 output_shape = (x[i].shape[0], out_.shape[1], x[i].shape[2], x[i].shape[3])
@@ -737,10 +737,10 @@ class v10Detect3d(nn.Module):
             y.append(torch.cat(list(outputs.values()), dim=1))
             head_features.append(list(head_feats.values()))
         # Refinement
-        refined_preds = self.refine_preds([yi.detach() for yi in y], [xi for xi in x], head_features)
+        refined_preds = self.refine_preds([yi.detach() for yi in y], [xi for xi in x], head_features, calibs, mean_sizes)
         return y, refined_preds
 
-    def forward_feat(self, x, heads):
+    def forward_feat(self, x, heads, calibs, mean_sizes):
         y = []
         depth_features = []
         head_features = []
@@ -757,7 +757,7 @@ class v10Detect3d(nn.Module):
             head_features.append(list(ems.values()))
 
         # Refinement
-        refined_preds = self.refine_preds([yi.detach() for yi in y], [xi for xi in x], head_features)
+        refined_preds = self.refine_preds([yi.detach() for yi in y], [xi for xi in x], head_features, calibs, mean_sizes)
         return y, refined_preds, depth_features
 
     def single_head_forward(self, head, features):
@@ -814,10 +814,12 @@ class v10Detect3d(nn.Module):
         y = preds
         return y if self.export else (y, x)
 
-    def forward(self, x):
+    def forward(self, x, batch=None):
+        if batch is None:
+            batch = {"calib": None, "mean_sizes": None}
         if self.training:
-            one2one,  refined_o2o, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
-            one2many, refined_o2m, o2m_embs = self.forward_feat(x, self.o2m_heads)
+            one2one,  refined_o2o, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads, batch["calib"], batch["mean_sizes"])
+            one2many, refined_o2m, o2m_embs = self.forward_feat(x, self.o2m_heads, batch["calib"], batch["mean_sizes"])
 
             if hasattr(self, "fgdm_pred") and self.fgdm_pred:
                 depth_maps = self.fgdm_predictor(x, return_embeddings=True)
@@ -828,7 +830,8 @@ class v10Detect3d(nn.Module):
                     "one2one": one2one, "refined_o2o": refined_o2o, "o2o_embs": o2o_embs,
                     "depth_maps": depth_maps}
         else:
-            (one2one, refined_o2o), o2o_embs = self.inference_forward_feat([xi.detach() for xi in x], self.o2o_heads), None
+            (one2one, refined_o2o), o2o_embs = self.inference_forward_feat([xi.detach() for xi in x],
+                                                   self.o2o_heads, batch["calib"], batch["mean_sizes"]), None
             # self.get_head_ranks()
             one2one = self.inference(one2one)
             refined_o2o = self.inference(refined_o2o)
@@ -841,7 +844,7 @@ class v10Detect3d(nn.Module):
                 return torch.cat([boxes, scores.unsqueeze(-1), labels.unsqueeze(-1).to(boxes.dtype)], dim=-1)
 
 
-    def refine_preds(self, output, backbone_features, head_features):
+    def refine_preds(self, output, backbone_features, head_features, calibs, mean_sizes):
         cls, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un = (
             torch.cat([xi.view(output[0].shape[0], self.no, -1) for xi in output], 2).split(
                 (self.nc, 2, 2, 2, 3, 24, 1, 1), 1
@@ -849,7 +852,7 @@ class v10Detect3d(nn.Module):
         self.anchors, self.strides = (x.transpose(0, 1) for x in make_anchors(output, self.stride, 0.5))
         preds = self.decode(cls, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un)
 
-        kp_feats = self.extract_kp_feats(preds, backbone_features)
+        kp_feats = self.extract_kp_feats(preds, backbone_features, calibs, mean_sizes)
         queries = self.query_embedder(head_features)
         embeddings = self.get_kp_embeddings(kp_feats)
 
@@ -868,15 +871,17 @@ class v10Detect3d(nn.Module):
             embeddings.append(embedding.transpose(1, 2).unsqueeze(2).unsqueeze(2).repeat(scale.shape[0], 1, scale.shape[2], scale.shape[3], 1))
         return embeddings
 
-    def extract_kp_feats(self, preds, backbone_features):
-        #FIXME!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        calib = torch.tensor(np.array([ 6.5179e+02,  1.7700e+02,  7.4361e+02,  7.3885e+02,  6.4071e-02, -3.0708e-04]), dtype=torch.float64)
-        calibs = calib.unsqueeze(0).repeat(backbone_features[0].shape[0], 1).to(backbone_features[0].device)
-        mean_sizes = torch.tensor(np.array([
-            [1.52563191462, 1.62856739989, 3.88311640418],
-            [1.76255119, 0.66068622, 0.84422524],
-            [1.73698127, 0.59706367, 1.76282397]]))
-        #FIXME!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    def extract_kp_feats(self, preds, backbone_features, calibs, mean_sizes):
+        if calibs is None:
+            print("Warning: Using invalid calibration")
+            calib = torch.tensor(np.array([ 6.5179e+02,  1.7700e+02,  7.4361e+02,  7.3885e+02,  6.4071e-02, -3.0708e-04]), dtype=torch.float64)
+            calibs = calib.unsqueeze(0).repeat(backbone_features[0].shape[0], 1).to(backbone_features[0].device)
+        if mean_sizes is None:
+            print("Warning: Using invalid mean_sizes")
+            mean_sizes = torch.tensor(np.array([
+                [1.52563191462, 1.62856739989, 3.88311640418],
+                [1.76255119, 0.66068622, 0.84422524],
+                [1.73698127, 0.59706367, 1.76282397]]))
         return self.keypoint_feature_extractor.forward(backbone_features, preds, calibs, mean_sizes,
                                                            stride_tensor=self.strides,
                                                            strides=self.stride)

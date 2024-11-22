@@ -94,7 +94,7 @@ class BaseModel(nn.Module):
             return self.loss(x, *args, **kwargs)
         return self.predict(x, *args, **kwargs)
 
-    def predict(self, x, profile=False, visualize=False, augment=False, embed=None):
+    def predict(self, x, profile=False, visualize=False, augment=False, embed=None, batch=None):
         """
         Perform a forward pass through the network.
 
@@ -110,9 +110,9 @@ class BaseModel(nn.Module):
         """
         if augment:
             return self._predict_augment(x)
-        return self._predict_once(x, profile, visualize, embed)
+        return self._predict_once(x, profile, visualize, embed, batch=batch)
 
-    def _predict_once(self, x, profile=False, visualize=False, embed=None):
+    def _predict_once(self, x, profile=False, visualize=False, embed=None, batch=None):
         """
         Perform a forward pass through the network.
 
@@ -130,8 +130,11 @@ class BaseModel(nn.Module):
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
             if profile:
-                self._profile_one_layer(m, x, dt)
-            x = m(x)  # run
+                self._profile_one_layer(m, x, dt, batch)
+            if isinstance(m, v10Detect3d):
+                x = m(x, batch=batch)
+            else:
+                x = m(x)  # run
             y.append(x if m.i in self.save else None)  # save output
             if visualize:
                 feature_visualization(x, m.type, m.i, save_dir=visualize)
@@ -149,7 +152,7 @@ class BaseModel(nn.Module):
         )
         return self._predict_once(x)
 
-    def _profile_one_layer(self, m, x, dt):
+    def _profile_one_layer(self, m, x, dt, batch=None):
         """
         Profile the computation time and FLOPs of a single layer of the model on a given input. Appends the results to
         the provided list.
@@ -272,7 +275,7 @@ class BaseModel(nn.Module):
         if not hasattr(self, "criterion"):
             self.criterion = self.init_criterion()
 
-        preds = self.forward(batch["img"]) if preds is None else preds
+        preds = self.forward(batch["img"], batch=batch) if preds is None else preds
         return self.criterion(preds, batch)
 
     def init_criterion(self):
