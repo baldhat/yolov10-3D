@@ -36,8 +36,9 @@ class KeypointRefiner(nn.Module):
 
     def forward_neck(self, embedding, keypoint, query):
         q = self.pre_norm1(query.unsqueeze(-1).reshape(-1, 1, query.shape[1]))
-        inp = (embedding + keypoint).reshape(-1, embedding.shape[4], embedding.shape[1])
-        k = self.pre_norm2(inp)
+        inp = keypoint.reshape(-1, embedding.shape[4], embedding.shape[1])
+        emb = embedding.reshape(-1, embedding.shape[4], embedding.shape[1])
+        k = self.pre_norm2(inp + emb)
         v = self.pre_norm3(inp)
         attn_output, attn_weights = self.attention_layer(q, k, v)
         x1 = self.norm1(attn_output + q)

@@ -124,8 +124,8 @@ def get_P2s(calibs):
     P2s[:, 1, 2] = calibs[:, 1]
     P2s[:, 0, 0] = calibs[:, 2]
     P2s[:, 1, 1] = calibs[:, 3]
-    P2s[:, 0, 3] = calibs[:, 4]
-    P2s[:, 1, 3] = calibs[:, 5]
+    P2s[:, 0, 3] = calibs[:, 4] * (-calibs[:, 2])
+    P2s[:, 1, 3] = calibs[:, 5] * (-calibs[:, 3])
     P2s[:, 2, 2] = 1
     return P2s
 
