@@ -36,8 +36,7 @@ class KFE(nn.Module):
     def bilinear_interpolation(self, feature_maps, kps_2d):
         kps_2d[..., 0] = torch.clamp((kps_2d[..., 0] / (feature_maps.shape[3] / 2)) - 1, -1, 1)
         kps_2d[..., 1] = torch.clamp((kps_2d[..., 1] / (feature_maps.shape[2] / 2)) - 1, -1, 1)
-        features = nn.functional.grid_sample(feature_maps.float(), kps_2d.float(), mode='nearest', padding_mode="border")
-        return features
+        return nn.functional.grid_sample(feature_maps.float(), kps_2d.float(), mode='bilinear', padding_mode="border")
 
     def vis_keypoints(self, kps_2d):
         plt.clf()

@@ -1240,7 +1240,7 @@ class KITTIVisualizer():
                                figsize=(18, 12), gridspec_kw = {'wspace':0, 'hspace':0}, constrained_layout=True)
         ax = ax.ravel()
 
-        for i, (image, calib, (img_id, result), info) in enumerate(zip(images, calibs, targets.items(), infos)):
+        for i, (image, calib, result, info) in enumerate(zip(images, calibs, targets.values(), infos)):
             if i >= self.max_imgs:
                 break
             img = image.cpu().numpy().transpose(1, 2, 0).copy()

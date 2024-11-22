@@ -22,7 +22,7 @@ class KeypointRefiner(nn.Module):
             nn.Sequential( nn.Conv2d(256, 64, kernel_size=1), nn.SiLU(), nn.Conv2d(64, 1, kernel_size=1)),   # depth
             nn.Sequential( nn.Conv2d(256, 64, kernel_size=1), nn.SiLU(), nn.Conv2d(64, 1, kernel_size=1)),   # depth uncertainty
         ])
-        self.heads[0][-1].bias.data.fill_(0.0)
+        self.heads[0][-1].bias.data.fill_(0.00001)
         nn.init.normal_(self.heads[0][-1].weight, std=0.05)
         self.heads[2][-1].bias.data.fill_(35)
         nn.init.uniform_(self.heads[2][-1].weight, a=-3.5, b=3.5)

@@ -67,7 +67,7 @@ retina_masks: False # (bool) use high-resolution segmentation masks
 embed: # (list[int], optional) return feature vectors/embeddings from given layers
 use_o2m_depth: False
 use_dino_depth: False
-use_refine: False
+use_refine: True
 dino_path: /home/stud/mijo/experiments/results/dino_mask_fix_noMixup/dino/best.pt
 
 # Visualize settings ---------------------------------------------------------------------------------------------------
@@ -109,7 +109,7 @@ depth: 1 # (float) depth loss gain
 offset3d: 10 # (float) 3d pixel offset loss gain
 size3d: 1 # (float) 3d size loss gain
 heading: 1 # (float) 3d heading loss gain
-refine: 1.0
+refine: 1
 # Task aligned learning
 tal_topk: 8 # (int) number of assignments per groundtruth for o2m head
 tal_alpha: 0.5 # class assignemnt score exponent

@@ -774,8 +774,9 @@ class DetectLoss3d:
                 else:
                     return loss_one2many[0] + loss_one2one[0] + fgdm_loss, torch.cat((loss_one2many[1], loss_one2one[1], fgdm_loss.unsqueeze(0)))
             else:
-                return (loss_one2many[0] + loss_one2one[0] + loss_o2o_ref[0] * self.model.args.refine + loss_o2m_ref[0] * self.model.args.refine,
-                        torch.cat((loss_one2many[1], loss_one2one[1], loss_o2o_ref[1] * self.model.args.refine, loss_o2m_ref[1] * self.model.args.refine)))
+                weight = self.model.args.refine
+                return (loss_one2many[0] + loss_one2one[0] + torch.sqrt(loss_o2o_ref[0] * weight) + torch.sqrt(loss_o2m_ref[0] * weight),
+                        torch.cat((loss_one2many[1], loss_one2one[1], torch.sqrt(loss_o2o_ref[1] * weight), torch.sqrt(loss_o2m_ref[1] * weight))))
         else:
             return torch.zeros(1), loss_one2one[1]
 
