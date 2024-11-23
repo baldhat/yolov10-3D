@@ -44,6 +44,20 @@ def get_box_corners(size3d):
     return box_corners
 
 
+def get_omni_eval_corners(size3d):
+    hl, hw, hh = (size3d[..., 2].unsqueeze(-1) / 2, size3d[..., 1].unsqueeze(-1) / 2, size3d[..., 0].unsqueeze(-1) / 2)
+    return np.asarray([
+        [-hl, -hw, hh],
+        [hl, -hw, hh],
+        [hl, -hw, -hh],
+        [-hl, -hw, -hh],
+        [-hl, hw, hh],
+        [hl, hw, hh],
+        [hl, hw, -hh],
+        [-hl, hw, -hh]
+    ])
+
+
 def get_roty(center_3d, heading_bin, heading_res, calibs):
     if heading_bin.shape[-1] > 1:
         heading_bin = heading_bin.argmax(dim=-1)

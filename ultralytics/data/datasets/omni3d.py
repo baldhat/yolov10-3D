@@ -8,6 +8,7 @@ from pathlib import Path
 
 from scipy.spatial.transform import Rotation
 
+from ultralytics.utils.keypoint_utils import *
 from ultralytics.utils.ops import *
 
 from collections import defaultdict
@@ -31,8 +32,8 @@ class Omni3Dataset(data.Dataset):
         print("Loading Omni3D Dataset...")
         self.raw_split = json.load(open(filepath, 'r'))
         if args.overfit:
-            self.raw_split["images"] = [image for image in self.raw_split["images"] if image["id"] < 703600]
-            self.raw_split["annotations"] = [anns for anns in self.raw_split["annotations"] if anns["image_id"] < 703600]
+            self.raw_split["images"] = [image for image in self.raw_split["images"] if image["id"] < 700050]
+            self.raw_split["annotations"] = [anns for anns in self.raw_split["annotations"] if anns["image_id"] < 700050]
 
         self.imgs = {img['id']: img for img in sorted(self.raw_split['images'], key=lambda img: img['id'])}
         self.idx_to_img_id = {idx: img_id for idx, img_id in enumerate(self.imgs)}
@@ -355,54 +356,64 @@ class Omni3Dataset(data.Dataset):
         valid = True
         return valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res, _rot_mat
 
+    @staticmethod
+    def get_3d_box(location, rotation, size3d):
+        boxes_object_frame = get_omni_eval_corners(size3d)
+        return transform_to_camera(boxes_object_frame, location, rotation)
+
     def get_preds_and_gts(self, results):
-        pred_annos = {"bbox": [], "type": [], 'frame_id': [], "score": []}
-        gt_annos = {"bbox": [], "type": [], 'frame_id': [], "score": [], "diff": []}
+        pred_annos = []
 
         for (key, value) in results.items():
             frame_id = int(key.split(".")[0])
+            frame_pred = {
+                "image_id": frame_id,
+                "K": self.imgs[frame_id]["K"],
+                "width": self.imgs[frame_id]["width"],
+                "height": self.imgs[frame_id]["height"],
+                "instances": []}
 
-            for pred in results[key]:
-                cls = self.cls2eval_id[self.train_id2cls[int(pred[0])]]
-                egoc_rot_matrix = np.array(pred[1:10]).reshape(3, 3)
-                dim = [pred[16], pred[15], pred[14]] # h,w,l -> l,w,h
-                location = pred[17:20]
-                ry = [-Rotation.from_matrix(egoc_rot_matrix).as_euler("xyz")[1]]
-                score = float(pred[-1])
-                pred_annos["bbox"].append(location + dim + ry)
-                pred_annos["type"].append(cls)
-                pred_annos["frame_id"].append(frame_id)
-                pred_annos["score"].append(score)
+            for pred in value:
+                pred_instance = {}
 
-            for gt in self.anns_by_img[frame_id]:
-                cls = self.data_cls2data_id[gt["category"]]
-                dim = gt["dimensions"]
-                location = gt["center_cam"]
-                ry = [-Rotation.from_matrix(gt['R_cam']).as_euler('xyz')[1]]
-                score = "1.0"
-                gt_annos["bbox"].append(location + [dim[2], dim[0], dim[1]] + ry) # h,w,l -> l,w,h
-                #gt_annos["bbox"].append(location + dim + ry)  FIXME
-                gt_annos["type"].append(cls)
-                gt_annos["frame_id"].append(frame_id)
-                gt_annos["score"].append(score)
-                gt_annos['diff'].append(2)
+                location = pred[17:17+3]
+                rotation = np.array(pred[1:10]).reshape(3, 3)
+                dsc_euler = Rotation.from_matrix(rotation).as_euler('xyz')
+                omni_euler = dsc_euler - np.asarray([np.pi / 2, 0, 0])
+                omni_rot_matrix = Rotation.from_euler('xyz', omni_euler).as_matrix()
+                size3d = pred[14:14+3] # h,w,l
+                box2dxyxy = np.clip(np.array(pred[10:10+4]), 0, np.array([frame_pred["width"], frame_pred["height"], frame_pred["width"], frame_pred["height"]]))
 
-        return pred_annos, gt_annos
+                pred_instance['image_id'] = frame_id
+                pred_instance['category_id'] = self.cls2eval_id[self.train_id2cls[int(pred[0])]]
+                pred_instance['bbox'] = xyxy2ltwh(box2dxyxy).tolist() #x0y0wh absolute
+                pred_instance['score'] = float(pred[-1])
+                pred_instance['depth'] = location[-1]
+                pred_instance['bbox3D'] = self.get_3d_box(torch.tensor(location), torch.tensor(rotation), torch.tensor(size3d))[0, 0].numpy().tolist()
+                pred_instance['center_cam'] = location
+                pred_instance['center_2D'] = [pred_instance['bbox'][0] + pred_instance['bbox'][2] / 2, pred_instance['bbox'][1] + pred_instance['bbox'][3] / 2]
+                pred_instance['dimensions'] = size3d[::-1] # Needs: w, h, l
+                pred_instance['pose'] = omni_rot_matrix.tolist()
+
+                frame_pred["instances"].append(pred_instance)
+            pred_annos.append(frame_pred)
+
+        return pred_annos
 
     def get_stats(self, results, save_dir):
-        pred_annos, gt_annos = self.get_preds_and_gts(results)
+        pred_annos = self.get_preds_and_gts(results)
 
-        file_path = os.path.join(save_dir, "eval_results.json")
-        with open(file_path, "w") as f:
-            json.dump({
-                "pred": pred_annos,
-                "gt": gt_annos
-            }, f)
+        file_path = os.path.join(save_dir, "eval_results.pth")
+        torch.save(pred_annos, file_path)
 
-        python = os.path.join(Path.home(), "anaconda3/envs/py36_waymo_tf/bin/python")
+        python = os.path.join(Path.home(), "anaconda3/envs/cubercnn/bin/python")
         if not os.path.exists(python):
-            python = os.path.join(Path.home(), "miniconda3/envs/py36_waymo_tf/bin/python")
-        command = f"{python} -u ultralytics/data/datasets/waymo_eval.py --iou 0.7 --pred {file_path}"
+            python = os.path.join(Path.home(), "miniconda3/envs/cubercnn/bin/python")
+        command = (f"{python} -u ultralytics/data/datasets/omni_eval/omni_eval.py "
+                   f"--dataset_names [cdrone_val] "
+                   f"--pred_ann_files [{file_path}] "
+                   f"--gt_ann_files [/home/stud/mijo/storage/group/deepscenario/CDrone/annotations/val_omni.json] "
+                   f"--log_dir {save_dir}/logs")
         lines = subprocess.check_output(command, shell= True, text= True, env={})
 
         print(lines)
