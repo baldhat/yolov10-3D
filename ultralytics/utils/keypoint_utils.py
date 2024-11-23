@@ -45,8 +45,8 @@ def get_box_corners(size3d):
 
 
 def get_omni_eval_corners(size3d):
-    hl, hw, hh = (size3d[..., 2].unsqueeze(-1) / 2, size3d[..., 1].unsqueeze(-1) / 2, size3d[..., 0].unsqueeze(-1) / 2)
-    return np.asarray([
+    hl, hw, hh = (size3d[..., 2] / 2, size3d[..., 1] / 2, size3d[..., 0] / 2)
+    return torch.tensor([
         [-hl, -hw, hh],
         [hl, -hw, hh],
         [hl, -hw, -hh],
