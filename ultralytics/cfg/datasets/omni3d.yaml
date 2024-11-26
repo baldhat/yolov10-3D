@@ -2,7 +2,7 @@
 path: ../datasets/waymo
 
 train: waymo_train_full.json
-val: waymo_train_full.json
+val: waymo_val_full.json
 test: test.json
 
 # Classes
