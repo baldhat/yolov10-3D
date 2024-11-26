@@ -7,12 +7,11 @@ from ultralytics.nn.modules import Conv
 class KeypointRefiner(nn.Module):
     def __init__(self):
         super(KeypointRefiner, self).__init__()
-        self.attention_layer = nn.MultiheadAttention(256, 8, batch_first=True)
+        self.attention_layer = nn.MultiheadAttention(256, 1, batch_first=True)
         self.norm1 = nn.LayerNorm(256)
         self.norm2 = nn.LayerNorm(256)
         self.pre_norm1 = nn.LayerNorm(256)
         self.pre_norm2 = nn.LayerNorm(256)
-        self.pre_norm3 = nn.LayerNorm(256)
         self.lin1 = nn.Linear(256, 512)
         self.lin2 = nn.Linear(512, 256)
         self.dropout = nn.Dropout(0.1)
@@ -35,15 +34,17 @@ class KeypointRefiner(nn.Module):
         return output
 
     def forward_neck(self, embedding, keypoint, query):
-        q = self.pre_norm1(query.unsqueeze(-1).reshape(-1, 1, query.shape[1]))
-        inp = keypoint.reshape(-1, embedding.shape[4], embedding.shape[1])
-        emb = embedding.reshape(-1, embedding.shape[4], embedding.shape[1])
-        k = self.pre_norm2(inp + emb)
-        v = self.pre_norm3(inp)
+        bs, feat, h, w, kps = embedding.shape
+        q = self.pre_norm1(query.reshape(bs, feat, -1).transpose(1, 2).reshape(-1, feat).unsqueeze(1))
+        inp = self.pre_norm2(keypoint.reshape(bs, feat, -1, kps).transpose(1, 2).reshape(-1, feat, kps).transpose(1, 2))
+        emb = embedding.reshape(bs, feat, -1, kps).transpose(1, 2).reshape(-1, feat, kps).transpose(1, 2)
+        k = inp + emb
+        v = inp + emb#
         attn_output, attn_weights = self.attention_layer(q, k, v)
-        x1 = self.norm1(attn_output + q)
+        x1 = self.norm1(attn_output.squeeze(1) + q.squeeze(1))
         x2 = silu(self.lin2(self.dropout(silu(self.lin1(x1))))) + x1
-        return self.norm2(x2).reshape(query.shape)
+        x3 = self.norm2(x2)
+        return x3.reshape(bs, -1, feat).transpose(1, 2).reshape(bs, feat, h, w)
 
     def forward_heads(self, x):
         output = []

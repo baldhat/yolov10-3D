@@ -638,7 +638,7 @@ class v10Detect3d(nn.Module):
 
         self.keypoint_feature_extractor = KFE(ch)
         self.query_embedder = QueryEmbedder([channels[head_name + "_c"] if not self.half_channels else channels[head_name + "_c"] // 2 for head_name in self.head_names])
-        self.kp_embedder = torch.nn.Embedding(9, 256)
+        self.kp_embedder = torch.nn.Embedding(9, 256) # TODO: Learn mapping of 3d position to embedding space?
         self.refiner = KeypointRefiner()
 
     def build_head(self, in_channels, mid_channels, output_channels):

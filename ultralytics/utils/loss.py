@@ -776,7 +776,7 @@ class DetectLoss3d:
             else:
                 weight = self.model.args.refine
                 return (loss_one2many[0] + loss_one2one[0] + loss_o2o_ref[0] * weight + loss_o2m_ref[0] * weight,
-                        torch.cat((loss_one2many[1], loss_one2one[1], loss_o2o_ref[1] * weight, loss_o2m_ref[1] * weight)))
+                        torch.cat((loss_one2many[1], loss_one2one[1], loss_o2m_ref[1] * weight, loss_o2o_ref[1] * weight)))
         else:
             return torch.zeros(1), loss_one2one[1]
 

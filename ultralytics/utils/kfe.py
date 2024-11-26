@@ -15,9 +15,9 @@ class KFE(nn.Module):
     def forward(self, backbone_features, predictions, calibs, mean_sizes, stride_tensor, strides):
         kps_3d = self.extract_3d_kps(predictions, calibs, mean_sizes)
         kps_2d = rect_to_img(kps_3d, calibs)
-        kps_2d = torch.cat((kps_2d,
-                            torch.cat((predictions[:, 7].unsqueeze(1).transpose(1, 2).unsqueeze(-1),
-                            predictions[:, 8].unsqueeze(1).transpose(1, 2).unsqueeze(-1)), dim=3)), dim=2)
+        center3d = torch.cat((predictions[:, 7].unsqueeze(1).transpose(1, 2).unsqueeze(-1),
+                   predictions[:, 8].unsqueeze(1).transpose(1, 2).unsqueeze(-1)), dim=3)
+        kps_2d = torch.cat((kps_2d, center3d), dim=2)
         stride_tensor = stride_tensor.repeat(calibs.shape[0], 1).unsqueeze(-1)
         kps_2d = kps_2d / stride_tensor.unsqueeze(-1)
         features = []
