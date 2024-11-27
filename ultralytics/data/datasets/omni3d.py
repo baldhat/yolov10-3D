@@ -1,6 +1,7 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
 import os
 
+import cv2
 import torch.utils.data as data
 from PIL import Image
 import subprocess
@@ -71,6 +72,8 @@ class Omni3Dataset(data.Dataset):
         self.min_depth_thres = args.min_depth_threshold
         self.pred_rot_mat = args.pred_rot_mat
         self.load_depth_maps = False
+        self.rotation = args.rotation
+
         assert(self.pred_rot_mat)
 
         self.left_multiply_matrix = np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]])
@@ -117,7 +120,9 @@ class Omni3Dataset(data.Dataset):
         crop_size = img_size
         random_crop_flag, random_flip_flag = False, False
         random_mix_flag = False
+        random_rot_flag = False
         calib = self.get_calib(index)
+        rot_angle = 0
         scale = 1
         shift = np.array([0, 0])
 
@@ -140,6 +145,10 @@ class Omni3Dataset(data.Dataset):
                 shift[1] = img_size[1] * np.clip(np.random.randn() * self.shift, -2 * self.shift, 2 * self.shift)
                 center[0] += shift[0]
                 center[1] += shift[1]
+
+            if np.random.random() < self.rotation:
+                random_rot_flag = True
+                rot_angle = int(np.random.uniform(-180, 180))
 
         if random_mix_flag == True:
             count_num = 0
@@ -166,7 +175,7 @@ class Omni3Dataset(data.Dataset):
                             break
 
         # add affine transformation for 2d images.
-        trans, trans_inv = get_affine_transform(center, crop_size, 0, self.resolution, inv=1)
+        trans, trans_inv = get_affine_transform(center, crop_size, rot_angle, self.resolution, inv=1)
         img = img.transform(tuple(self.resolution.tolist()),
                             method=Image.AFFINE,
                             data=tuple(trans_inv.reshape(-1).tolist()),
@@ -199,12 +208,15 @@ class Omni3Dataset(data.Dataset):
                     object.box2d[0], object.box2d[2] = img_size[0] - x2, img_size[0] - x1
                     object.pos[0] *= -1
                     object.rot_mat = self.left_multiply_matrix @ object.rot_mat @ self.right_multiply_matrix
+            if random_rot_flag:
+                pass
+
 
             object_num = len(objects) if len(objects) < self.max_objs else self.max_objs
 
             for i in range(object_num):
                 valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res, _rot_mat \
-                    = self.load_object(objects[i], scale, trans, calib, shift, ratio_pad)
+                    = self.load_object(objects[i], scale, trans, calib, shift, ratio_pad, rot_angle)
                 if valid:
                     gt_boxes_2d.append(_box)
                     gt_cls.append(_cls)
@@ -230,7 +242,7 @@ class Omni3Dataset(data.Dataset):
                         self.max_objs - object_num)
                 for i in range(object_num_temp):
                     valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res, _rot_mat \
-                        = self.load_object(objects[i], scale, trans, calib, shift, ratio_pad)
+                        = self.load_object(objects[i], scale, trans, calib, shift, ratio_pad, rot_angle)
                     if valid:
                         gt_boxes_2d.append(_box)
                         gt_cls.append(_cls)
@@ -282,7 +294,7 @@ class Omni3Dataset(data.Dataset):
         }
         return data
 
-    def load_object(self, object_, scale, trans, calib, shift, ratio_pad):
+    def load_object(self, object_, scale, trans, calib, shift, ratio_pad, rot_angle):
         valid = False
         _box = 0
         _cls = 0
@@ -316,8 +328,18 @@ class Omni3Dataset(data.Dataset):
         # process 2d bbox & get 2d center
         bbox_2d = object_.box2d
         # add affine transformation for 2d boxes.
-        bbox_2d[:2] = affine_transform(bbox_2d[:2], trans)
-        bbox_2d[2:] = affine_transform(bbox_2d[2:], trans)
+
+
+        # if the image was rotated, reorient the bounding box
+        corner_points = bbox_2d[[0, 1, 2, 3, 0, 3, 2, 1]].copy().reshape(4, 2)
+        bbox_2d_rot = np.zeros(8)
+        bbox_2d_rot[:2] = affine_transform(corner_points[0], trans)
+        bbox_2d_rot[2:4] = affine_transform(corner_points[1], trans)
+        bbox_2d_rot[4:6] = affine_transform(corner_points[2], trans)
+        bbox_2d_rot[6:8] = affine_transform(corner_points[3], trans)
+        corner_xs = bbox_2d_rot[0::2]
+        corner_ys = bbox_2d_rot[1::2]
+        bbox_2d = np.array([corner_xs.min(), corner_ys.min(), corner_xs.max(), corner_ys.max()])
 
         _box = np.copy(bbox_2d)
         _box = xyxy2xywh(_box)
@@ -339,9 +361,13 @@ class Omni3Dataset(data.Dataset):
 
         _cls = [self.cls2train_id[object_.cls_type]]
 
+        egoc_rot_matrix = object_.rot_mat
+        left_multiply_matrix = Rotation.from_euler('XYZ', [0, 0, -rot_angle / 180 * np.pi]).as_matrix()
+        egoc_rot_matrix = left_multiply_matrix @ egoc_rot_matrix
+
         in_pos = np.array([_center3d[0] + shift[0]*trans[0, 0], _center3d[1] + shift[1]*trans[1, 1]])
         _rot_mat = egoc_to_alloc_rot_matrix_torch(amodal_center=torch.from_numpy(in_pos).unsqueeze(0).float(),
-                                                  egoc_rot_matrix=torch.from_numpy(object_.rot_mat).unsqueeze(0).float(),
+                                                  egoc_rot_matrix=torch.from_numpy(egoc_rot_matrix).unsqueeze(0).float(),
                                                   calib=torch.from_numpy(calib.P2*ratio_pad[0, 0]).unsqueeze(0).float())[0].numpy().reshape(9)
 
         _size3d = (np.array([object_.h, object_.w, object_.l], dtype=np.float32)

@@ -159,6 +159,7 @@ random_crop: 0.5 # (float) image crop (probability)
 bgr: 0.0 # (float) image channel BGR (probability)
 mosaic: 1.0 # (float) image mosaic (probability)
 mixup: 0.5 # (float) image mixup (probability)
+rotation: 0.5
 cam_dis: False
 copy_paste: 0.0 # (float) segment copy-paste (probability)
 auto_augment: randaugment # (str) auto augmentation policy for classification (randaugment, autoaugment, augmix)
