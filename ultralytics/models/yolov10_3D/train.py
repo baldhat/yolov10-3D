@@ -23,7 +23,7 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
             return KITTIDataset(img_path, mode, self.args)
         elif dataset_yaml == "waymo.yaml":
             return WaymoDataset(img_path, mode, self.args)
-        elif dataset_yaml == "omni3d.yaml":
+        elif dataset_yaml == "omni3d.yaml" or dataset_yaml == "cdrone.yaml":
             return Omni3Dataset(img_path, mode, self.args)
         else:
             raise NotImplemented("Yolov10_3D only support Kitti and Waymo datasets")

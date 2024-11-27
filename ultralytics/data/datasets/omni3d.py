@@ -21,11 +21,14 @@ from ultralytics.data.datasets.kitti_utils import get_objects_from_dict, Calibra
 class Omni3Dataset(data.Dataset):
     def __init__(self, filepath, mode, args):
         self.args = args
-        self.path = "/".join(filepath.split("/")[:-1])
+        if "CDrone" in filepath:
+            self.path = "/".join(filepath.split("/")[:-2])
+        else:
+            self.path = "/".join(filepath.split("/")[:-1])
         self.split = mode
         self.mode = mode
-        self.class_name = ['Car', 'Pedestrian', 'Cyclist']
-        self.writelist = ['Car', 'Pedestrian', 'Cyclist']
+        self.class_name = ['Car', 'Pedestrian', 'Bicycle']
+        self.writelist = ['Car', 'Pedestrian', 'Bicycle']
         self.resolution = np.array([960, 640])  # W * H
         self.max_objs = 50
         self.use_camera_dis = False
@@ -33,18 +36,17 @@ class Omni3Dataset(data.Dataset):
         print("Loading Omni3D Dataset...")
         self.raw_split = json.load(open(filepath, 'r'))
         if args.overfit:
-            self.raw_split["images"] = [image for image in self.raw_split["images"] if image["id"] < 700050]
-            self.raw_split["annotations"] = [anns for anns in self.raw_split["annotations"] if anns["image_id"] < 700050]
+            self.raw_split["images"] = [image for image in self.raw_split["images"] if image["id"] < 50]
+            self.raw_split["annotations"] = [anns for anns in self.raw_split["annotations"] if anns["image_id"] < 50]
 
         self.imgs = {img['id']: img for img in sorted(self.raw_split['images'], key=lambda img: img['id'])}
         self.idx_to_img_id = {idx: img_id for idx, img_id in enumerate(self.imgs)}
 
-        self.cls2train_id = {"Car": 0, "Pedestrian": 1, "Cyclist": 2}
-        self.train_id2cls = {0: "Car", 1: "Pedestrian", 2: "Cyclist"}
+        self.cls2train_id = {"Car": 0, "Pedestrian": 1, "Bicycle": 2}
+        self.train_id2cls = {0: "Car", 1: "Pedestrian", 2: "Bicycle"}
 
         self.data_cls2data_id = {value["name"].title(): value["id"] for value in self.raw_split["categories"]}
         self.data_id2data_cls = {cls_id: cls_name for cls_name, cls_id in self.data_cls2data_id.items()}
-        self.cls2eval_id = {"unknown": 0, "Car": 1, "Pedestrian": 2, "Sign": 3, "Cyclist": 4}
 
         self.anns_by_img = defaultdict(list)
         for ii, ann in enumerate(self.raw_split['annotations']):
@@ -411,14 +413,14 @@ class Omni3Dataset(data.Dataset):
                 box2dxyxy = np.clip(np.array(pred[10:10+4]), 0, np.array([frame_pred["width"], frame_pred["height"], frame_pred["width"], frame_pred["height"]]))
 
                 pred_instance['image_id'] = frame_id
-                pred_instance['category_id'] = self.cls2eval_id[self.train_id2cls[int(pred[0])]]
+                pred_instance['category_id'] = self.data_cls2data_id[self.train_id2cls[int(pred[0])]]
                 pred_instance['bbox'] = xyxy2ltwh(box2dxyxy).tolist() #x0y0wh absolute
                 pred_instance['score'] = float(pred[-1])
                 pred_instance['depth'] = location[-1]
                 pred_instance['bbox3D'] = self.get_3d_box(torch.tensor(location), torch.tensor(rotation), torch.tensor(size3d))[0, 0].numpy().tolist()
                 pred_instance['center_cam'] = location
                 pred_instance['center_2D'] = [pred_instance['bbox'][0] + pred_instance['bbox'][2] / 2, pred_instance['bbox'][1] + pred_instance['bbox'][3] / 2]
-                pred_instance['dimensions'] = size3d[::-1] # Needs: w, h, l
+                pred_instance['dimensions'] = [size3d[1], size3d[0], size3d[2]] # Needs: w, h, l
                 pred_instance['pose'] = omni_rot_matrix.tolist()
 
                 frame_pred["instances"].append(pred_instance)
@@ -435,15 +437,16 @@ class Omni3Dataset(data.Dataset):
         python = os.path.join(Path.home(), "anaconda3/envs/cubercnn/bin/python")
         if not os.path.exists(python):
             python = os.path.join(Path.home(), "miniconda3/envs/cubercnn/bin/python")
-        command = (f"{python} -u ultralytics/data/datasets/omni_eval/omni_eval.py "
-                   f"--dataset_names [cdrone_val] "
+        command = (f"{python} -u ultralytics/data/datasets/omni_eval/eval.py "
+                   f"--dataset_names [KITTI_val] "
                    f"--pred_ann_files [{file_path}] "
                    f"--gt_ann_files [/home/stud/mijo/storage/group/deepscenario/CDrone/annotations/val_omni.json] "
                    f"--log_dir {save_dir}/logs")
-        lines = subprocess.check_output(command, shell= True, text= True, env={})
+        lines = subprocess.check_output(command, shell= True, text= True, env={}).split("\n")
 
-        print(lines)
-        metric3d = float(lines.split("\n")[4].split("|")[2].strip().split(" ")[0])
+        values = lines[23].split("|")
+        print("\n".join(lines[21:25]))
+        metric3d = float(values[6].strip())
         return metric3d
 
     def decode_preds_eval(self, preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=True,
