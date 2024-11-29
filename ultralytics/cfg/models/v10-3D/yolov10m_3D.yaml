@@ -16,6 +16,7 @@ half_channels: False
 fgdm_predictor: False
 kernel_size_1: 3
 kernel_size_2: 1
+detach_refine_features: False
 channels:
   cls_c: 128
   o2d_c: 64

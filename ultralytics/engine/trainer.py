@@ -369,6 +369,8 @@ class BaseTrainer:
                 self._close_dataloader_mixup()
                 self.train_loader.reset()
                 print("Disabled mixup on dataset")
+            if epoch == self.args.start_refinement_training - 1:
+                self.model.criterion.train_refine_head = True
 
             if RANK in (-1, 0):
                 LOGGER.info(self.progress_string())

@@ -603,7 +603,7 @@ class WorldModel(DetectionModel):
         """Initialize the loss criterion for the model."""
         raise NotImplementedError
 
-    def predict(self, x, profile=False, visualize=False, augment=False, embed=None):
+    def predict(self, x, profile=False, visualize=False, augment=False, embed=None, batch=None):
         """
         Perform a forward pass through the model.
 
@@ -661,7 +661,7 @@ class Ensemble(nn.ModuleList):
         """Initialize an ensemble of models."""
         super().__init__()
 
-    def forward(self, x, augment=False, profile=False, visualize=False):
+    def forward(self, x, augment=False, profile=False, visualize=False, batch=None):
         """Function generates the YOLO network's final layer."""
         y = [module(x, augment, profile, visualize)[0] for module in self]
         # y = torch.stack(y).max(0)[0]  # max ensemble
@@ -942,6 +942,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                 args.append(d.get("fgdm_predictor"))
                 args.append(d.get("kernel_size_1"))
                 args.append(d.get("kernel_size_2"))
+                args.append(d.get("detach_refine_features"))
         elif m is RTDETRDecoder:  # special case, channels arg must be passed in index 1
             args.insert(1, [ch[x] for x in f])
         elif m is CBLinear:

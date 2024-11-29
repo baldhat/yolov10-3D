@@ -557,13 +557,14 @@ class v10Detect3d(nn.Module):
 
     def __init__(self, nc=80, ch=(), dsconv=False, channels=None, use_predecessors=False, detach_predecessors=True,
                  deform=False, common_head=False, num_scales=3, half_channels=False, fgdm_predictor=False,
-                 kernel_size_1=3, kernel_size_2=3):
+                 kernel_size_1=3, kernel_size_2=3, detach_refine_features=False):
         super().__init__()
         assert (channels is not None)
         self.nc = nc  # number of classes
         self.dsconv = dsconv
         self.nl = num_scales
         self.half_channels = half_channels
+        self.detach_refine_features = detach_predecessors
         self.output_channels = {
             "cls": self.nc,
             "o2d": 2,
@@ -737,7 +738,9 @@ class v10Detect3d(nn.Module):
             y.append(torch.cat(list(outputs.values()), dim=1))
             head_features.append(list(head_feats.values()))
         # Refinement
-        refined_preds = self.refine_preds([yi.detach() for yi in y], [xi for xi in x], head_features, calibs, mean_sizes)
+        refined_preds = self.refine_preds([yi.detach() for yi in y],
+                                          [xi.detach() if self.detach_refine_features else xi for xi in x],
+                                          head_features, calibs, mean_sizes)
         return y, refined_preds
 
     def forward_feat(self, x, heads, calibs, mean_sizes):
@@ -757,7 +760,9 @@ class v10Detect3d(nn.Module):
             head_features.append(list(ems.values()))
 
         # Refinement
-        refined_preds = self.refine_preds([yi.detach() for yi in y], [xi for xi in x], head_features, calibs, mean_sizes)
+        refined_preds = self.refine_preds([yi.detach() for yi in y],
+                                          [xi.detach() if self.detach_refine_features else xi for xi in x],
+                                          head_features, calibs, mean_sizes)
         return y, refined_preds, depth_features
 
     def single_head_forward(self, head, features):

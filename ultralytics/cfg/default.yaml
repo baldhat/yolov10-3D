@@ -119,6 +119,7 @@ tal_3d: True
 tal_2d: True
 kps_dist_metric: l1
 constrain_anchors: True
+start_refinement_training: 2
 # Training
 htl: False
 close_mixup: 0 # Epochs before the end to stop mixup augmentation

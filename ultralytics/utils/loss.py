@@ -744,6 +744,7 @@ class DetectLoss3d:
         self.one2many_refined = DDDetectionLoss(model, tal_topk=model.args.tal_topk, name="o2m_ref")
         self.one2one_refined = DDDetectionLoss(model, tal_topk=1, name="o2o_ref")
         self.model = model
+        self.train_refine_head = False
         if self.model.args.fgdm_loss:
             self.fgdm_loss_func = ForegroundDepthMapLoss(self.model)
         if self.model.args.fgdm_supervision:
@@ -753,12 +754,20 @@ class DetectLoss3d:
         one2one, o2o_embs = preds["one2one"], preds["o2o_embs"]
         loss_one2one = self.one2one(one2one, batch, embeddings=o2o_embs)
 
-        o2o_ref = preds["refined_o2o"]
-        loss_o2o_ref = self.one2one_refined(o2o_ref, batch)
+        if self.train_refine_head:
+            o2o_ref = preds["refined_o2o"]
+            loss_o2o_ref = self.one2one_refined(o2o_ref, batch)
+        else:
+            loss_o2o_ref = (torch.zeros(1, device=loss_one2one[0].device, requires_grad=True),
+                            torch.zeros(6, device=loss_one2one[0].device, requires_grad=True))
 
         if preds.get("one2many", None):
-            o2m_ref = preds["refined_o2m"]
-            loss_o2m_ref = self.one2many_refined(o2m_ref, batch)
+            if self.train_refine_head:
+                o2m_ref = preds["refined_o2m"]
+                loss_o2m_ref = self.one2many_refined(o2m_ref, batch)
+            else:
+                loss_o2m_ref = (torch.zeros(1, device=loss_one2one[0].device, requires_grad=True),
+                                torch.zeros(6, device=loss_one2one[0].device, requires_grad=True))
 
             one2many, o2m_embs = preds["one2many"], preds["o2m_embs"]
             loss_one2many = self.one2many(one2many, batch, embeddings=o2m_embs)
@@ -776,7 +785,7 @@ class DetectLoss3d:
             else:
                 weight = self.model.args.refine
                 return (loss_one2many[0] + loss_one2one[0] + loss_o2o_ref[0] * weight + loss_o2m_ref[0] * weight,
-                        torch.cat((loss_one2many[1], loss_one2one[1], loss_o2m_ref[1] * weight, loss_o2o_ref[1] * weight)))
+                        torch.cat((loss_one2many[1], loss_o2m_ref[1] * weight, loss_one2one[1], loss_o2o_ref[1] * weight)))
         else:
             return torch.zeros(1), loss_one2one[1]
 

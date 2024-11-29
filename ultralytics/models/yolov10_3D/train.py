@@ -36,6 +36,9 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
             self.loss_names[0] += ["dis_om"]
             self.loss_names[1] += ["dis_oo"]
 
+        self.loss_names[0] += ["box_om_ref", "cls_om_ref", "dep_om_ref", "o3d_om_ref", "s3d_om_ref", "hd_om_ref"]
+        self.loss_names[1] += ["box_oo_ref", "cls_oo_ref", "dep_oo_ref", "o3d_oo_ref", "s3d_oo_ref", "hd_oo_ref"]
+
         self.loss_names = self.loss_names[0] + self.loss_names[1]
 
         if self.args.fgdm_loss:
