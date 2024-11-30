@@ -744,7 +744,7 @@ class DetectLoss3d:
         self.one2many_refined = DDDetectionLoss(model, tal_topk=model.args.tal_topk, name="o2m_ref")
         self.one2one_refined = DDDetectionLoss(model, tal_topk=1, name="o2o_ref")
         self.model = model
-        self.train_refine_head = False
+        self.train_refine_head = True if model.args.start_refinement_training == 0 else False
         if self.model.args.fgdm_loss:
             self.fgdm_loss_func = ForegroundDepthMapLoss(self.model)
         if self.model.args.fgdm_supervision:

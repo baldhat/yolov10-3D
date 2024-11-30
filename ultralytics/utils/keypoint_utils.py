@@ -8,20 +8,25 @@ def get_object_keypoints(center_3d, size3d, roty):
     return transform_to_camera(pts3d, torch.tensor(center_3d), torch.tensor(roty, device="cpu", dtype=torch.float32).unsqueeze(-1))
 
 
-def get_3d_keypoints(center_3d, dep, size3d, heading_bin, heading_res, calibs):
+def get_3d_keypoints(center_3d, dep, size3d, heading_bin, heading_res, calibs, kps_rel_pos=None):
     calibs = calibs.unsqueeze(1).repeat(1, center_3d.shape[1], 1)
     locations = img_to_rect(center_3d, dep, calibs)
-    boxes_object_frame = get_box_corners(size3d)
+    boxes_object_frame = get_box_corners(size3d, kps_rel_pos)
     rotations = get_roty(center_3d, heading_bin, heading_res, calibs)
     boxes_camera_frame = transform_to_camera(boxes_object_frame, locations, rotations)
     return boxes_camera_frame
 
 
-def get_box_corners(size3d):
+def get_box_corners(size3d, kps_rel_pos=None):
     hl, hw, hh = (size3d[..., 2].unsqueeze(-1) / 2, size3d[..., 1].unsqueeze(-1) / 2, size3d[..., 0].unsqueeze(-1) / 2)
-    corners_x = torch.cat((hl, hl, -hl, -hl, hl, hl, -hl, -hl), dim=-1)
-    corners_y = torch.cat((hw, -hw, hw, -hw, hw, -hw, hw, -hw), dim=-1)
-    corners_z = torch.cat((-hh, -hh, -hh, -hh, hh, hh, hh, hh), dim=-1)
+    if kps_rel_pos is not None:
+        corners_x = torch.cat((hl, hl, -hl, -hl, hl, hl, -hl, -hl), dim=-1) * kps_rel_pos[..., 0]
+        corners_y = torch.cat((hw, -hw, hw, -hw, hw, -hw, hw, -hw), dim=-1) * kps_rel_pos[..., 1]
+        corners_z = torch.cat((-hh, -hh, -hh, -hh, hh, hh, hh, hh), dim=-1) * kps_rel_pos[..., 2]
+    else:
+        corners_x = torch.cat((hl, hl, -hl, -hl, hl, hl, -hl, -hl), dim=-1)
+        corners_y = torch.cat((hw, -hw, hw, -hw, hw, -hw, hw, -hw), dim=-1)
+        corners_z = torch.cat((-hh, -hh, -hh, -hh, hh, hh, hh, hh), dim=-1)
     box_corners = torch.cat((corners_x.unsqueeze(-1), corners_y.unsqueeze(-1), corners_z.unsqueeze(-1)), dim=-1)
     return box_corners
 

@@ -39,7 +39,7 @@ class KeypointRefiner(nn.Module):
         inp = self.pre_norm2(keypoint.reshape(bs, feat, -1, kps).transpose(1, 2).reshape(-1, feat, kps).transpose(1, 2))
         emb = embedding.reshape(bs, feat, -1, kps).transpose(1, 2).reshape(-1, feat, kps).transpose(1, 2)
         k = inp + emb
-        v = inp + emb#
+        v = inp + emb
         attn_output, attn_weights = self.attention_layer(q, k, v)
         x1 = self.norm1(attn_output.squeeze(1) + q.squeeze(1))
         x2 = silu(self.lin2(self.dropout(silu(self.lin1(x1))))) + x1

@@ -857,9 +857,9 @@ class v10Detect3d(nn.Module):
         self.anchors, self.strides = (x.transpose(0, 1) for x in make_anchors(output, self.stride, 0.5))
         preds = self.decode(cls, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un)
 
-        kp_feats = self.extract_kp_feats(preds, backbone_features, calibs, mean_sizes)
+        kp_feats, embeddings = self.extract_kp_feats(preds, backbone_features, calibs, mean_sizes)
         queries = self.query_embedder(head_features)
-        embeddings = self.get_kp_embeddings(kp_feats)
+        #embeddings = self.get_kp_embeddings(kp_feats)
 
         refined_output = self.refiner(embeddings, kp_feats, queries)
 
