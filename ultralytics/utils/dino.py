@@ -259,13 +259,13 @@ class Args:
     cam_dis = False
     fliplr = 0.5
     random_crop = 0.5
-    scale = 0.4
-    min_scale = 0.6
-    max_scale = 1.4
+    scale = 0.2
+    min_scale = 0.8
+    max_scale = 1.2
     translate = 0.1
     mixup = 0.5
-    max_depth_threshold = 70
-    min_depth_threshold = 0.5
+    max_depth_threshold = 120
+    min_depth_threshold = 1
     seed = 1
     load_depth_maps = True
 
@@ -277,24 +277,24 @@ def main(save_dir):
     args = Args()
     train_dataset = KITTIDataset(train_file_path, "train", args)
     val_dataset = KITTIDataset(val_file_path, "val", args)
-    train_dataloader = build_dataloader(train_dataset, 12, 4, shuffle=True)
-    val_dataloader = build_dataloader(val_dataset, 12, 4, shuffle=False)
+    train_dataloader = build_dataloader(train_dataset, 24, 4, shuffle=True)
+    val_dataloader = build_dataloader(val_dataset, 24, 4, shuffle=False)
 
-    model = DinoDepther("small")
+    model = DinoDepther("base")
     model.train()
 
     #freeze_backbone(model)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=5e-5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
 
-    lr_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer=optimizer, start_factor=1.0, end_factor=0.1, total_iters=100)
+    lr_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer=optimizer, start_factor=1.0, end_factor=0.1, total_iters=200)
 
     best_eval_loss = 100000
     best_epoch = 0
     train_losses = []
     val_losses = []
 
-    for epoch in range(100):
+    for epoch in range(200):
         train_loss = train_one_epoch(epoch, model, train_dataloader, optimizer)
         torch.cuda.empty_cache()
         eval_loss = validate(epoch, model, val_dataloader)

@@ -120,10 +120,10 @@ constrain_anchors: True
 # Training
 htl: False
 close_mixup: 0 # Epochs before the end to stop mixup augmentation
-max_depth_threshold: 70
+max_depth_threshold: 120
 min_depth_threshold: 1
-min_scale: 0.6
-max_scale: 1.4
+min_scale: 0.8
+max_scale: 1.2
 overfit: False
 distillation: True
 distillation_temp: 2
