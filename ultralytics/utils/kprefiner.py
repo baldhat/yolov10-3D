@@ -7,7 +7,7 @@ from ultralytics.nn.modules import Conv
 class KeypointRefiner(nn.Module):
     def __init__(self):
         super(KeypointRefiner, self).__init__()
-        self.attention_layer = nn.MultiheadAttention(256, 1, batch_first=True)
+        self.attention_layer = nn.MultiheadAttention(256, 8, batch_first=True)
         self.norm1 = nn.LayerNorm(256)
         self.norm2 = nn.LayerNorm(256)
         self.pre_norm1 = nn.LayerNorm(256)
