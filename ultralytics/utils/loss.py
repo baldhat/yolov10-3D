@@ -1192,7 +1192,7 @@ class SupervisionLoss:
             _, dino_embeddings = self.foundation_model(imgs)
 
         transform = transforms.Resize(size=(fgdm_embeddings.shape[2], fgdm_embeddings.shape[3]),
-                          interpolation=InterpolationMode.NEAREST_EXACT)
+                          interpolation=InterpolationMode.BILINEAR)
         mask = (transform(gt_depth_maps) > 0)
         dino_emb = transform(dino_embeddings).transpose(1, 2).transpose(2, 3)[mask]
         pred_emb = fgdm_embeddings.transpose(1, 2).transpose(2, 3)[mask]
