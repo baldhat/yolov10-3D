@@ -9,6 +9,7 @@ from ultralytics.data.datasets.waymo import WaymoDataset
 from ultralytics.utils.plotting import plot_labels_3D, KITTIVisualizer, plot_images, plot_training_depth_dist
 
 from ...data.datasets.omni3d import Omni3Dataset
+from ...data.datasets.rope3d import Rope3Dataset
 
 
 class YOLOv10_3DDetectionTrainer(DetectionTrainer):
@@ -25,6 +26,8 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
             return WaymoDataset(img_path, mode, self.args)
         elif dataset_yaml == "omni3d.yaml" or dataset_yaml == "cdrone.yaml":
             return Omni3Dataset(img_path, mode, self.args)
+        elif dataset_yaml == "rope3d.yaml":
+            return Rope3Dataset(img_path, mode, self.args)
         else:
             raise NotImplemented("Yolov10_3D only support Kitti and Waymo datasets")
 
