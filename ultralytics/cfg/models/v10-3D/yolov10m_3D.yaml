@@ -13,7 +13,7 @@ deform: False
 common_head: False
 num_scales: 2
 half_channels: False
-fgdm_predictor: True
+fgdm_predictor: False
 kernel_size_1: 3
 kernel_size_2: 1
 channels:

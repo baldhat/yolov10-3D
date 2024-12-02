@@ -128,14 +128,14 @@ overfit: False
 distillation: True
 distillation_temp: 2
 distillation_weight: 0.75
-distillation_loss: "cos"
+distillation_loss: "soft"
 distillation_no_mixup: True
 
-load_depth_maps: True
+load_depth_maps: False
 
-fgdm_loss: True
+fgdm_loss: False
 fgdm_loss_weight: 2
-fgdm_supervision: True
+fgdm_supervision: False
 fgdm_supervision_weight: 1
 
 dfl: 1.5 # (float) dfl loss gain

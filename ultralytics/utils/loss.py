@@ -891,7 +891,7 @@ class DDDetectionLoss:
                                             fg_mask, target_scores_sum)
 
         if self.hyp.distillation:
-            embeddings = torch.cat([emb.view(feats[0].shape[0], 128, -1) for emb in embeddings], dim=2)
+            embeddings = torch.cat([emb.view(emb.shape[0], emb.shape[1], -1) for emb in embeddings], dim=2)
             loss[6] = self.supervisor.forward_head(
                 batch["img"].detach(), gt_center_3d, embeddings, fg_mask.bool(),
                 target_gt_idx, mask_gt.bool().squeeze(-1), batch["mixed"].bool()
@@ -1141,7 +1141,7 @@ class SupervisionLoss:
         self.device = next(model.parameters()).device  # get model device
         self.args = model.args
         self.model = model
-        self.foundation_model = DinoDepther()
+        self.foundation_model = DinoDepther("base")
         self.foundation_model.load(self.args.dino_path)
         self.T = self.args.distillation_temp
         self.weight = self.args.distillation_weight
