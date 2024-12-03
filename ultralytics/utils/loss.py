@@ -891,7 +891,7 @@ class DDDetectionLoss:
         loss[2:6] = self.compute_box3d_loss(targets_3d, pred_3d, anchor_points, stride_tensor,
                                             fg_mask, target_scores_sum)
 
-        if self.hyp.distillation:
+        if self.hyp.distillation and embeddings is not None:
             embeddings = torch.cat([emb.view(emb.shape[0], emb.shape[1], -1) for emb in embeddings], dim=2)
             loss[6] = self.supervisor.forward_head(
                 batch["non_mix_imgs"].detach(), gt_center_3d, pred_3d[..., :2], embeddings, fg_mask.bool(),
