@@ -795,12 +795,12 @@ class DDDetectionLoss:
     def preprocess(self, targets, batch_size, scale_tensor):
         """Preprocesses the target counts and matches with the input batch size to output a tensor."""
         if targets.shape[0] == 0:
-            out = torch.zeros(batch_size, 0, 17, device=self.device)
+            out = torch.zeros(batch_size, 0, 18, device=self.device)
         else:
             i = targets[:, 0]  # image index
             _, counts = i.unique(return_counts=True)
             counts = counts.to(dtype=torch.int32)
-            out = torch.zeros(batch_size, counts.max(), 17, device=self.device)
+            out = torch.zeros(batch_size, counts.max(), 18, device=self.device)
             for j in range(batch_size):
                 matches = i == j
                 n = matches.sum()
@@ -848,12 +848,13 @@ class DDDetectionLoss:
         gts = torch.cat((batch["batch_idx"].view(-1, 1), batch["cls"].view(-1, 1),
                                 batch["bboxes"], batch["center_2d"], batch["size_2d"],
                                 batch["center_3d"], batch["size_3d"], batch["depth"].view(-1, 1),
-                                batch["heading_bin"].view(-1, 1), batch["heading_res"].view(-1, 1)), 1)
+                                batch["heading_bin"].view(-1, 1), batch["heading_res"].view(-1, 1),
+                                batch["src_img"].view(-1, 1)), 1)
         gts = self.preprocess(gts.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
         calibs = batch["calib"]
         mean_sizes = batch["mean_sizes"]
-        gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin, gt_heading_res = gts.split(
-            (1, 4, 2, 2, 2, 3, 1, 1, 1), 2)
+        gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin, gt_heading_res, gt_src_img = gts.split(
+            (1, 4, 2, 2, 2, 3, 1, 1, 1, 1), 2)
         mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0)
 
         # Pboxes
@@ -893,8 +894,9 @@ class DDDetectionLoss:
         if self.hyp.distillation:
             embeddings = torch.cat([emb.view(emb.shape[0], emb.shape[1], -1) for emb in embeddings], dim=2)
             loss[6] = self.supervisor.forward_head(
-                batch["img"].detach(), gt_center_3d, embeddings, fg_mask.bool(),
-                target_gt_idx, mask_gt.bool().squeeze(-1), batch["mixed"].bool()
+                batch["non_mix_imgs"].detach(), gt_center_3d, pred_3d[..., :2], embeddings, fg_mask.bool(),
+                target_gt_idx, mask_gt.bool().squeeze(-1), batch["mixed"].bool(), gt_src_img.squeeze(-1).long(),
+                stride_tensor, anchor_points
             ) / target_scores_sum
 
         return loss.sum() * batch_size, loss
@@ -1153,38 +1155,59 @@ class SupervisionLoss:
         elif self.criterion == "mse":
             self.loss = nn.MSELoss()
 
-    def forward_head(self, imgs, gt_center_3d, pred_embeddings, fg_mask, target_gt_idx, mask_gt, mixed_mask):
+    def forward_head(self, imgs, gt_center_3d, pred_center_3d, pred_embeddings, fg_mask, target_gt_idx, mask_gt, mixed_mask, src_img, stride_tensor, anchor_points):
         loss = torch.zeros(imgs.shape[0], device=imgs.device)
 
         with torch.no_grad():
-            depth_maps, dino_embeddings = self.foundation_model(imgs)
+            depth_maps0, dino_embeddings0 = self.foundation_model(imgs[:, 0])
+            depth_maps1, dino_embeddings1 = self.foundation_model(imgs[:, 1])
         #self.plot_depth_maps(depth_maps, imgs)
 
-        for batch_idx in range(depth_maps.shape[0]):
-            if mask_gt[batch_idx].any() and (not self.no_mixup or not mixed_mask[batch_idx]):
-                img_size = torch.tensor(imgs.shape[2:][::-1], device=gt_center_3d.device)
-                dino_embed_size = torch.tensor(dino_embeddings.shape[2:][::-1], device=gt_center_3d.device)
-                center3d = gt_center_3d[batch_idx][mask_gt[batch_idx]] / img_size * dino_embed_size
-                dino_emb = dino_embeddings.transpose(1, 3)[
-                        batch_idx,
-                        center3d[:, 0].round().long().clamp(min=0, max=dino_embed_size[0] - 1),
-                        center3d[:, 1].round().long().clamp(min=0, max=dino_embed_size[1] - 1)
-                ][target_gt_idx[batch_idx][fg_mask[batch_idx]]]
-                pred_emb = pred_embeddings.transpose(1, 2)[batch_idx][fg_mask[batch_idx]]
+        anchor_points = anchor_points * stride_tensor
+        pred_offset = pred_center_3d * stride_tensor
+        predcenter3d = (anchor_points + pred_offset)
 
-                if self.criterion == "soft":
-                    soft_targets = nn.functional.softmax(dino_emb / self.T, dim=-1)
-                    soft_prob = nn.functional.log_softmax(pred_emb / self.T, dim=-1)
-                    loss[batch_idx] = torch.sum(soft_targets * (soft_targets.log() - soft_prob)) / soft_prob.size()[0] * (
-                            self.T ** 2)
-                elif self.criterion == "mse":
-                    loss[batch_idx] = self.loss(pred_emb, dino_emb)
-                elif self.criterion == "cos":
-                    loss[batch_idx] = self.loss(pred_emb, dino_emb, target=torch.ones(dino_emb.size(0)).to(dino_emb.device))
-                else:
-                    raise RuntimeError(f"Unknown criterion function: {self.criterion}")
+        img_size = torch.tensor(imgs.shape[3:][::-1], device=gt_center_3d.device)
+
+        for batch_idx in range(depth_maps0.shape[0]):
+            if self.args.use_pred_center:
+                center3d = (predcenter3d / (img_size / 2) - 1)[batch_idx][fg_mask[batch_idx]]
+                center3d_0 = center3d[src_img[batch_idx][mask_gt[batch_idx]][target_gt_idx[batch_idx][fg_mask[batch_idx]]] == 0]
+                center3d_1 = center3d[src_img[batch_idx][mask_gt[batch_idx]][target_gt_idx[batch_idx][fg_mask[batch_idx]]] == 1]
             else:
-                loss[batch_idx] = 0
+                center3d = gt_center_3d[batch_idx][mask_gt[batch_idx]] / (img_size / 2) - 1
+                center3d_0 = center3d[src_img[batch_idx][mask_gt[batch_idx]] == 0]
+                center3d_1 = center3d[src_img[batch_idx][mask_gt[batch_idx]] == 1]
+
+            #self.visualize_centers(imgs[batch_idx], img_size, center3d_0, center3d_1)
+
+            dino_emb0 = torch.nn.functional.grid_sample(dino_embeddings0[batch_idx].unsqueeze(0),
+                                                        center3d_0.unsqueeze(0).unsqueeze(0), mode="bilinear",
+                                                        padding_mode="border")[0, :, 0]
+            dino_emb1 = torch.nn.functional.grid_sample(dino_embeddings1[batch_idx].unsqueeze(0),
+                                                        center3d_1.unsqueeze(0).unsqueeze(0), mode="bilinear",
+                                                        padding_mode="border")[0, :, 0]
+
+            if self.args.use_pred_center:
+                dino_emb = torch.cat((dino_emb0, dino_emb1), dim=1).transpose(0, 1)
+            else:
+                dino_emb = torch.cat((dino_emb0, dino_emb1), dim=1).transpose(0, 1)[target_gt_idx[batch_idx][fg_mask[batch_idx]]]
+
+            pred_emb = pred_embeddings.transpose(1, 2)[batch_idx][fg_mask[batch_idx]]
+            if self.criterion == "soft":
+                soft_targets = nn.functional.softmax(dino_emb / self.T, dim=-1)
+                soft_prob = nn.functional.log_softmax(pred_emb / self.T, dim=-1)
+                if soft_targets.shape[0] == 0:
+                    loss[batch_idx] = torch.zeros(1, requires_grad=True)
+                else:
+                    loss[batch_idx] = torch.sum(soft_targets * (soft_targets.log() - soft_prob)) / soft_prob.size()[0] * (
+                        self.T ** 2)
+            elif self.criterion == "mse":
+                loss[batch_idx] = self.loss(pred_emb, dino_emb)
+            elif self.criterion == "cos":
+                loss[batch_idx] = self.loss(pred_emb, dino_emb, target=torch.ones(dino_emb.size(0)).to(dino_emb.device))
+            else:
+                raise RuntimeError(f"Unknown criterion function: {self.criterion}")
         return loss.sum() * self.weight
 
     def forward_fgdm(self, imgs, fgdm_embeddings, gt_depth_maps):
@@ -1220,6 +1243,23 @@ class SupervisionLoss:
             ax.imshow(res)
 
         plt.show()
+
+    def visualize_centers(self, imgs, img_size, center3d_0, center3d_1):
+        fig, axes = plt.subplots(2, 1, figsize=(18, 12))
+        fig.tight_layout()
+        axes = axes.ravel()
+        img0 = (255 * imgs[0].cpu().numpy().transpose(1, 2, 0)).astype(np.uint8)
+        axes[0].imshow(img0)
+        center3d0 = ((center3d_0 + 1) * img_size / 2).detach().cpu()
+        axes[0].scatter(center3d0[:, 0], center3d0[:, 1])
+
+        img1 = (255 * imgs[1].cpu().numpy().transpose(1, 2, 0)).astype(np.uint8)
+        axes[1].imshow(img1)
+        center3d1 = ((center3d_1 + 1) * img_size / 2).detach().cpu()
+        axes[1].scatter(center3d1[:, 0], center3d1[:, 1])
+
+        plt.show()
+        return
 
 
 class ForegroundDepthMapLoss(nn.Module):

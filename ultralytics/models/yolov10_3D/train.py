@@ -65,6 +65,8 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
         """Allows custom preprocessing model inputs and ground truths depending on task type."""
         batch["calib"] = batch["calib"].to(self.device)
         batch["img"] = batch["img"].to(self.device)
+        batch["non_mix_imgs"] = batch["non_mix_imgs"].to(self.device, non_blocking=True)
+        batch["non_mix_imgs"] = (batch["non_mix_imgs"].half() if self.args.half else batch["non_mix_imgs"].float())
         return batch
 
     def plot_training_labels(self):

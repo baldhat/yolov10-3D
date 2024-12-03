@@ -422,7 +422,7 @@ class WaymoDataset(data.Dataset):
         lines = subprocess.check_output(command, shell= True, text= True, env={})
 
         print(lines)
-        metric3d = float(lines.split("\n")[4].split("|")[2].strip().split(" ")[0])
+        metric3d = float(lines.split("\n")[4].split("|")[2].strip().split(" ")[0]) # 0.7 IoU, Level 1
         return metric3d
 
     def decode_preds_eval(self, preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=True, threshold=0.001):

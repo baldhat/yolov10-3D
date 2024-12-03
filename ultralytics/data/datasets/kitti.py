@@ -118,6 +118,7 @@ class KITTIDataset(data.Dataset):
         index = int(self.idx_list[item])  # index mapping, get real data id
         ori_img = self.get_image(index)
         img = ori_img
+        img0, img1 = None, None
         img_size = np.array(ori_img.size)
         if self.split != 'test':
             dst_W, dst_H = img_size
@@ -137,9 +138,11 @@ class KITTIDataset(data.Dataset):
         if self.data_augmentation:
             if np.random.random() < 0.5 and self.mixup:
                 random_mix_flag = True
+                img0 = img.copy()
 
             if np.random.random() < self.random_flip:
                 random_flip_flag = True
+                img0 = img.transpose(Image.FLIP_LEFT_RIGHT)
                 img = img.transpose(Image.FLIP_LEFT_RIGHT)
                 if self.load_depth_maps:
                     seg_mask = seg_mask.transpose(Image.FLIP_LEFT_RIGHT)
@@ -166,7 +169,7 @@ class KITTIDataset(data.Dataset):
                 calib_temp = self.get_calib(random_index)
 
                 if calib_temp.cu == calib.cu and calib_temp.cv == calib.cv and calib_temp.fu == calib.fu and calib_temp.fv == calib.fv:
-                    img_temp = self.get_image(random_index)
+                    img1 = self.get_image(random_index)
                     if self.load_depth_maps:
                         seg_mask_tmp = self.get_segmentation(random_index)
                     img_size_temp = np.array(img.size)
@@ -177,10 +180,10 @@ class KITTIDataset(data.Dataset):
                         if len(objects_1) + len(objects_2) < self.max_objs:
                             random_mix_flag = True
                             if random_flip_flag == True:
-                                img_temp = img_temp.transpose(Image.FLIP_LEFT_RIGHT)
+                                img1 = img1.transpose(Image.FLIP_LEFT_RIGHT)
                                 if self.load_depth_maps:
                                     seg_mask_tmp = seg_mask_tmp.transpose(Image.FLIP_LEFT_RIGHT)
-                            img = Image.blend(img, img_temp, alpha=0.5)
+                            img = Image.blend(img, img1, alpha=0.5)
                             break
 
         # add affine transformation for 2d images.
@@ -189,6 +192,16 @@ class KITTIDataset(data.Dataset):
                             method=Image.AFFINE,
                             data=tuple(trans_inv.reshape(-1).tolist()),
                             resample=Image.BILINEAR)
+
+        if random_mix_flag:
+            img0 = img0.transform(tuple(self.resolution.tolist()),
+                                  method=Image.AFFINE,
+                                  data=tuple(trans_inv.reshape(-1).tolist()),
+                                  resample=Image.BILINEAR)
+            img1 = img1.transform(tuple(self.resolution.tolist()),
+                                  method=Image.AFFINE,
+                                  data=tuple(trans_inv.reshape(-1).tolist()),
+                                  resample=Image.BILINEAR)
         if self.load_depth_maps:
             seg_mask = np.array(seg_mask.transform(tuple(self.resolution.tolist()),
                                     method=Image.AFFINE,
@@ -203,6 +216,11 @@ class KITTIDataset(data.Dataset):
         # image encoding
         img = np.array(img).astype(np.float32) / 255.0
         img = img.transpose(2, 0, 1)  # C * H * W
+        if random_mix_flag:
+            img0 = np.array(img0).astype(np.float32) / 255.0
+            img0 = img0.transpose(2, 0, 1)  # C * H * W
+            img1 = np.array(img1).astype(np.float32) / 255.0
+            img1 = img1.transpose(2, 0, 1)  # C * H * W
 
         #  ============================   get labels   ==============================
         gt_boxes_2d = []
@@ -214,6 +232,7 @@ class KITTIDataset(data.Dataset):
         gt_depth = []
         gt_heading_bin = []
         gt_heading_res = []
+        gt_src_img = [] # 0 or 1, when no mixup always 0
 
         if self.split != 'test':
             objects = self.get_label(index)
@@ -296,6 +315,8 @@ class KITTIDataset(data.Dataset):
                 gt_heading_bin.append(heading_bin)
                 gt_heading_res.append(heading_res)
 
+                gt_src_img.append(0) # object in img0
+
                 s3d = (np.array([objects[i].h, objects[i].w, objects[i].l], dtype=np.float32)
                        - self.cls_mean_size[self.cls2train_id[objects[i].cls_type]])
                 gt_size_3d.append(s3d)
@@ -377,6 +398,8 @@ class KITTIDataset(data.Dataset):
                     gt_heading_bin.append(heading_bin)
                     gt_heading_res.append(heading_res)
 
+                    gt_src_img.append(1) # object in img1
+
                     s3d = (np.array([objects[i].h, objects[i].w, objects[i].l], dtype=np.float32)
                            - self.cls_mean_size[self.cls2train_id[objects[i].cls_type]])
                     gt_size_3d.append(s3d)
@@ -438,7 +461,9 @@ class KITTIDataset(data.Dataset):
             "mean_sizes": torch.tensor(self.cls_mean_size),
             "heading_bin": torch.tensor(np.array(gt_heading_bin)),
             "heading_res": torch.tensor(np.array(gt_heading_res)),
-            "mixed": torch.tensor(np.array(random_mix_flag, dtype=np.uint8))
+            "mixed": torch.tensor(np.array(random_mix_flag, dtype=np.uint8)),
+            "src_img": torch.tensor(np.array(gt_src_img, dtype=np.uint8)),
+            "non_mix_imgs": torch.tensor(np.concatenate((img0[None],img1[None]) if random_mix_flag else (img[None], img[None]), axis=0))
         }
 
     def get_stats(self, results, save_dir):
@@ -583,10 +608,10 @@ class KITTIDataset(data.Dataset):
         values = list(zip(*[list(b.values()) for b in batch]))
         for i, k in enumerate(keys):
             value = values[i]
-            if k in ["img", "coord_range", "ratio_pad", "calib", "mixed", "depth_map"]:
+            if k in ["img", "coord_range", "ratio_pad", "calib", "mixed", "depth_map", "non_mix_imgs"]:
                 value = torch.stack(value, 0)
             if k in ["bboxes", "cls", "depth", "center_3d", "center_2d", "size_2d", "heading_bin",
-                     "heading_res", "size_3d"]:
+                     "heading_res", "size_3d", "src_img"]:
                 value = torch.cat(value, 0)
             if k not in ["mean_sizes"]:
                 new_batch[k] = value
