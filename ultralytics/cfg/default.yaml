@@ -125,6 +125,8 @@ min_depth_threshold: 1
 min_scale: 0.8
 max_scale: 1.2
 overfit: False
+gradient_balancer: "amtl"
+gradient_balancer_strategy: "distVSrest"
 # Distillation
 distillation: True
 distillation_temp: 2
