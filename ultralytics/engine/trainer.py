@@ -41,6 +41,7 @@ from ultralytics.utils.autobatch import check_train_batch_size
 from ultralytics.utils.checks import check_amp, check_file, check_imgsz, check_model_file_from_stem, print_args
 from ultralytics.utils.dist import ddp_cleanup, generate_ddp_command
 from ultralytics.utils.files import get_latest_run
+from ultralytics.utils.gradient_balancer import GradientBalancer
 from ultralytics.utils.torch_utils import (
     EarlyStopping,
     ModelEMA,
@@ -276,6 +277,8 @@ class BaseTrainer:
             dist.broadcast(self.amp, src=0)  # broadcast the tensor from rank 0 to all other ranks (returns None)
         self.amp = bool(self.amp)  # as boolean
         self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp)
+        self.gradient_balancer = GradientBalancer(self.scaler, balancer=self.args.gradient_balancer,
+                                                  strategy=self.args.gradient_balancer_strategy)
         if world_size > 1:
             self.model = nn.parallel.DistributedDataParallel(self.model, device_ids=[RANK])
 
@@ -405,7 +408,10 @@ class BaseTrainer:
                     )
 
                 # Backward
-                self.scaler.scale(self.loss).backward()
+                if self.args.gradient_balancer is not None:
+                    self.gradient_balancer.step(self.model, self.loss_items)
+                else:
+                    self.scaler.scale(self.loss).backward()
 
                 # Optimize - https://pytorch.org/docs/master/notes/amp_examples.html
                 if ni - last_opt_step >= self.accumulate:
@@ -421,7 +427,13 @@ class BaseTrainer:
                             self.stop = broadcast_list[0]
                         if self.stop:  # training time exceeded
                             break
-
+                '''
+                if i == 3:
+                    snapshot = torch.cuda.memory._snapshot()
+                    from pickle import dump
+                    with open('snapshot.pickle', 'wb') as f:
+                        dump(snapshot, f)
+                '''
                 # Log
                 mem = f"{torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0:.3g}G"  # (GB)
                 loss_len = self.tloss.shape[0] if len(self.tloss.shape) else 1
