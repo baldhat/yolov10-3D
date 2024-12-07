@@ -45,7 +45,7 @@ class KeypointRefiner(nn.Module):
         q = self.pre_norm1(query.reshape(bs, self.embed_dim, -1).transpose(1, 2).reshape(-1, self.embed_dim).unsqueeze(1))
         inp = self.pre_norm1(keypoint.reshape(bs, self.embed_dim, -1, kps).transpose(1, 2).reshape(-1, self.embed_dim, kps).transpose(1, 2))
         emb = embedding.reshape(bs, self.pos_embedding_dim, -1, kps).transpose(1, 2).reshape(-1, self.pos_embedding_dim, kps).transpose(1, 2)
-        k = inp# + self.mln(emb)
+        k = inp + self.mln(emb)
         v = k
         attn_output, attn_weights = self.attention_layer(q, k, v)
         x1 = self.norm1(attn_output.squeeze(1) + q.squeeze(1))
