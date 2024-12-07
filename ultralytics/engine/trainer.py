@@ -10,6 +10,7 @@ import math
 import os
 import subprocess
 import time
+import traceback
 import warnings
 from copy import deepcopy
 from datetime import datetime, timedelta
@@ -350,6 +351,8 @@ class BaseTrainer:
             ei_loss = self.compute_e0_loss()
             loss_weightor = htl.Hierarchical_Task_Learning()
 
+        #torch.autograd.set_detect_anomaly(True)
+
         while True:
             self.epoch = epoch
             self.run_callbacks("on_train_epoch_start")
@@ -393,6 +396,7 @@ class BaseTrainer:
                         )
                         if "momentum" in x:
                             x["momentum"] = np.interp(ni, xi, [self.args.warmup_momentum, self.args.momentum])
+
                 # Forward
                 with torch.cuda.amp.autocast(self.amp):
                     batch = self.preprocess_batch(batch)
@@ -408,7 +412,6 @@ class BaseTrainer:
 
                 # Backward
                 self.scaler.scale(self.loss).backward()
-
                 # Optimize - https://pytorch.org/docs/master/notes/amp_examples.html
                 if ni - last_opt_step >= self.accumulate:
                     self.optimizer_step()
@@ -423,6 +426,7 @@ class BaseTrainer:
                             self.stop = broadcast_list[0]
                         if self.stop:  # training time exceeded
                             break
+
 
                 # Log
                 mem = f"{torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0:.3g}G"  # (GB)

@@ -898,7 +898,7 @@ class DDDetectionLoss:
             (_, target_scores, target_center_2d, target_size_2d, target_center_3d,
              target_size_3d, target_depth, target_heading_bin, target_heading_res) = targets
         except Exception as e:
-            return loss.sum() * batch_size, loss
+            return torch.zeros(1, requires_grad=True).to(gts.device), loss
 
         target_scores_sum = max(target_scores.sum(), 1)
 

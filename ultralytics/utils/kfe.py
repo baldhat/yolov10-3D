@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from ultralytics.nn.modules import Conv
 from ultralytics.utils.keypoint_utils import get_3d_keypoints, rect_to_img
 
+
 class KFE(nn.Module):
     def __init__(self, in_channels):
         super(KFE, self).__init__()
@@ -19,39 +20,21 @@ class KFE(nn.Module):
             Conv(64, 24, act=torch.nn.Tanh())
         )
 
-    def generate_3d_positional_embedding(self, keypoint_positions):
-        """
-        Generate a sinusoidal positional embedding for a 3D point (x, y, z) in the range [-1, 1].
-
-        Arguments:
-        x, y, z -- Coordinates of the 3D point, normalized to [-1, 1].
-        Returns:
-        A tensor of size [embedding_dim] containing the positional embedding.
-        """
-        embedding_dim = self.out_channels
-        # Create a tensor of indices [0, 1, 2, ..., embedding_dim//2-1] for the sine/cosine frequency scaling
+    def pos2posemb3d(self, keypoint_positions, num_pos_feats=128, temperature=10000):
         pos_embeddings = []
-        for kps in keypoint_positions:
-            bs, h, w = kps.shape[0], kps.shape[2], kps.shape[3]
-            freqs_xy = (torch.arange(embedding_dim // 6, dtype=torch.float32, device=kps.device)
-                        .unsqueeze(0).unsqueeze(0).unsqueeze(0).unsqueeze(0)
-                        .repeat(bs, self.num_keypoints, h, w, 1))
-            freqs_z = (torch.arange((embedding_dim - (embedding_dim // 6) * 4) // 2, dtype=torch.float32, device=kps.device)
-                       .unsqueeze(0).unsqueeze(0).unsqueeze(0).unsqueeze(0)
-                       .repeat(bs, self.num_keypoints, h, w, 1))
-
-            # Calculate the sine and cosine values for x, y, z
-            # The frequencies for x, y, z are scaled differently
-            x_freq = kps[:, 0::3].unsqueeze(-1) / (10000 ** (2 * freqs_xy / embedding_dim))
-            y_freq = kps[:, 1::3].unsqueeze(-1) / (10000 ** (2 * freqs_xy / embedding_dim))
-            z_freq = kps[:, 2::3].unsqueeze(-1) / (10000 ** (2 * freqs_z / embedding_dim))
-            x_pos = torch.cat([torch.sin(x_freq), torch.cos(x_freq)], dim=-1)
-            y_pos = torch.cat([torch.sin(y_freq), torch.cos(y_freq)], dim=-1)
-            z_pos = torch.cat([torch.sin(z_freq), torch.cos(z_freq)], dim=-1)
-
-            # Concatenate the results for x, y, z to get the full positional embedding
-            pos_embedding = torch.cat([x_pos, y_pos, z_pos], dim=-1)
-            pos_embeddings.append(pos_embedding.transpose(1, 4))
+        for keypoint_pos in keypoint_positions:
+            scale = torch.pi
+            keypoint_pos = keypoint_pos * scale
+            dim_t = torch.arange(num_pos_feats, dtype=torch.float32, device=keypoint_pos.device)
+            dim_t = temperature ** (2 * torch.div(dim_t, 2, rounding_mode='floor') / num_pos_feats)
+            pos_x = keypoint_pos[:, 0::3, :, :, None] / dim_t
+            pos_y = keypoint_pos[:, 1::3, :, :, None] / dim_t
+            pos_z = keypoint_pos[:, 2::3, :, :, None] / dim_t
+            pos_x = torch.stack((pos_x[..., 0::2].sin(), pos_x[..., 1::2].cos()), dim=-1).flatten(-2)
+            pos_y = torch.stack((pos_y[..., 0::2].sin(), pos_y[..., 1::2].cos()), dim=-1).flatten(-2)
+            pos_z = torch.stack((pos_z[..., 0::2].sin(), pos_z[..., 1::2].cos()), dim=-1).flatten(-2)
+            posemb = torch.cat((pos_y, pos_x, pos_z), dim=-1).transpose(1, -1)
+            pos_embeddings.append(posemb)
         return pos_embeddings
 
     def forward(self, backbone_features, predictions, calibs, mean_sizes, stride_tensor, strides):
@@ -69,8 +52,9 @@ class KFE(nn.Module):
         kps_3d = self.extract_3d_kps(predictions, calibs, mean_sizes,
                                      kps_input)
         kps_2d = rect_to_img(kps_3d, calibs)
-        center3d = torch.cat((predictions[:, self.num_keypoints-2].unsqueeze(1).transpose(1, 2).unsqueeze(-1),
-                   predictions[:, self.num_keypoints-1].unsqueeze(1).transpose(1, 2).unsqueeze(-1)), dim=3)
+        pred_center_x_idx, pred_center_y_idx = 7, 8
+        center3d = torch.cat((predictions[:, pred_center_x_idx].unsqueeze(1).transpose(1, 2).unsqueeze(-1),
+                   predictions[:, pred_center_y_idx].unsqueeze(1).transpose(1, 2).unsqueeze(-1)), dim=3)
         kps_2d = torch.cat((kps_2d, center3d), dim=2)
         stride_tensor = stride_tensor.repeat(calibs.shape[0], 1).unsqueeze(-1)
         kps_2d = kps_2d / stride_tensor.unsqueeze(-1)
@@ -84,7 +68,7 @@ class KFE(nn.Module):
                 self.bilinear_interpolation(proj_features[i], kps_2d[:, scale_offset:scale_offset+num_anchors_in_scale])
                     .reshape(bs, self.out_channels, h, w, num_kp))
             scale_offset += num_anchors_in_scale
-        positional_embedding = self.generate_3d_positional_embedding(keypoints_rel_pos)
+        positional_embedding = self.pos2posemb3d(keypoints_rel_pos)
         return features, positional_embedding
 
     def bilinear_interpolation(self, feature_maps, kps_2d):
@@ -95,9 +79,16 @@ class KFE(nn.Module):
     def vis_keypoints(self, kps_2d):
         plt.clf()
         image = np.zeros((384, 1280), dtype=float)
-        fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+        fig, ax = plt.subplots(1, 1, figsize=(50, 20))
         ax.imshow(image)
-        ax.scatter(kps_2d[:, 0].detach().cpu(), kps_2d[:, 1].detach().cpu())
+        if len(kps_2d.shape) > 2:
+            for anchor in kps_2d:
+                ax.scatter(anchor[:8, 0].detach().cpu(), anchor[:8, 1].detach().cpu(), color=(0, 0, 1))
+                ax.scatter(anchor[8, 0].detach().cpu(), anchor[8, 1].detach().cpu(), color=(1, 0, 0))
+        else:
+            ax.scatter(kps_2d[:8, 0].detach().cpu(), kps_2d[:8, 1].detach().cpu(), color=(0,0,1))
+            ax.scatter(kps_2d[8, 0].detach().cpu(), kps_2d[8, 1].detach().cpu(), color=(1,0,0))
+        fig.tight_layout()
         plt.show()
 
     def extract_3d_kps(self, predictions, calibs, mean_sizes, kps_rel_pos):
