@@ -122,7 +122,7 @@ constrain_anchors: True
 # Training
 htl: False
 close_mixup: 0 # Epochs before the end to stop mixup augmentation
-max_depth_threshold: 70
+max_depth_threshold: 120
 min_depth_threshold: 1
 min_scale: 0.6
 max_scale: 1.4
@@ -159,7 +159,7 @@ random_crop: 0.5 # (float) image crop (probability)
 bgr: 0.0 # (float) image channel BGR (probability)
 mosaic: 1.0 # (float) image mosaic (probability)
 mixup: 0.5 # (float) image mixup (probability)
-rotation: 0.5
+rotation: 0.0
 cam_dis: False
 copy_paste: 0.0 # (float) segment copy-paste (probability)
 auto_augment: randaugment # (str) auto augmentation policy for classification (randaugment, autoaugment, augmix)

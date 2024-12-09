@@ -169,10 +169,9 @@ class ObjectRope3D(object):
         self.h = np.array(line["dimensions"])[1]
         self.l = np.array(line["dimensions"])[2]
         self.pos = np.array(line["center_cam"]) + np.array([0, self.h / 2, 0]) # already the center
-        #omni_euler = Rotation.from_matrix(line['R_cam']).as_euler('xyz')
-        self.ry =line["rotation_y"]
-        #dsc_euler = omni_euler + np.asarray([np.pi / 2, 0, 0])
-        #dsc_egoc_rot_matrix = Rotation.from_euler('xyz', dsc_euler).as_matrix()
+        euler = Rotation.from_matrix(line['R_cam']).as_euler('xyz')
+        euler = euler + np.asarray([np.pi / 2, 0, 0])
+        self.rot_mat = Rotation.from_euler('xyz', euler).as_matrix()
         self.level_str = 'UnKnown'
         self.num_lidar = line["lidar_pts"]
         self.behind_camera = line["behind_camera"] # a corner is behind camera
