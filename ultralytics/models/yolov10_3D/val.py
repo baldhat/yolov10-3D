@@ -1,3 +1,4 @@
+from ultralytics.data.datasets.rope3d import Rope3DDataset
 from ultralytics.models.yolo.detect import DetectionValidator
 from ultralytics.utils import ops
 from ultralytics.data.datasets.kitti import KITTIDataset
@@ -27,6 +28,8 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
             return WaymoDataset(img_path, mode, self.args)
         elif dataset_yaml == "omni3d.yaml":
             return Omni3Dataset(img_path, mode, self.args)
+        elif dataset_yaml == "rope3d.yaml":
+            return Rope3DDataset(img_path, mode, self.args)
         else:
             raise NotImplemented("Yolov10_3D only supports Kitti and Waymo datasets")
 
