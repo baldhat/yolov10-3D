@@ -580,6 +580,8 @@ class v10Detect3d(nn.Module):
 
         self.fgdm_pred = fgdm_predictor
 
+        self.dense = False
+
         self.use_predecessors = use_predecessors
         self.detach_predecessors = detach_predecessors
         self.predecessors = {
@@ -693,27 +695,46 @@ class v10Detect3d(nn.Module):
 
     def inference_forward_feat(self, x, heads):
         y = []
+        head_features = []
         batch_sz = x[0].shape[0]
         head_names = list(self.output_channels.keys())
         for i in range(self.nl):
             outputs = {}
-            outputs[head_names[0]] = heads[0][i](x[i])
+            head_feats = {}
+            outputs[head_names[0]], head_feats[head_names[0]] = self.single_head_forward(heads[0][i], x[i])
 
             candidate_indices = self.select_candidates(outputs[head_names[0]], batch_sz)
 
             inputs = self.extract_patches(x[i], candidate_indices)
             for j, module in enumerate(heads[1:]):
+                paddings = []
                 for layer in module[i]:
                     if isinstance(layer, Conv):
-                        layer.conv.padding = 0
-                output_shape = (x[i].shape[0], list(self.output_channels.values())[j+1], x[i].shape[2], x[i].shape[3])
+                        paddings.append(layer.conv.padding)
+                        layer.conv.padding = (0,)
+                out_, feats = self.single_head_forward(module[i], inputs)
+
+                output_shape = (x[i].shape[0], out_.shape[1], x[i].shape[2], x[i].shape[3])
                 head_output = torch.zeros(output_shape, device=x[i].device)
-                out = module[i](inputs)[:, :, 0, 0].view(output_shape[0], self.max_det, output_shape[1]).transpose(1, 2)
+                feat_output_shape = (x[i].shape[0], feats.shape[1], x[i].shape[2], x[i].shape[3])
+                feat_output = torch.zeros(feat_output_shape, device=x[i].device)
+
+                out = out_[:, :, 0, 0].view(output_shape[0], self.max_det, output_shape[1]).transpose(1, 2)
+                feats = feats.view(output_shape[0], self.max_det, feats.shape[1]).transpose(1,2)
+
                 for b in range(batch_sz):
-                    head_output[b, :, candidate_indices[b, :, 0], candidate_indices[b, :, 1]] = out[b]
+                    head_output[b, :, candidate_indices[b, :, 0], candidate_indices[b, :, 1]] = out[b].float()
+                    feat_output[b, :, candidate_indices[b, :, 0], candidate_indices[b, :, 1]] = feats[b].float()
+
                 outputs[head_names[j+1]] = head_output
+                #head_feats[head_names[j+1]] = feat_output
+                if head_names[j+1] == "dep":
+                    head_features.append(feat_output)
+                for k, layer in enumerate(module[i]):
+                    if isinstance(layer, Conv):
+                        layer.conv.padding = paddings[k]
             y.append(torch.cat(list(outputs.values()), dim=1))
-        return y
+        return y, head_features
 
     def forward_feat(self, x, heads):
         y = []
@@ -812,8 +833,8 @@ class v10Detect3d(nn.Module):
         return self.inference(y), embs, depth_maps
 
     def forward(self, x):
-        if not self.training:
-            one2one, o2o_embs = self.inference_forward_feat([xi.detach() for xi in x], self.o2o_heads), None
+        if not self.training and not self.dense:
+            one2one, o2o_embs = self.inference_forward_feat([xi.detach() for xi in x], self.o2o_heads)
             # self.get_head_ranks()
             # one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
         else:

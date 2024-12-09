@@ -84,6 +84,9 @@ class GradientBalancer(torch.nn.Module):
         grads, _, _ = ProcrustesSolver.apply(gradients.T.unsqueeze(0), "min")
         return grads[0].sum(-1)
 
+
+########################### Taken from samsung mtl ############################
+
 class RandomProjectionSolver:
     @staticmethod
     def apply(grads):

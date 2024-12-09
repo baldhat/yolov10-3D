@@ -427,13 +427,7 @@ class BaseTrainer:
                             self.stop = broadcast_list[0]
                         if self.stop:  # training time exceeded
                             break
-                '''
-                if i == 3:
-                    snapshot = torch.cuda.memory._snapshot()
-                    from pickle import dump
-                    with open('snapshot.pickle', 'wb') as f:
-                        dump(snapshot, f)
-                '''
+
                 # Log
                 mem = f"{torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0:.3g}G"  # (GB)
                 loss_len = self.tloss.shape[0] if len(self.tloss.shape) else 1
