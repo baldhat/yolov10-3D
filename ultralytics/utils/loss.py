@@ -906,11 +906,14 @@ class DDDetectionLoss:
 
         if self.hyp.distillation and embeddings is not None:
             embeddings = torch.cat([emb.view(emb.shape[0], emb.shape[1], -1) for emb in embeddings], dim=2)
-            loss[6] = self.supervisor.forward_head(
-                batch["non_mix_imgs"].detach(), gt_center_3d, pred_3d[..., :2], embeddings, fg_mask.bool(),
-                target_gt_idx, mask_gt.bool().squeeze(-1), batch["mixed"].bool(), gt_src_img.squeeze(-1).long(),
-                stride_tensor, anchor_points
-            ) / target_scores_sum
+            if "yolo" in self.hyp.distillation_path:
+                loss[6] = self.supervisor.forward_larger_brother(batch["img"].detach(), embeddings)
+            else:
+                loss[6] = self.supervisor.forward_head(
+                    batch["non_mix_imgs"].detach(), gt_center_3d, pred_3d[..., :2], embeddings, fg_mask.bool(),
+                    target_gt_idx, mask_gt.bool().squeeze(-1), batch["mixed"].bool(), gt_src_img.squeeze(-1).long(),
+                    stride_tensor, anchor_points
+                ) / target_scores_sum
 
         return loss.sum() * batch_size, loss
 
@@ -1166,6 +1169,30 @@ class SupervisionLoss:
             self.loss = nn.CosineEmbeddingLoss()
         elif self.criterion == "mse":
             self.loss = nn.MSELoss()
+
+    def forward_larger_brother(self, img, pred_embeddings):
+        with torch.inference_mode():
+            _, teacher_embeddings = self.forward_teacher(img)
+
+        teacher_emb = teacher_embeddings.transpose(1, 2).reshape(-1, 64)
+        pred_emb = pred_embeddings.transpose(1, 2).reshape(-1, 64)
+
+        if self.criterion == "soft":
+            soft_targets = nn.functional.softmax(teacher_emb / self.T, dim=-1)
+            soft_prob = nn.functional.log_softmax(pred_emb / self.T, dim=-1)
+            if soft_targets.shape[0] == 0:
+                loss = torch.zeros(1, requires_grad=True)
+            else:
+                loss = torch.sum(soft_targets * (soft_targets.log() - soft_prob)) / soft_prob.size()[0] * (
+                        self.T ** 2)
+        elif self.criterion == "mse":
+            loss = self.loss(pred_emb, teacher_emb)
+        elif self.criterion == "cos":
+            loss = self.loss(pred_emb, teacher_emb,
+                                        target=torch.ones(teacher_emb.size(0)).to(teacher_emb.device))
+        else:
+            raise RuntimeError(f"Unknown criterion function: {self.criterion}")
+        return loss.mean()
 
     def forward_head(self, imgs, gt_center_3d, pred_center_3d, pred_embeddings, fg_mask, target_gt_idx, mask_gt, mixed_mask, src_img, stride_tensor, anchor_points):
         loss = torch.zeros(imgs.shape[0], device=imgs.device)
