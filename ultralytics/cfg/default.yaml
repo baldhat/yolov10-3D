@@ -125,7 +125,7 @@ min_depth_threshold: 1
 min_scale: 0.8
 max_scale: 1.2
 overfit: False
-distillation: True
+distillation: False
 distillation_temp: 2
 distillation_weight: 0.75
 distillation_loss: "soft"

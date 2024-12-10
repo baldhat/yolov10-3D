@@ -15,7 +15,7 @@ from collections import defaultdict
 import json
 
 from ultralytics.data.utils import angle2class
-from ultralytics.data.datasets.kitti_utils import get_objects_from_dict, Calibration, get_affine_transform, affine_transform
+from ultralytics.data.datasets.kitti_utils import get_objects_from_dict_rope, Calibration, get_affine_transform, affine_transform
 
 from ultralytics.utils.ops import xyxy2xywh, xywh2xyxy
 
@@ -31,8 +31,9 @@ class Rope3DDataset(data.Dataset):
         self.resolution = np.array([960, 640])  # W * H
         self.max_objs = 50
         self.use_camera_dis = False
+        self.load_depth_maps = False
 
-        print("Loading Omni3D Dataset...")
+        print("Loading Rope3D Dataset...")
         self.raw_split = json.load(open(filepath, 'r'))
         if args.overfit:
             self.raw_split["images"] = [image for image in self.raw_split["images"] if image["id"] < 50]
@@ -76,13 +77,13 @@ class Rope3DDataset(data.Dataset):
         print("Finished loading!")
 
     def get_image(self, idx):
-        img_file = os.path.join(self.path, self.imgs[idx]["file_path"].replace("waymo/images/", ""))
+        img_file = os.path.join(self.path, self.imgs[idx]["file_path"].replace("images/", ""))
         if not os.path.exists(img_file):
             print(f"Missing segment: {img_file}")
         return Image.open(img_file).convert("RGB")
 
     def get_label(self, idx):
-        return get_objects_from_dict(self.anns_by_img[idx])
+        return get_objects_from_dict_rope(self.anns_by_img[idx])
 
     def get_labels(self):
         labels = self.anns_by_img
@@ -300,8 +301,8 @@ class Rope3DDataset(data.Dataset):
         center_3d = object_.pos - [0, object_.h / 2, 0]  # real 3D center in 3D space
         r_center_3d = center_3d.reshape(-1, 3)  # shape adjustment (N, 3)
         center_3d, _ = calib.rect_to_img(r_center_3d)  # project 3D center to image plane
-        center_3d = center_3d[0]  # shape adjustment
-        center_3d = affine_transform(center_3d.reshape(-1), trans)
+        center_3d_pre = center_3d[0]  # shape adjustment
+        center_3d = affine_transform(center_3d_pre.reshape(-1), trans)
         _center3d = center_3d.copy()
 
         # process 2d bbox & get 2d center
@@ -332,7 +333,7 @@ class Rope3DDataset(data.Dataset):
 
         # encoding heading angle
         # heading_angle = objects[i].alpha
-        heading_angle = calib.ry2alpha(object_.ry, (object_.box2d[0] + object_.box2d[2]) / 2)
+        heading_angle = calib.ry2alpha(object_.ry, center_3d_pre[0])
         if heading_angle > np.pi:  heading_angle -= 2 * np.pi  # check range
         if heading_angle < -np.pi: heading_angle += 2 * np.pi
         heading_bin, heading_res = angle2class(heading_angle)
