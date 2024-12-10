@@ -15,6 +15,9 @@ def get_objects_from_label(label_file):
 def get_objects_from_dict(dict_list):
     return [Object3d(item, idx) for idx, item in enumerate(dict_list)]
 
+def get_objects_from_dict_rope(dict_list):
+    return [ObjectRope3D(item, idx) for idx, item in enumerate(dict_list)]
+
 class Object3d(object):
     def __init__(self, line, idx=None):
         if type(line) == str: # KITTI
@@ -154,6 +157,30 @@ class Object3d(object):
                        self.box2d[2], self.box2d[3], self.h, self.w, self.l, self.pos[0], self.pos[1], self.pos[2],
                        self.ry)
         return kitti_str
+
+class ObjectRope3D(object):
+    def __init__(self, line, idx=None):
+        super().__init__()
+        self.cls_type = line["category_name"].title()
+        self.occlusion = -1.0
+        box = np.array(line["bbox2D_proj"]) # xyxy
+        self.box2d = np.array(box, dtype=np.float32)
+        self.w = np.array(line["dimensions"])[0]
+        self.h = np.array(line["dimensions"])[1]
+        self.l = np.array(line["dimensions"])[2]
+        self.pos = np.array(line["center_cam"]) + np.array([0, self.h / 2, 0]) # already the center
+        #omni_euler = Rotation.from_matrix(line['R_cam']).as_euler('xyz')
+        self.ry =line["rotation_y"]
+        #dsc_euler = omni_euler + np.asarray([np.pi / 2, 0, 0])
+        #dsc_egoc_rot_matrix = Rotation.from_euler('xyz', dsc_euler).as_matrix()
+        self.level_str = 'UnKnown'
+        self.num_lidar = line["lidar_pts"]
+        self.behind_camera = line["behind_camera"] # a corner is behind camera
+        self.visibility = line["visibility"]# annotated visibility 0 to 1
+        self.truncation = line["truncation"] # computed truncation 0 to 1
+        self.segmentation_pts = line["segmentation_pts"] # visible instance segmentation points
+        self.depth_error = line["depth_error"] # L1 of depth map and rendered object
+        self.valid3D = line.get("valid3D", True)
 
 
 ###################  calibration  ###################
