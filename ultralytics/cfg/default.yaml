@@ -24,7 +24,7 @@ exist_ok: False # (bool) whether to overwrite existing experiment
 pretrained: True # (bool | str) whether to use a pretrained model (bool) or a model to load weights from (str)
 optimizer: AdamW # (str) optimizer to use, choices=[SGD, Adam, Adamax, AdamW, NAdam, RAdam, RMSProp, auto]
 verbose: True # (bool) whether to print verbose output
-seed: 5 # (int) random seed for reproducibility
+seed: 1 # (int) random seed for reproducibility
 deterministic: True # (bool) whether to enable deterministic mode
 single_cls: False # (bool) train multi-class data as single-class
 rect: False # (bool) rectangular training if mode='train' or rectangular validation if mode='val'
@@ -68,7 +68,7 @@ embed: # (list[int], optional) return feature vectors/embeddings from given laye
 use_o2m_depth: False
 use_dino_depth: False
 dino_path: /home/stud/mijo/experiments/results/dino_base_64_lr3e-6_noMix/dino/best.pt
-distillation_path: /home/baldhat/dev/mono3d/yolov10-3D/runs/detect/yolov10-3Dx_test/weights/best.pt
+distillation_path: /home/stud/mijo/experiments/results/dino_base_64_lr3e-6_noMix/dino/best.pt
 
 # Visualize settings ---------------------------------------------------------------------------------------------------
 show: False # (bool) show predicted images and videos if environment allows
@@ -126,12 +126,12 @@ min_depth_threshold: 1
 min_scale: 0.8
 max_scale: 1.2
 overfit: False
-gradient_balancer: "amtl"
+gradient_balancer: "pcgrad"
 gradient_balancer_strategy: "distVSrest"
 # Distillation
 distillation: True
 distillation_temp: 2
-distillation_weight: 0.75
+distillation_weight: 3.0
 distillation_loss: "soft"
 distillation_no_mixup: True
 use_pred_center: False
