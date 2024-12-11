@@ -132,8 +132,8 @@ gradient_balancer_strategy: "distVSrest"
 distillation: True
 distillation_teacher: "self"
 distillation_temp: 2
-distillation_weight: 3.0
-distillation_loss: "soft"
+distillation_weight: 10.0
+distillation_loss: "cos"
 distillation_no_mixup: True
 use_pred_center: False
 
