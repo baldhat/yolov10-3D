@@ -22,7 +22,6 @@ import matplotlib.pyplot as plt
 import cv2
 
 
-
 class VarifocalLoss(nn.Module):
     """
     Varifocal loss by Zhang et al.
@@ -738,15 +737,163 @@ class v10DetectLoss:
         loss_one2one = self.one2one(one2one, batch)
         return loss_one2many[0] + loss_one2one[0], torch.cat((loss_one2many[1], loss_one2one[1]))
 
+def debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor):
+    target_center_2d, target_size_2d = targets_2d
+    target_bboxes = torch.cat(
+        (target_center_2d - target_size_2d / 2, target_center_2d + target_size_2d / 2), dim=-1)
+
+    color = {8: (255, 255, 0), 16: (0, 255, 255), 32: (255, 0, 255)}
+    mean = 0
+    std = 1
+    fig, axes = plt.subplots(2, 2, figsize=(18, 12), gridspec_kw={'wspace': 0, 'hspace': 0},
+                             constrained_layout=True)
+    for i, ax in enumerate(np.ravel(axes)):
+        img = batch["img"][i].detach().cpu().numpy().transpose(1, 2, 0).copy()
+        img = np.clip((img * std + mean) * 255, 0, 255).astype(np.uint8)
+
+        target_boxes = target_bboxes[i][fg_mask[i]].int().cpu()
+        for box in target_boxes:
+            p1, p2 = box.split((2, 2), dim=0)
+            cv2.rectangle(img, p1.numpy(), p2.numpy(), (255, 0, 0), 3)  # gt
+
+        pred_boxes = pred_bboxes[i][fg_mask[i]].cpu()
+        stride = stride_tensor[fg_mask[i]].cpu()
+        for j, box in enumerate(pred_boxes):
+            c = color[stride[j].item()]
+            p1, p2 = box.split((2, 2), dim=0)
+            cv2.rectangle(img, p1.int().numpy(), p2.int().numpy(), c)  # gt
+            cv2.circle(img, (p1 + (p2 - p1) / 2).int().numpy(), 4, (0, 255, 255), -1)
+
+        t_center_2d = target_center_2d[i][fg_mask[i]].int().cpu()
+        for center2d in t_center_2d:
+            cv2.circle(img, center2d.numpy(), 5, (0, 0, 255), -1)
+
+        ax.imshow(img)
+        ax.axis("off")
+    plt.show()
+    print()
+
+def debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt):
+    target_center_3d, _, _, _, _ = targets_3d
+    box_idxs = [0, 1, 2, 3, 0,  # base
+                4, 7, 3, 7,  # right
+                6, 2, 6,  # back
+                5,  # left
+                4, 1, 5, 0]  # front
+    color_none_bottom, color_bottom = ((255, 0, 0), (255, 0, 0))
+    color_gt_none_bot, color_gt_bot = ((0, 255, 0), (0, 0, 255))
+    fig, axes = plt.subplots(2, 2, figsize=(18, 12), gridspec_kw={'wspace': 0, 'hspace': 0},
+                             constrained_layout=True)
+    for i, ax in enumerate(np.ravel(axes)):
+        img = batch["img"][i].detach().cpu().numpy().transpose(1, 2, 0).copy()
+        img = np.clip((img) * 255, 0, 255).astype(np.uint8)
+
+        t_center_3d = target_center_3d[i][fg_mask[i]].int().cpu()
+        pd_kps = project_to_image(pred_kps[i][fg_mask[i]], batch["calib"][i]).int().cpu()
+        gr_kps = project_to_image(gt_kps[i][mask_gt[i].bool().squeeze(-1)], batch["calib"][i]).int().cpu()
+        for center_3d in t_center_3d:
+            cv2.circle(img, center_3d.numpy(), 5, (0, 0, 255), -1)
+        for kp in pd_kps:
+            cv2.polylines(img, [kp[box_idxs[:5]].numpy().astype(np.int32).reshape((-1, 1, 2))], isClosed=False,
+                          color=color_none_bottom, thickness=1, lineType=cv2.LINE_AA)
+            cv2.polylines(img, [kp[box_idxs[5:]].numpy().astype(np.int32).reshape((-1, 1, 2))], isClosed=True,
+                          color=color_bottom, thickness=1, lineType=cv2.LINE_AA)
+        for kp in gr_kps:
+            cv2.polylines(img, [kp[box_idxs[:5]].numpy().astype(np.int32).reshape((-1, 1, 2))], isClosed=False,
+                          color=color_gt_none_bot, thickness=1, lineType=cv2.LINE_AA)
+            cv2.polylines(img, [kp[box_idxs[5:]].numpy().astype(np.int32).reshape((-1, 1, 2))], isClosed=True,
+                          color=color_gt_bot, thickness=1, lineType=cv2.LINE_AA)
+
+        ax.imshow(img)
+        ax.axis("off")
+    plt.show()
+    print()
+
+def debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor):
+    max_imgs = 4
+    fig, ax = plt.subplots(math.ceil(max_imgs ** 0.5), math.ceil(max_imgs ** 0.5),
+                           figsize=(36, 18), gridspec_kw={'wspace': 0, 'hspace': 0}, constrained_layout=True)
+    ax = ax.ravel()
+    color = {8: (255, 255, 0), 16: (0, 255, 255), 32: (255, 0, 255)}
+
+    for i, anchors in enumerate(pred_kps):
+        if i >= max_imgs:
+            break
+        MAX_DIST = 70
+        SCALE = 30
+
+        # Create BEV Space
+        R = (MAX_DIST * SCALE)
+        space = np.zeros((R * 2, R * 2, 3), dtype=np.uint8)
+
+        for theta in np.linspace(0, np.pi, 7):
+            space = cv2.line(space, pt1=(int(R - R * np.cos(theta)), int(R - R * np.sin(theta))), pt2=(R, R),
+                             color=(255, 255, 255), thickness=2, lineType=cv2.LINE_AA)
+        for radius in np.linspace(0, R, 5):
+            if radius == 0:
+                continue
+            space = cv2.circle(space, center=(R, R), radius=int(radius), color=(255, 255, 255), thickness=2,
+                               lineType=cv2.LINE_AA)
+        space = space[:R, :, :]
+
+        for j, anchor in enumerate(anchors[torch.logical_not(fg_mask[i])].cpu().numpy()):
+            c = color[stride_tensor[j].item()]
+            bottom_corners = (anchor[:4] * SCALE)
+            x = bottom_corners[:, 0] + R
+            y = -bottom_corners[:, 2] + R
+            pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1).astype(np.int32)[[0, 1, 3, 2]]
+            space = cv2.polylines(space, pts=[pts], isClosed=True, color=c)
+        for assigned in anchors[fg_mask[i]].cpu().numpy():
+            bottom_corners = (assigned[:4] * SCALE)
+            x = bottom_corners[:, 0] + R
+            y = -bottom_corners[:, 2] + R
+            pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1).astype(np.int32)[
+                [0, 1, 3, 2]]
+            space = cv2.polylines(space, pts=[pts], isClosed=True, color=(0, 0, 255), thickness=2)
+        for gt in gt_kps[i][mask_gt[i].bool().squeeze(-1)].cpu().numpy():
+            bottom_corners = (gt[:4] * SCALE)
+            x = bottom_corners[:, 0] + R
+            y = -bottom_corners[:, 2] + R
+            pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1).astype(np.int32)[
+                [0, 1, 3, 2]]
+            space = cv2.polylines(space, pts=[pts], isClosed=True, color=(0, 255, 0), thickness=2)
+
+        ax[i].imshow(space)
+        ax[i].axis("off")
+    plt.show()
+    print()
+
+def project_to_image(kps, calib):
+    sample_num = kps.shape[0]
+    corners3d_hom = torch.cat((kps, torch.ones((sample_num, 8, 1), device=calib.device)), axis=2)  # (N, 8, 4)
+
+    mat = get_mat(calib)
+    img_pts = torch.matmul(corners3d_hom, mat.T.double()) # (N, 8, 3)
+    x, y = img_pts[:, :, 0] / img_pts[:, :, 2], img_pts[:, :, 1] / img_pts[:, :, 2]
+    boxes_corner = torch.cat((x.reshape(-1, 8, 1), y.reshape(-1, 8, 1)), axis=2)
+    return boxes_corner
+
+def get_mat(calib):
+    mat = torch.eye(4, device=calib.device)[:3]
+    cu, cv, fu, fv, tx, ty = calib.split((1, 1, 1, 1, 1, 1), dim=-1)
+    mat[0, 2] = cu
+    mat[1, 2] = cv
+    mat[0, 0] = fu
+    mat[1, 1] = fv
+    mat[0, 3] = tx * (-fu)
+    mat[1, 3] = ty * (-fv)
+    return mat
 
 class DetectLoss3d:
     def __init__(self, model):
         self.model = model
         self.teacher_model = None
         if self.model.args.distillation or self.model.args.fgdm_supervision:
-            if "yolo" in self.model.args.distillation_path.lower():
+            if self.model.args.distillation_teacher == "yolo":
                 from .. import YOLOv10_3D
                 self.teacher_model = YOLOv10_3D(self.model.args.distillation_path).to("cuda")
+            elif self.model.args.distillation_teacher == "self":
+                self.teacher_model = self.model
             else:
                 from .dino import DinoDepther
                 self.teacher_model = DinoDepther("base")
@@ -906,10 +1053,14 @@ class DDDetectionLoss:
 
         if self.hyp.distillation and embeddings is not None:
             embeddings = torch.cat([emb.view(emb.shape[0], emb.shape[1], -1) for emb in embeddings], dim=2)
-            if "yolo" in self.hyp.distillation_path:
-                loss[6] = self.supervisor.forward_larger_brother(batch["img"].detach(), embeddings)
+            if self.hyp.distillation_teacher in ["yolo", "self"] :
+                forwards = (anchor_points, stride_tensor, self.no, self.nc, calibs, mean_sizes, self.assigner)
+                loss[6] = self.supervisor.distill_from_yolo(batch["non_mix_imgs"].detach(), embeddings,
+                                                            gt_src_img.squeeze(-1).long(), mask_gt,
+                                                            gts, forwards, batch["mixed"].bool(),
+                                                            fg_mask, target_gt_idx)
             else:
-                loss[6] = self.supervisor.forward_head(
+                loss[6] = self.supervisor.distill_from_dino(
                     batch["non_mix_imgs"].detach(), gt_center_3d, pred_3d[..., :2], embeddings, fg_mask.bool(),
                     target_gt_idx, mask_gt.bool().squeeze(-1), batch["mixed"].bool(), gt_src_img.squeeze(-1).long(),
                     stride_tensor, anchor_points
@@ -918,9 +1069,9 @@ class DDDetectionLoss:
         return loss.sum() * batch_size, loss
 
     def plot_assignments(self, batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt):
-        self.debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor)
-        self.debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt)
-        self.debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor)
+        debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor)
+        debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt)
+        debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor)
 
     def compute_loss_weights(self, current_loss):
         weights = torch.ones(6, device=self.device)
@@ -980,152 +1131,6 @@ class DDDetectionLoss:
 
         return torch.stack((depth_loss, offset3d_loss, size3d_loss, heading_loss))
 
-    def debug_show_assigned_targets2d(self, batch, targets_2d, fg_mask, pred_bboxes, stride_tensor):
-        target_center_2d, target_size_2d = targets_2d
-        target_bboxes = torch.cat(
-            (target_center_2d - target_size_2d / 2, target_center_2d + target_size_2d / 2), dim=-1)
-
-        color = {8: (255, 255, 0), 16: (0, 255, 255), 32: (255, 0, 255)}
-        mean = 0
-        std = 1
-        fig, axes = plt.subplots(2, 2, figsize=(18, 12), gridspec_kw={'wspace': 0, 'hspace': 0},
-                                 constrained_layout=True)
-        for i, ax in enumerate(np.ravel(axes)):
-            img = batch["img"][i].detach().cpu().numpy().transpose(1, 2, 0).copy()
-            img = np.clip((img * std + mean) * 255, 0, 255).astype(np.uint8)
-
-            target_boxes = target_bboxes[i][fg_mask[i]].int().cpu()
-            for box in target_boxes:
-                p1, p2 = box.split((2, 2), dim=0)
-                cv2.rectangle(img, p1.numpy(), p2.numpy(), (255, 0, 0), 3)  # gt
-
-            pred_boxes = pred_bboxes[i][fg_mask[i]].cpu()
-            stride = stride_tensor[fg_mask[i]].cpu()
-            for j, box in enumerate(pred_boxes):
-                c = color[stride[j].item()]
-                p1, p2 = box.split((2, 2), dim=0)
-                cv2.rectangle(img, p1.int().numpy(), p2.int().numpy(), c)  # gt
-                cv2.circle(img, (p1 + (p2 - p1) / 2).int().numpy(), 4, (0, 255, 255), -1)
-
-            t_center_2d = target_center_2d[i][fg_mask[i]].int().cpu()
-            for center2d in t_center_2d:
-                cv2.circle(img, center2d.numpy(), 5, (0, 0, 255), -1)
-
-            ax.imshow(img)
-            ax.axis("off")
-        plt.show()
-        print()
-
-    def debug_show_assigned_targets3d(self, batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt):
-        target_center_3d, _, _, _, _ = targets_3d
-        box_idxs = [0, 1, 2, 3, 0,  # base
-                    4, 7, 3, 7,  # right
-                    6, 2, 6,  # back
-                    5,  # left
-                    4, 1, 5, 0]  # front
-        color_none_bottom, color_bottom = ((255, 0, 0), (255, 0, 0))
-        color_gt_none_bot, color_gt_bot = ((0, 255, 0), (0, 0, 255))
-        fig, axes = plt.subplots(2, 2, figsize=(18, 12), gridspec_kw={'wspace': 0, 'hspace': 0},
-                                 constrained_layout=True)
-        for i, ax in enumerate(np.ravel(axes)):
-            img = batch["img"][i].detach().cpu().numpy().transpose(1, 2, 0).copy()
-            img = np.clip((img) * 255, 0, 255).astype(np.uint8)
-
-            t_center_3d = target_center_3d[i][fg_mask[i]].int().cpu()
-            pd_kps = self.project_to_image(pred_kps[i][fg_mask[i]], batch["calib"][i]).int().cpu()
-            gr_kps = self.project_to_image(gt_kps[i][mask_gt[i].bool().squeeze(-1)], batch["calib"][i]).int().cpu()
-            for center_3d in t_center_3d:
-                cv2.circle(img, center_3d.numpy(), 5, (0, 0, 255), -1)
-            for kp in pd_kps:
-                cv2.polylines(img, [kp[box_idxs[:5]].numpy().astype(np.int32).reshape((-1, 1, 2))], isClosed=False,
-                              color=color_none_bottom, thickness=1, lineType=cv2.LINE_AA)
-                cv2.polylines(img, [kp[box_idxs[5:]].numpy().astype(np.int32).reshape((-1, 1, 2))], isClosed=True,
-                              color=color_bottom, thickness=1, lineType=cv2.LINE_AA)
-            for kp in gr_kps:
-                cv2.polylines(img, [kp[box_idxs[:5]].numpy().astype(np.int32).reshape((-1, 1, 2))], isClosed=False,
-                              color=color_gt_none_bot, thickness=1, lineType=cv2.LINE_AA)
-                cv2.polylines(img, [kp[box_idxs[5:]].numpy().astype(np.int32).reshape((-1, 1, 2))], isClosed=True,
-                              color=color_gt_bot, thickness=1, lineType=cv2.LINE_AA)
-
-            ax.imshow(img)
-            ax.axis("off")
-        plt.show()
-        print()
-
-    def debug_show_pred_bevs(self, pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor):
-        max_imgs = 4
-        fig, ax = plt.subplots(math.ceil(max_imgs ** 0.5), math.ceil(max_imgs ** 0.5),
-                               figsize=(36, 18), gridspec_kw={'wspace': 0, 'hspace': 0}, constrained_layout=True)
-        ax = ax.ravel()
-        color = {8: (255, 255, 0), 16: (0, 255, 255), 32: (255, 0, 255)}
-
-        for i, anchors in enumerate(pred_kps):
-            if i >= max_imgs:
-                break
-            MAX_DIST = 70
-            SCALE = 30
-
-            # Create BEV Space
-            R = (MAX_DIST * SCALE)
-            space = np.zeros((R * 2, R * 2, 3), dtype=np.uint8)
-
-            for theta in np.linspace(0, np.pi, 7):
-                space = cv2.line(space, pt1=(int(R - R * np.cos(theta)), int(R - R * np.sin(theta))), pt2=(R, R),
-                                 color=(255, 255, 255), thickness=2, lineType=cv2.LINE_AA)
-            for radius in np.linspace(0, R, 5):
-                if radius == 0:
-                    continue
-                space = cv2.circle(space, center=(R, R), radius=int(radius), color=(255, 255, 255), thickness=2,
-                                   lineType=cv2.LINE_AA)
-            space = space[:R, :, :]
-
-            for j, anchor in enumerate(anchors[torch.logical_not(fg_mask[i])].cpu().numpy()):
-                c = color[stride_tensor[j].item()]
-                bottom_corners = (anchor[:4] * SCALE)
-                x = bottom_corners[:, 0] + R
-                y = -bottom_corners[:, 2] + R
-                pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1).astype(np.int32)[[0, 1, 3, 2]]
-                space = cv2.polylines(space, pts=[pts], isClosed=True, color=c)
-            for assigned in anchors[fg_mask[i]].cpu().numpy():
-                bottom_corners = (assigned[:4] * SCALE)
-                x = bottom_corners[:, 0] + R
-                y = -bottom_corners[:, 2] + R
-                pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1).astype(np.int32)[
-                    [0, 1, 3, 2]]
-                space = cv2.polylines(space, pts=[pts], isClosed=True, color=(0, 0, 255), thickness=2)
-            for gt in gt_kps[i][mask_gt[i].bool().squeeze(-1)].cpu().numpy():
-                bottom_corners = (gt[:4] * SCALE)
-                x = bottom_corners[:, 0] + R
-                y = -bottom_corners[:, 2] + R
-                pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1).astype(np.int32)[
-                    [0, 1, 3, 2]]
-                space = cv2.polylines(space, pts=[pts], isClosed=True, color=(0, 255, 0), thickness=2)
-
-            ax[i].imshow(space)
-            ax[i].axis("off")
-        plt.show()
-        print()
-
-    def project_to_image(self, kps, calib):
-        sample_num = kps.shape[0]
-        corners3d_hom = torch.cat((kps, torch.ones((sample_num, 8, 1), device=calib.device)), axis=2)  # (N, 8, 4)
-
-        mat = self.get_mat(calib)
-        img_pts = torch.matmul(corners3d_hom, mat.T.double()) # (N, 8, 3)
-        x, y = img_pts[:, :, 0] / img_pts[:, :, 2], img_pts[:, :, 1] / img_pts[:, :, 2]
-        boxes_corner = torch.cat((x.reshape(-1, 8, 1), y.reshape(-1, 8, 1)), axis=2)
-        return boxes_corner
-
-    def get_mat(self, calib):
-        mat = torch.eye(4, device=calib.device)[:3]
-        cu, cv, fu, fv, tx, ty = calib.split((1, 1, 1, 1, 1, 1), dim=-1)
-        mat[0, 2] = cu
-        mat[1, 2] = cv
-        mat[0, 0] = fu
-        mat[1, 1] = fv
-        mat[0, 3] = tx * (-fu)
-        mat[1, 3] = ty * (-fv)
-        return mat
 
 def laplacian_aleatoric_uncertainty_loss_new(input, target, log_variance):
     '''
@@ -1170,15 +1175,62 @@ class SupervisionLoss:
         elif self.criterion == "mse":
             self.loss = nn.MSELoss()
 
-    def forward_larger_brother(self, img, pred_embeddings):
+    def distill_from_yolo(self, imgs, pred_embeddings, src_img, mask_gt, gts, forwards, mixed_mask, pred_fg_mask, pred_target_gt_idx):
         with torch.inference_mode():
-            _, teacher_embeddings = self.forward_teacher(img)
+            teacher_pred0, teacher_embeddings0 = self.forward_teacher(imgs[:, 0])
+            teacher_embeddings1 = torch.zeros_like(teacher_embeddings0)
+            teacher_pred1 = torch.zeros_like(teacher_pred0)
+            if mixed_mask.sum() > 0:
+                teacher_pred1[mixed_mask], teacher_embeddings1[mixed_mask] = self.forward_teacher(imgs[mixed_mask][:, 1])
+            teacher_embeddings1[~mixed_mask] = teacher_embeddings0[~mixed_mask]
+            teacher_pred1[~mixed_mask] = teacher_pred0[~mixed_mask]
 
-        teacher_emb = teacher_embeddings.transpose(1, 2).reshape(-1, 64)
-        pred_emb = pred_embeddings.transpose(1, 2).reshape(-1, 64)
+        mask_gt0 = mask_gt.bool() & (src_img.unsqueeze(-1) == 0)
+        mask_gt1 = mask_gt.bool() & (src_img.unsqueeze(-1) == 1)
+        teacher_fg_mask0, teacher_target_gt_idx0 = self.get_teacher_assignments(teacher_pred0, gts, mask_gt0, *forwards)
+        teacher_fg_mask1, teacher_target_gt_idx1 = self.get_teacher_assignments(teacher_pred1, gts, mask_gt1, *forwards)
 
+        loss = torch.zeros((pred_embeddings.shape[0]), device=imgs.device)
+        count = 0
+
+        for i in range(imgs.shape[0]):
+            teacher_fg_mask0_, teacher_target_gt_idx0_ = teacher_fg_mask0[i], teacher_target_gt_idx0[i]
+
+            pred_fg_mask_, pred_target_gt_idx_ = pred_fg_mask[i], pred_target_gt_idx[i]
+            teacher_fg_embeddings0_ = teacher_embeddings0[i].transpose(-2,-1)[teacher_fg_mask0_]
+            teacher_fg_target_gt_idx0_ = teacher_target_gt_idx0_[teacher_fg_mask0_]
+
+            if mixed_mask[i]:
+                teacher_fg_mask1_, teacher_target_gt_idx1_ = teacher_fg_mask1[i], teacher_target_gt_idx1[i]
+                teacher_fg_embeddings1_ = teacher_embeddings1[i].transpose(-2, -1)[teacher_fg_mask1_]
+                teacher_fg_target_gt_idx1_ = teacher_target_gt_idx1_[teacher_fg_mask1_]
+
+            pred_fg_embeddings0_ = pred_embeddings[i].transpose(-2, -1)[pred_fg_mask_]
+            pred_fg_target_gt_idx0_ = pred_target_gt_idx_[pred_fg_mask_]
+
+            pairs = []
+            k = 0
+            for pred_embedding, pred_gt_idx in zip(pred_fg_embeddings0_, pred_fg_target_gt_idx0_):
+                for teacher_embedding0, teacher_gt_idx in zip(teacher_fg_embeddings0_, teacher_fg_target_gt_idx0_):
+                    if pred_gt_idx == teacher_gt_idx:
+                        pairs.append((pred_embedding, teacher_embedding0))
+                        k += 1
+                if mixed_mask[i]:
+                    for teacher_embedding1, teacher_gt_idx in zip(teacher_fg_embeddings1_, teacher_fg_target_gt_idx1_):
+                        if pred_gt_idx == teacher_gt_idx:
+                            pairs.append((pred_embedding, teacher_embedding1))
+                            k += 1
+            if k > 0:
+                pred_embs = torch.stack([p[0] for p in pairs], dim=0)
+                teach_embs = torch.stack([p[1] for p in pairs], dim=0)
+                loss[i] = self.get_loss(pred_embs, teach_embs)
+            count += k
+
+        return loss.sum() / count
+
+    def get_loss(self, pred_emb, teach_emb):
         if self.criterion == "soft":
-            soft_targets = nn.functional.softmax(teacher_emb / self.T, dim=-1)
+            soft_targets = nn.functional.softmax(teach_emb / self.T, dim=-1)
             soft_prob = nn.functional.log_softmax(pred_emb / self.T, dim=-1)
             if soft_targets.shape[0] == 0:
                 loss = torch.zeros(1, requires_grad=True)
@@ -1186,15 +1238,15 @@ class SupervisionLoss:
                 loss = torch.sum(soft_targets * (soft_targets.log() - soft_prob)) / soft_prob.size()[0] * (
                         self.T ** 2)
         elif self.criterion == "mse":
-            loss = self.loss(pred_emb, teacher_emb)
+            loss = self.loss(pred_emb, teach_emb)
         elif self.criterion == "cos":
-            loss = self.loss(pred_emb, teacher_emb,
-                                        target=torch.ones(teacher_emb.size(0)).to(teacher_emb.device))
+            loss = self.loss(pred_emb, teach_emb,
+                                        target=torch.ones(teach_emb.size(0)).to(teach_emb.device))
         else:
-            raise RuntimeError(f"Unknown criterion function: {self.criterion}")
-        return loss.mean()
+            loss = torch.zeros(1, requires_grad=True)
+        return loss.sum()
 
-    def forward_head(self, imgs, gt_center_3d, pred_center_3d, pred_embeddings, fg_mask, target_gt_idx, mask_gt, mixed_mask, src_img, stride_tensor, anchor_points):
+    def distill_from_dino(self, imgs, gt_center_3d, pred_center_3d, pred_embeddings, fg_mask, target_gt_idx, mask_gt, mixed_mask, src_img, stride_tensor, anchor_points):
         loss = torch.zeros(imgs.shape[0], device=imgs.device)
 
         with torch.inference_mode():
@@ -1280,10 +1332,22 @@ class SupervisionLoss:
 
     def forward_teacher(self, imgs):
         from ultralytics.models import YOLOv10_3D
+        from ..nn.tasks import YOLOv10_3DDetectionModel
         if isinstance(self.teacher_model, YOLOv10_3D):
             self.teacher_model.model.model[-1].dense = True # Set the detection head to dense
             res_dict = self.teacher_model.model(imgs)
-            return res_dict["one2one"], torch.cat([x.reshape(x.shape[0], x.shape[1], -1) for x in res_dict["o2o_embs"]], dim=2)
+            pred = res_dict["one2one"][1]
+            pred_shape = pred[0].shape
+            preds = torch.cat([xi.view(pred_shape[0], pred_shape[1], -1) for xi in pred], 2)
+            return preds, torch.cat([x.reshape(x.shape[0], x.shape[1], -1) for x in res_dict["o2o_embs"]], dim=2)
+        elif isinstance(self.teacher_model, YOLOv10_3DDetectionModel):
+            self.teacher_model.model[-1].dense = True # Set the detection head to dense
+            res_dict = self.teacher_model(imgs)
+            self.teacher_model.model[-1].dense = False
+            pred = res_dict["one2one"]
+            pred_shape = pred[0].shape
+            preds = torch.cat([xi.view(pred_shape[0], pred_shape[1], -1) for xi in pred], 2)
+            return preds, torch.cat([x.reshape(x.shape[0], x.shape[1], -1) for x in res_dict["o2o_embs"]], dim=2)
         else:
             return self.teacher_model(imgs)
 
@@ -1316,6 +1380,54 @@ class SupervisionLoss:
         plt.show()
         return
 
+    def bbox_decode(self, anchor_points, pred_2d, stride_tensor):
+        # anchor_points:
+        # pred_2d: offset_2d (2), size_2d(2)
+        offset, size = pred_2d.split((2, 2), dim=-1)
+        centers = anchor_points + offset
+        xy1 = centers - size / 2
+        xy2 = centers + size / 2
+        return torch.cat((xy1, xy2), dim=-1) * stride_tensor
+
+    def get_teacher_assignments(self, feats, gts, mask_gt, anchor_points, stride_tensor, no, nc, calibs, mean_sizes, assigner):
+        pred_scores, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un = (
+            feats.split(
+                (nc, 2, 2, 2, 3, 24, 1, 1), 1
+            ))
+
+        # num classes
+        pred_scores = pred_scores.permute(0, 2, 1).contiguous()
+        # offset 2d (2), size 2d (2) = 4
+        pred_2d = torch.cat((pred_o2d.permute(0, 2, 1).contiguous(), pred_s2d.permute(0, 2, 1).contiguous()), -1)
+        # offset 3d (2), size 3d (3) = 5
+        pred_3d = torch.cat((pred_o3d.permute(0, 2, 1).contiguous(),  # offset 3d (2)
+                             pred_s3d.permute(0, 2, 1).contiguous(),  # size 3d (3)
+                             pred_hd.permute(0, 2, 1).contiguous(),  # heading bins (12) + heading res (12)
+                             pred_dep.permute(0, 2, 1).contiguous(),  # depth (1)
+                             pred_dep_un.permute(0, 2, 1).contiguous()), -1)  # depth uncertainty (1)
+        # = 38
+
+        gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin, gt_heading_res, gt_src_img = gts.split(
+            (1, 4, 2, 2, 2, 3, 1, 1, 1, 1), 2)
+        #mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0)
+
+        # Pboxes
+        pred_bboxes = self.bbox_decode(anchor_points, pred_2d, stride_tensor)
+
+        targets, fg_mask, target_gt_idx, pred_kps, gt_kps = assigner(
+            pred_scores.detach().sigmoid(),
+            pred_bboxes.detach().type(gt_bboxes.dtype),
+            pred_3d.detach(),
+            anchor_points * stride_tensor,
+            (gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin,
+             gt_heading_res),
+            mask_gt,
+            stride_tensor,
+            calibs,
+            mean_sizes
+        )
+        #debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor)
+        return fg_mask, target_gt_idx
 
 class ForegroundDepthMapLoss(nn.Module):
 
