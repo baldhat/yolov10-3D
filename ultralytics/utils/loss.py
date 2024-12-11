@@ -744,7 +744,7 @@ class DetectLoss3d:
         self.model = model
         self.teacher_model = None
         if self.model.args.distillation or self.model.args.fgdm_supervision:
-            if "yolo" in self.model.args.distillation_path.lower():
+            if self.model.args.distillation_teacher == "yolo":
                 from .. import YOLOv10_3D
                 self.teacher_model = YOLOv10_3D(self.model.args.distillation_path).to("cuda")
             else:
@@ -906,7 +906,7 @@ class DDDetectionLoss:
 
         if self.hyp.distillation and embeddings is not None:
             embeddings = torch.cat([emb.view(emb.shape[0], emb.shape[1], -1) for emb in embeddings], dim=2)
-            if "yolo" in self.hyp.distillation_path:
+            if self.hyp.distillation_teacher == "yolo":
                 loss[6] = self.supervisor.forward_larger_brother(batch["img"].detach(), embeddings)
             else:
                 loss[6] = self.supervisor.forward_head(
