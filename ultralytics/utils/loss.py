@@ -1345,6 +1345,8 @@ class SupervisionLoss:
             res_dict = self.teacher_model(imgs)
             self.teacher_model.model[-1].dense = False
             pred = res_dict["one2one"]
+            if isinstance(pred, tuple):
+                pred = pred[1]
             pred_shape = pred[0].shape
             preds = torch.cat([xi.view(pred_shape[0], pred_shape[1], -1) for xi in pred], 2)
             return preds, torch.cat([x.reshape(x.shape[0], x.shape[1], -1) for x in res_dict["o2o_embs"]], dim=2)
