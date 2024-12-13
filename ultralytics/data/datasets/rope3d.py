@@ -72,6 +72,7 @@ class Rope3Dataset(data.Dataset):
         self.pred_rot_mat = args.pred_rot_mat
         self.load_depth_maps = False
         self.rotation = args.rotation
+        self.virtual_focal_length = args.virtual_focal_length
 
         assert(self.pred_rot_mat)
 
@@ -124,6 +125,7 @@ class Rope3Dataset(data.Dataset):
         rot_angle = 0
         scale = 1
         shift = np.array([0, 0])
+        vdepth_factor0 = self.virtual_focal_length / calib.fv
 
         if self.data_augmentation:
             if np.random.random() < 0.5 and self.mixup:
@@ -157,8 +159,9 @@ class Rope3Dataset(data.Dataset):
                 random_index = np.random.randint(self.__len__())
                 random_index = int(self.idx_to_img_id[random_index])
                 calib_temp = self.get_calib(random_index)
-
-                if calib_temp.cu == calib.cu and calib_temp.cv == calib.cv and calib_temp.fu == calib.fu and calib_temp.fv == calib.fv:
+                vdepth_factor1 = self.virtual_focal_length / calib_temp.fv
+                
+                if True: #calib_temp.cu == calib.cu and calib_temp.cv == calib.cv and calib_temp.fu == calib.fu and calib_temp.fv == calib.fv:
                     img_temp = self.get_image(random_index)
                     img_size_temp = np.array(img.size)
                     dst_W_temp, dst_H_temp = img_size_temp
@@ -196,6 +199,7 @@ class Rope3Dataset(data.Dataset):
         gt_heading_bin = []
         gt_heading_res = []
         gt_rot_mat = []
+        gt_vdep_factors = []
 
         if self.split != 'test':
             objects = self.get_label(index)
@@ -227,6 +231,7 @@ class Rope3Dataset(data.Dataset):
                     gt_heading_bin.append(_head_bin)
                     gt_heading_res.append(_head_res)
                     gt_rot_mat.append(_rot_mat)
+                    gt_vdep_factors.append(vdepth_factor0)
 
             if random_mix_flag == True:
                 objects = self.get_label(random_index)
@@ -253,6 +258,7 @@ class Rope3Dataset(data.Dataset):
                         gt_heading_bin.append(_head_bin)
                         gt_heading_res.append(_head_res)
                         gt_rot_mat.append(_rot_mat)
+                        gt_vdep_factors.append(vdepth_factor1)
 
         inputs = torch.tensor(img)
         info = {'img_id': index,
@@ -289,7 +295,8 @@ class Rope3Dataset(data.Dataset):
             "heading_res": torch.tensor(np.array(gt_heading_res)),
             "mixed": torch.tensor(np.array(random_mix_flag, dtype=np.uint8)),
             "rot_mat": torch.tensor(gt_rot_mat),
-            "shift": torch.tensor(shift)
+            "shift": torch.tensor(shift),
+            "vdepth_factors": torch.tensor(gt_vdep_factors)
         }
         return data
 
@@ -575,7 +582,7 @@ class Rope3Dataset(data.Dataset):
             if k in ["img", "coord_range", "ratio_pad", "calib", "mixed", "shift"]:
                 value = torch.stack(value, 0)
             if k in ["bboxes", "cls", "depth", "center_3d", "center_2d", "size_2d", "heading_bin",
-                     "heading_res", "size_3d", "rot_mat"]:
+                     "heading_res", "size_3d", "rot_mat", "vdepth_factors"]:
                 value = torch.cat(value, 0)
             if k not in ["mean_sizes"]:
                 new_batch[k] = value

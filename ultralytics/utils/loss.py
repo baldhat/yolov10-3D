@@ -795,12 +795,12 @@ class DDDetectionLoss:
     def preprocess(self, targets, batch_size, scale_tensor):
         """Preprocesses the target counts and matches with the input batch size to output a tensor."""
         if targets.shape[0] == 0:
-            out = torch.zeros(batch_size, 0, 24, device=self.device)
+            out = torch.zeros(batch_size, 0, 25, device=self.device)
         else:
             i = targets[:, 0]  # image index
             _, counts = i.unique(return_counts=True)
             counts = counts.to(dtype=torch.int32)
-            out = torch.zeros(batch_size, counts.max(), 24, device=self.device)
+            out = torch.zeros(batch_size, counts.max(), 25, device=self.device)
             for j in range(batch_size):
                 matches = i == j
                 n = matches.sum()
@@ -859,12 +859,12 @@ class DDDetectionLoss:
         gts = torch.cat((batch["batch_idx"].view(-1, 1), batch["cls"].view(-1, 1),
                                 batch["bboxes"], batch["center_2d"], batch["size_2d"],
                                 batch["center_3d"], batch["size_3d"], batch["depth"].view(-1, 1),
-                                batch["rot_mat"]), 1)
+                                batch["rot_mat"], batch["vdepth_factors"].view(-1, 1)), 1)
         gts = self.preprocess(gts.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
         calibs = batch["calib"]
         mean_sizes = batch["mean_sizes"]
-        gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_rot_mat = gts.split(
-            (1, 4, 2, 2, 2, 3, 1, 9), 2)
+        gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_rot_mat, gt_vdepth_factors = gts.split(
+            (1, 4, 2, 2, 2, 3, 1, 9, 1), 2)
         mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0)
 
         # Pboxes
@@ -875,7 +875,7 @@ class DDDetectionLoss:
             pred_bboxes.detach().type(gt_bboxes.dtype),
             pred_3d.detach(),
             anchor_points * stride_tensor,
-            (gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_rot_mat),
+            (gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_rot_mat, gt_vdepth_factors),
             mask_gt,
             stride_tensor,
             calibs,
@@ -883,14 +883,14 @@ class DDDetectionLoss:
         )
         try:
             (_, target_scores, target_center_2d, target_size_2d, target_center_3d,
-             target_size_3d, target_depth, target_rot_mat) = targets
+             target_size_3d, target_depth, target_rot_mat, target_vdepth_factors) = targets
         except Exception as e:
             return loss.sum() * batch_size, loss
 
         target_scores_sum = max(target_scores.sum(), 1)
 
         targets_2d = targets[2:4]
-        targets_3d = targets[4:9] # center, size, depth, head_bin, head_res
+        targets_3d = targets[4:] # center, size, depth, rot_mat, vdepth_factors
 
         #self.plot_assignments(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt)
 
@@ -937,9 +937,9 @@ class DDDetectionLoss:
         return (size2d_loss + offset2d_loss) / num_targets
 
     def compute_box3d_loss(self, targets_3d, pred_3d, anchor_points, stride_tensor, fg_mask, num_targets):
-        pred_depth = pred_3d[fg_mask][..., -2]
-        pred_depth_un = pred_3d[fg_mask][..., -1]
-        target_depth = targets_3d[-2][fg_mask].squeeze()
+        pred_depth = pred_3d[fg_mask][..., -2]* targets_3d[4][fg_mask].squeeze()
+        pred_depth_un = pred_3d[fg_mask][..., -1] 
+        target_depth = targets_3d[2][fg_mask].squeeze() 
         depth_loss = (laplacian_aleatoric_uncertainty_loss_new(pred_depth, target_depth, pred_depth_un).sum()
                       / num_targets * self.hyp.depth)
 
@@ -957,7 +957,7 @@ class DDDetectionLoss:
                        / num_targets * self.hyp.size3d)
 
         pred_rot_mat = pred_3d[fg_mask][..., 5:5+9][:6]
-        target_rot_mat = targets_3d[-1][fg_mask][:6]
+        target_rot_mat = targets_3d[3][fg_mask][:6]
         rot_loss = F.l1_loss(pred_rot_mat, target_rot_mat, reduction="sum") / num_targets * self.hyp.heading
         '''
         target_bin = targets_3d[-2][fg_mask]
