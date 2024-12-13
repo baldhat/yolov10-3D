@@ -204,7 +204,7 @@ class Omni3Dataset(data.Dataset):
             objects = self.get_label(index)
             # data augmentation for labels
             if random_flip_flag:
-                calib.flip(img_size)
+                calib.horizontal_flip(img_size)
                 for object in objects:
                     [x1, _, x2, _] = object.box2d # xyxy
                     object.box2d[0], object.box2d[2] = img_size[0] - x2, img_size[0] - x1

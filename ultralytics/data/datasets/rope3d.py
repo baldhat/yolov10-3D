@@ -1,7 +1,6 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
 import os
 
-import cv2
 import torch.utils.data as data
 from PIL import Image
 import subprocess
@@ -15,7 +14,6 @@ from ultralytics.utils.ops import *
 from collections import defaultdict
 import json
 
-from ultralytics.data.utils import angle2class
 from ultralytics.data.datasets.kitti_utils import get_objects_from_dict_rope, Calibration, get_affine_transform, affine_transform
 
 
@@ -25,10 +23,10 @@ class Rope3Dataset(data.Dataset):
         self.path = "/".join(filepath.split("/")[:-1])
         self.split = mode
         self.mode = mode
-        self.class_name = ['Car', 'Pedestrian', 'Bicycle']
-        self.writelist = ['Car', 'Pedestrian', 'Bicycle']
-        self.resolution = np.array([960, 640])  # W * H
-        self.max_objs = 50
+        self.class_name = ['Car', 'Pedestrian', 'Cyclist']
+        self.writelist = ['Car', 'Pedestrian', 'Cyclist']
+        self.resolution = np.array([960, 540])  # W * H
+        self.max_objs = 80
         self.use_camera_dis = False
         self.load_depth_maps = False
 
@@ -41,8 +39,8 @@ class Rope3Dataset(data.Dataset):
         self.imgs = {img['id']: img for img in sorted(self.raw_split['images'], key=lambda img: img['id'])}
         self.idx_to_img_id = {idx: img_id for idx, img_id in enumerate(self.imgs)}
 
-        self.cls2train_id = {"Car": 0, "Pedestrian": 1, "Bicycle": 2}
-        self.train_id2cls = {0: "Car", 1: "Pedestrian", 2: "Bicycle"}
+        self.cls2train_id = {"Car": 0, "Pedestrian": 1, "Cyclist": 2}
+        self.train_id2cls = {0: "Car", 1: "Pedestrian", 2: "Cyclist"}
 
         self.data_cls2data_id = {value["name"].title(): value["id"] for value in self.raw_split["categories"]}
         self.data_id2data_cls = {cls_id: cls_name for cls_name, cls_id in self.data_cls2data_id.items()}
@@ -203,11 +201,11 @@ class Rope3Dataset(data.Dataset):
             objects = self.get_label(index)
             # data augmentation for labels
             if random_flip_flag:
-                calib.flip(img_size)
+                calib.horizontal_flip(img_size)
                 for object in objects:
                     [x1, _, x2, _] = object.box2d # xyxy
                     object.box2d[0], object.box2d[2] = img_size[0] - x2, img_size[0] - x1
-                    object.pos[0] *= -1
+                    object.pos[0] *= -1 # object position is expressed in camera coordinates
                     object.rot_mat = self.left_multiply_matrix @ object.rot_mat @ self.right_multiply_matrix
             if random_rot_flag:
                 pass

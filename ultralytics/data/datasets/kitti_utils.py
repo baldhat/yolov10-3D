@@ -168,10 +168,13 @@ class ObjectRope3D(object):
         self.w = np.array(line["dimensions"])[0]
         self.h = np.array(line["dimensions"])[1]
         self.l = np.array(line["dimensions"])[2]
-        self.pos = np.array(line["center_cam"]) + np.array([0, self.h / 2, 0]) # already the center
         euler = Rotation.from_matrix(line['R_cam']).as_euler('xyz')
         euler = euler + np.asarray([np.pi / 2, 0, 0])
         self.rot_mat = Rotation.from_euler('xyz', euler).as_matrix()
+        self.pos = convert_location_gravity2ground(
+                    torch.Tensor([line['center_cam']]).float(),
+                    torch.Tensor([self.rot_mat]).float(),
+                    torch.from_numpy(np.array([[self.h, self.w, self.l]])).float()).numpy()[0]
         self.level_str = 'UnKnown'
         self.num_lidar = line["lidar_pts"]
         self.behind_camera = line["behind_camera"] # a corner is behind camera
@@ -244,6 +247,12 @@ class Calibration(object):
         self.fv = self.P2[1, 1]
         self.tx = self.P2[0, 3] / (-self.fu)
         self.ty = self.P2[1, 3] / (-self.fv)
+        
+    def horizontal_flip(self, img_size):
+        self.P2[0, 2] = img_size[0] - self.P2[0, 2] - 1
+        self.P2[0, 3] = -self.P2[0, 3]
+        self.cu = self.P2[0, 2]
+        self.tx = self.P2[0, 3] / (-self.fu)
 
     def cart_to_hom(self, pts):
         """
