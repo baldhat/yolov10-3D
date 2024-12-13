@@ -1244,7 +1244,7 @@ class SupervisionLoss:
                                         target=torch.ones(teach_emb.size(0)).to(teach_emb.device))
         else:
             loss = torch.zeros(1, requires_grad=True)
-        return loss.sum()
+        return loss.sum()  * self.weight
 
     def distill_from_dino(self, imgs, gt_center_3d, pred_center_3d, pred_embeddings, fg_mask, target_gt_idx, mask_gt, mixed_mask, src_img, stride_tensor, anchor_points):
         loss = torch.zeros(imgs.shape[0], device=imgs.device)
