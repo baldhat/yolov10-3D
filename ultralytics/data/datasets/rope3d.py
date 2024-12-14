@@ -165,7 +165,7 @@ class Rope3Dataset(data.Dataset):
                 calib_temp = self.get_calib(random_index)
                 vdepth_factor1 = self.virtual_focal_length / calib_temp.fv
                 
-                if True: #calib_temp.cu == calib.cu and calib_temp.cv == calib.cv and calib_temp.fu == calib.fu and calib_temp.fv == calib.fv:
+                if calib_temp.cu == calib.cu and calib_temp.cv == calib.cv and calib_temp.fu == calib.fu and calib_temp.fv == calib.fv:
                     img_temp = self.get_image(random_index)
                     img_size_temp = np.array(img.size)
                     dst_W_temp, dst_H_temp = img_size_temp
@@ -533,7 +533,7 @@ class Rope3Dataset(data.Dataset):
                 bbox = bboxes[i, j].cpu().numpy()
                 bbox = (xywh2xyxy(bbox) / ratio_pad[i][0, [1, 0, 1, 0]]).tolist()
 
-                depth = pred_dep[i, j].numpy()
+                depth = pred_dep[i, j].numpy() / (self.virtual_focal_length / calibs[i].fv)
                 sigma = torch.exp(-pred_dep_un[i, j]).item()
 
                 if undo_augment:

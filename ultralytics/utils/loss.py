@@ -937,7 +937,7 @@ class DDDetectionLoss:
         return (size2d_loss + offset2d_loss) / num_targets
 
     def compute_box3d_loss(self, targets_3d, pred_3d, anchor_points, stride_tensor, fg_mask, num_targets):
-        pred_depth = pred_3d[fg_mask][..., -2]* targets_3d[4][fg_mask].squeeze()
+        pred_depth = pred_3d[fg_mask][..., -2] / targets_3d[4][fg_mask].squeeze()
         pred_depth_un = pred_3d[fg_mask][..., -1] 
         target_depth = targets_3d[2][fg_mask].squeeze() 
         depth_loss = (laplacian_aleatoric_uncertainty_loss_new(pred_depth, target_depth, pred_depth_un).sum()
