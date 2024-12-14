@@ -38,6 +38,7 @@ class Rope3Dataset(data.Dataset):
 
         self.imgs = {img['id']: img for img in sorted(self.raw_split['images'], key=lambda img: img['id'])}
         self.idx_to_img_id = {idx: img_id for idx, img_id in enumerate(self.imgs)}
+        self.img_file2img_id = {img["file_path"].split(os.path.sep)[-1]: idx for idx, img in self.imgs.items()}
 
         self.cls2train_id = {"Car": 0, "Pedestrian": 1, "Cyclist": 2}
         self.train_id2cls = {0: "Car", 1: "Pedestrian", 2: "Cyclist"}
@@ -100,6 +101,9 @@ class Rope3Dataset(data.Dataset):
         calib = np.array(self.imgs[idx]["K"])
         calib = np.hstack((calib, np.zeros((3, 1))))
         return Calibration({"P2": calib, 'R0': 0, "Tr_velo2cam": np.ones_like(calib)})
+    
+    def get_c2g(self, idx):
+        return np.array(self.imgs[idx]["c2g_trans"])
 
     def get_im_files(self):
         return self.imgs.values()
@@ -262,6 +266,7 @@ class Rope3Dataset(data.Dataset):
 
         inputs = torch.tensor(img)
         info = {'img_id': index,
+                'img_file': self.imgs[index]["file_path"].split(os.path.sep)[-1],
                 'img_size': img_size,
                 'trans_inv': trans_inv}
 
@@ -282,7 +287,7 @@ class Rope3Dataset(data.Dataset):
             "cls": torch.tensor(np.array(gt_cls)),
             "bboxes": bboxes,
             "batch_idx": torch.zeros(len(gt_boxes_2d)),  # Used during collate_fn
-            "im_file": '%06d.txt' % info["img_id"],
+            "im_file": info["img_file"],
             "ori_shape": info["img_size"][::-1],  # this one is (height, width)
             "ratio_pad": torch.tensor(ratio_pad),
             "center_2d": torch.tensor(np.array(gt_center_2d)),
@@ -392,72 +397,70 @@ class Rope3Dataset(data.Dataset):
         boxes_object_frame = get_omni_eval_corners(size3d)
         return transform_to_camera(boxes_object_frame, location, rotation)
 
-    def get_preds_and_gts(self, results):
-        raise NotImplementedError("evaluation of rope3d has not yet been implemented")
-        pred_annos = []
-
-        for (key, value) in results.items():
-            frame_id = int(key.split(".")[0])
-            frame_pred = {
-                "image_id": frame_id,
-                "K": self.imgs[frame_id]["K"],
-                "width": self.imgs[frame_id]["width"],
-                "height": self.imgs[frame_id]["height"],
-                "instances": []}
-
-            for pred in value:
-                pred_instance = {}
-
-                location = pred[17:17+3]
-                rotation = np.array(pred[1:10]).reshape(3, 3)
-                dsc_euler = Rotation.from_matrix(rotation).as_euler('xyz')
-                omni_euler = dsc_euler - np.asarray([np.pi / 2, 0, 0])
-                omni_rot_matrix = Rotation.from_euler('xyz', omni_euler).as_matrix()
-                size3d = pred[14:14+3] # h,w,l
-                box2dxyxy = np.clip(np.array(pred[10:10+4]), 0, np.array([frame_pred["width"], frame_pred["height"], frame_pred["width"], frame_pred["height"]]))
-
-                pred_instance['image_id'] = frame_id
-                pred_instance['category_id'] = self.data_cls2data_id[self.train_id2cls[int(pred[0])]]
-                pred_instance['bbox'] = xyxy2ltwh(box2dxyxy).tolist() #x0y0wh absolute
-                pred_instance['score'] = float(pred[-1])
-                pred_instance['depth'] = location[-1]
-                pred_instance['bbox3D'] = self.get_3d_box(torch.tensor(location), torch.tensor(rotation), torch.tensor(size3d))[0, 0].numpy().tolist()
-                pred_instance['center_cam'] = location
-                pred_instance['center_2D'] = [pred_instance['bbox'][0] + pred_instance['bbox'][2] / 2, pred_instance['bbox'][1] + pred_instance['bbox'][3] / 2]
-                pred_instance['dimensions'] = [size3d[1], size3d[0], size3d[2]] # Needs: w, h, l
-                pred_instance['pose'] = omni_rot_matrix.tolist()
-
-                frame_pred["instances"].append(pred_instance)
-            pred_annos.append(frame_pred)
-
-        return pred_annos
+    def save_preds(self, results, output_dir):
+        output_dir = os.path.join(output_dir, 'preds')
+        os.makedirs(output_dir, exist_ok=True)
+        for img_file in results.keys():
+            out_path = os.path.join(output_dir, img_file.split(".")[0] + ".txt")
+            f = open(out_path, 'w')
+            for i in range(len(results[img_file])):
+                class_name = self.class_name[int(results[img_file][i][0])]
+                f.write('{} 0.0 0'.format(class_name))
+                for j in range(1, len(results[img_file][i])):
+                    f.write(' {:.2f}'.format(results[img_file][i][j]))
+                f.write('\n')
+            f.close()
+        return output_dir
 
     def get_stats(self, results, save_dir):
-        raise NotImplementedError("evaluation of rope3d has not yet been implemented")
-        pred_annos = self.get_preds_and_gts(results)
+        output_dir = self.save_preds(results, save_dir)
 
-        file_path = os.path.join(save_dir, "eval_results.pth")
-        torch.save(pred_annos, file_path)
-
-        python = os.path.join(Path.home(), "anaconda3/envs/cubercnn/bin/python")
-        if not os.path.exists(python):
-            python = os.path.join(Path.home(), "miniconda3/envs/cubercnn/bin/python")
-        command = (f"{python} -u ultralytics/data/datasets/omni_eval/eval.py "
-                   f"--dataset_names [KITTI_val] "
-                   f"--pred_ann_files [{file_path}] "
-                   f"--gt_ann_files [/home/stud/mijo/storage/group/deepscenario/CDrone/annotations/val_omni.json] "
-                   f"--log_dir {save_dir}/logs")
-        lines = subprocess.check_output(command, shell= True, text= True, env={}).split("\n")
-
-        values = lines[23].split("|")
-        print("\n".join(lines[21:25]))
-        metric3d = float(values[6].strip())
+        command = (f"source /home/stud/mijo/dev/rope3d_eval/evaluate.sh {output_dir}")
+        out = subprocess.check_output(command, shell= True, text= True, executable="/bin/bash")
+        lines = out.split("\n")
+        
+        metric3d = float(lines[11].split(" ")[3].strip()) # 0.7 moderate
+        #metric3d = float(lines[12].split(" ")[3].strip()) # 0.7 hard
+        #metric3d = float(lines[14].split(" ")[3].strip()) # 0.5 moderate
+        #metric3d = float(lines[15].split(" ")[3].strip()) # 0.5 hard
         return metric3d
+    
+    def egoc_rot_matrix2rot_y(self, c2g_trans: np.ndarray, egoc_rot_matrix: np.ndarray) -> torch.Tensor:
+        """
+        Rope3D provides a single angle per object only and the ground equation.
+        From the ground equation we can compute c2g_trans.
+        We can then use c2g_trans and the egocentric rotation inferred by the network to compute rot_y again.
+        See: https://github.com/liyingying0113/rope3d-dataset-tools/blob/main/show_tools/show_2d3d_box.py
+        Args:
+        c2g_trans (np.ndarray): B x 3 x 3. Rotation matrix to map between ground and camera
+        egoc_rot_matrix (np.ndarray): B x 3 x 3. Egocentric rotation matrix of the object
+        Returns:
+        np.ndarray: B. Rotation of the object around the y-axis of the camera
+        """
+        ground_r_recovered = c2g_trans @ egoc_rot_matrix
+        _, _, yaw_world_res_recovered = Rotation.from_matrix(ground_r_recovered).as_euler('XYZ')
+        R = c2g_trans[:3, :3]
+        theta_recovered_v1 = np.arctan((R[1, 0] / np.tan(yaw_world_res_recovered) - R[0, 0]) /
+        (R[1, 2] / np.tan(yaw_world_res_recovered) - R[0, 2]))
+        theta_recovered_v2 = theta_recovered_v1 + np.pi
+        beta_recovered_v1 = np.arcsin(R[2, 2] * np.sin(theta_recovered_v1) - R[2, 0] * np.cos(theta_recovered_v1))
+        beta_recovered_v2 = np.arcsin(R[2, 2] * np.sin(theta_recovered_v2) - R[2, 0] * np.cos(theta_recovered_v2))
+        target_theta0_1_recovered_v1 = np.cos(beta_recovered_v1) * np.sin(yaw_world_res_recovered)
+        target_theta0_1_recovered_v2 = np.cos(beta_recovered_v2) * np.sin(yaw_world_res_recovered)
+        theta0_1_recovered_v1 = R[1, 0] * np.cos(theta_recovered_v1) - R[1, 2] * np.sin(theta_recovered_v1)
+        theta0_1_recovered_v2 = R[1, 0] * np.cos(theta_recovered_v2) - R[1, 2] * np.sin(theta_recovered_v2)
+        assert np.isclose(target_theta0_1_recovered_v1, target_theta0_1_recovered_v2)
+        if np.isclose(theta0_1_recovered_v1, target_theta0_1_recovered_v1):
+            theta_recovered = theta_recovered_v1
+        elif np.isclose(theta0_1_recovered_v2, target_theta0_1_recovered_v1):
+            theta_recovered = theta_recovered_v2
+
+        return theta_recovered
 
     def decode_preds_eval(self, preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=True,
-                          threshold=0.001, ground_center=False):
+                          threshold=0.001, ground_center=True):
         return self.decode_preds(preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=undo_augment,
-                                 threshold=threshold, ground_center=False)
+                                 threshold=threshold, ground_center=ground_center, roty=True)
 
     def decode_batch_eval(self, batch, calibs, undo_augment=True):
         return self.decode_batch(batch, calibs, undo_augment=undo_augment)
@@ -513,7 +516,7 @@ class Rope3Dataset(data.Dataset):
         return results
 
     def decode_preds(self, preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=True,
-                     threshold=0.001, ground_center=True):
+                     threshold=0.001, ground_center=True, roty=False):
         preds = preds.detach().cpu()
         bboxes, pred_center3d, pred_s3d, pred_rot_mat, pred_dep, pred_dep_un, scores, labels = preds.split(
             (4, 2, 3, 9, 1, 1, 1, 1), dim=-1)
@@ -566,7 +569,12 @@ class Rope3Dataset(data.Dataset):
                 if score < threshold:
                     continue
 
-                targets.append([cls_id] + egoc_rot_mat.ravel().tolist() + bbox + dimensions.tolist() + locations.tolist() + [score])
+                if roty:
+                    c2g_trans = self.get_c2g(self.img_file2img_id[im_files[i].split(os.path.sep)[-1]])
+                    roty = self.egoc_rot_matrix2rot_y(c2g_trans, egoc_rot_mat)
+                    targets.append([cls_id, roty] + bbox + dimensions.tolist() + locations.tolist() + [score])
+                else:
+                    targets.append([cls_id] + egoc_rot_mat.ravel().tolist() + bbox + dimensions.tolist() + locations.tolist() + [score])
 
             results[im_files[i]] = targets
         return results
