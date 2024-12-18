@@ -1333,8 +1333,23 @@ class SupervisionLoss:
     def forward_teacher(self, imgs):
         from ultralytics.models import YOLOv10_3D
         from ..nn.tasks import YOLOv10_3DDetectionModel
+        from ultralytics.nn.modules.conv import Conv
         if isinstance(self.teacher_model, YOLOv10_3D):
             self.teacher_model.model.model[-1].dense = True # Set the detection head to dense
+            for head in self.teacher_model.model.model[-1].o2o_heads:
+                for i in range(self.teacher_model.model.model[-1].nl):
+                    for k, layer in enumerate(head[i]):
+                        if isinstance(layer, Conv) and k >= 1:
+                            layer.conv.padding = (0,)
+                        if isinstance(layer, Conv) and k == 0:
+                            layer.conv.padding = (1,1)
+            for head in self.teacher_model.model.model[-1].o2m_heads:
+                for i in range(self.teacher_model.model.model[-1].nl):
+                    for k, layer in enumerate(head[i]):
+                        if isinstance(layer, Conv) and k >= 1:
+                            layer.conv.padding = (0,)
+                        if isinstance(layer, Conv) and k == 0:
+                            layer.conv.padding = (1,1)
             res_dict = self.teacher_model.model(imgs)
             pred = res_dict["one2one"][1]
             pred_shape = pred[0].shape
