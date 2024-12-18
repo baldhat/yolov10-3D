@@ -543,7 +543,7 @@ class v10Detect(Detect):
             b[-1].bias.data[: m.nc] = math.log(5 / m.nc / (640 / s) ** 2)  # cls (.01 objects, 80 classes, 640 img)
 
 class v10Detect3d(nn.Module):
-    max_det = 50
+    max_det = 80
 
     dynamic = False  # force grid reconstruction
     export = False  # export mode
@@ -862,8 +862,8 @@ class v10Detect3d(nn.Module):
             deps = [40]
             ranges = [[-3.5, 3.5]]
         elif self.nl == 2:
-            deps = [45, 20]
-            ranges = [[-2, 2], [-2, 2]]
+            deps = [60, 25]
+            ranges = [[-3.5, 3.5], [-2.5, 2.5]]
         elif self.nl == 3:
             deps = [45, 25, 10]
             ranges = [[-2, 2], [-1.5, 1.5], [-1, 1]]

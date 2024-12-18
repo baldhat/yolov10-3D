@@ -1016,7 +1016,7 @@ class DDDetectionLoss:
         print()
 
     def debug_show_assigned_targets3d(self, batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt):
-        target_center_3d, _, _, _ = targets_3d
+        target_center_3d, _, _, _, _ = targets_3d
         box_idxs = [0, 1, 2, 3, 0,  # base
                     4, 7, 3, 7,  # right
                     6, 2, 6,  # back
@@ -1100,7 +1100,8 @@ class DDDetectionLoss:
 
             ax[i].imshow(space)
             ax[i].axis("off")
-        plt.show()
+        plt.savefig("/home/stud/mijo/dev/bev_assignments.jpg", dpi=300)
+        #plt.show()
         print()
 
     def project_to_image(self, kps, calib):

@@ -404,10 +404,10 @@ class Rope3Dataset(data.Dataset):
             out_path = os.path.join(output_dir, img_file.split(".")[0] + ".txt")
             f = open(out_path, 'w')
             for i in range(len(results[img_file])):
-                class_name = self.class_name[int(results[img_file][i][0])]
+                class_name = self.class_name[int(results[img_file][i][0])].lower()
                 f.write('{} 0.0 0'.format(class_name))
                 for j in range(1, len(results[img_file][i])):
-                    f.write(' {:.2f}'.format(results[img_file][i][j]))
+                    f.write(' {:.3f}'.format(results[img_file][i][j]))
                 f.write('\n')
             f.close()
         return output_dir
@@ -572,7 +572,8 @@ class Rope3Dataset(data.Dataset):
                 if roty:
                     c2g_trans = self.get_c2g(self.img_file2img_id[im_files[i].split(os.path.sep)[-1]])
                     roty = self.egoc_rot_matrix2rot_y(c2g_trans, egoc_rot_mat)
-                    targets.append([cls_id, roty] + bbox + dimensions.tolist() + locations.tolist() + [score])
+                    alpha = calibs[i].ry2alpha(roty, x3d)
+                    targets.append([cls_id, alpha] + bbox + dimensions.tolist() + locations.tolist() + [roty, score])
                 else:
                     targets.append([cls_id] + egoc_rot_mat.ravel().tolist() + bbox + dimensions.tolist() + locations.tolist() + [score])
 
