@@ -1353,6 +1353,7 @@ class KITTIVisualizer():
         ax = ax.ravel()
 
         for i, ((img_id, result), (_, target)) in enumerate(zip(preds.items(), targets.items())):
+            print(img_id)
             if i >= self.max_imgs:
                 break
             MAX_DIST = 60

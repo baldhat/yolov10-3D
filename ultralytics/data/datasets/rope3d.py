@@ -533,7 +533,7 @@ class Rope3Dataset(data.Dataset):
                 bbox = bboxes[i, j].cpu().numpy()
                 bbox = (xywh2xyxy(bbox) / ratio_pad[i][0, [1, 0, 1, 0]]).tolist()
 
-                depth = pred_dep[i, j].numpy() / (self.virtual_focal_length / calibs[i].fv)
+                depth = pred_dep[i, j].numpy() * (self.virtual_focal_length / calibs[i].fv)
                 sigma = torch.exp(-pred_dep_un[i, j]).item()
 
                 if undo_augment:
@@ -572,6 +572,10 @@ class Rope3Dataset(data.Dataset):
                 if roty:
                     c2g_trans = self.get_c2g(self.img_file2img_id[im_files[i].split(os.path.sep)[-1]])
                     roty = self.egoc_rot_matrix2rot_y(c2g_trans, egoc_rot_mat)
+                    if roty > np.pi:
+                        roty -= 2 * np.pi
+                    if roty < -np.pi:
+                        roty += 2 * np.pi
                     alpha = calibs[i].ry2alpha(roty, x3d)
                     targets.append([cls_id, alpha] + bbox + dimensions.tolist() + locations.tolist() + [roty, score])
                 else:
