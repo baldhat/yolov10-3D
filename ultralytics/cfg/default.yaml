@@ -129,10 +129,10 @@ overfit: False
 gradient_balancer: #"amtl"
 gradient_balancer_strategy: "distVSrest"
 # Distillation
-distillation: True
+distillation: False
 distillation_teacher: "yolo"
 distillation_temp: 2
-distillation_weight: 3.0
+distillation_weight: 0.25
 distillation_loss: "soft"
 distillation_no_mixup: True
 use_pred_center: False

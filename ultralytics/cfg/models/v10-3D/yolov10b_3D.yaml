@@ -22,7 +22,6 @@ channels:
   hd_c: 64
   dep_c: 64
   dep_un_c: 64
-
 # YOLOv8.0n backbone
 backbone:
   # [from, repeats, module, args]
