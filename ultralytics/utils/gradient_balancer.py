@@ -12,21 +12,23 @@ class GradientBalancer(torch.nn.Module):
             self.balance = self.pc_grad
         elif self.balancer == "amtl":
             self.balance = self.amtl
+        elif self.balancer == "cfa":
+            self.balance = self.cfa
 
         if self.strategy == "depVSrest":
             self.loss_groups = [
-                [0, 1, 3, 4, 5, 6, 7, 9, 10, 11],
-                [2, 8]
+                [2, 8], # dep # switched the groups, dep is the base now
+                [0, 1, 3, 4, 5, 6, 7, 9, 10, 11]
             ]
         elif self.strategy == "2dVS3d":
             self.loss_groups = [
-                [0, 1, 6, 7],
-                [2, 3, 4, 5, 8, 9, 10, 11]
+                [2, 3, 4, 5, 8, 9, 10, 11],  # switched the groups, 3d is the base now
+                [0, 1, 6, 7] # box, cls
             ]
         elif self.strategy == "distVSrest":
             self.loss_groups = [
                 [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12],
-                [6, 13]
+                [6, 13] # dist
             ]
         else:
             raise NotImplementedError("Unknown gradient balancing strategy")
@@ -34,8 +36,11 @@ class GradientBalancer(torch.nn.Module):
     def step(self, model, loss_items):
         shared_params = list(model.model[:-1].parameters()) # backbone layers
         losses = self.aggregate_losses(loss_items)
-        gradients = self.get_gradients_wrt_losses(shared_params, losses)
-        self.set_shared_grad(shared_params, self.balance(gradients))
+        if self.balancer != "cfa":
+            gradients = self.get_gradients_wrt_losses(shared_params, losses)
+            self.set_shared_grad(shared_params, self.balance(gradients))
+        else:
+            self.set_shared_grad(shared_params, self.balance(shared_params, losses))
 
 
     def aggregate_losses(self, loss_items):
@@ -67,13 +72,19 @@ class GradientBalancer(torch.nn.Module):
 
     @staticmethod
     def set_shared_grad(shared_params, grad_vec):
-        offset = 0
-        for p in shared_params:
-            if p.grad is None:
-                continue
-            _offset = offset + p.grad.shape.numel()
-            p.grad.data = grad_vec[offset:_offset].view_as(p.grad)
-            offset = _offset
+        if isinstance(grad_vec, torch.Tensor):
+            offset = 0
+            for p in shared_params:
+                if p.grad is None:
+                    continue
+                _offset = offset + p.grad.shape.numel()
+                p.grad.data = grad_vec[offset:_offset].view_as(p.grad)
+                offset = _offset
+        else:
+            for i, p in enumerate(shared_params):
+                if p.grad is None:
+                    continue
+                p.grad.data = grad_vec[i].view_as(p.grad)
 
     @staticmethod
     def pc_grad(gradients):
@@ -83,6 +94,33 @@ class GradientBalancer(torch.nn.Module):
     def amtl(gradients):
         grads, _, _ = ProcrustesSolver.apply(gradients.T.unsqueeze(0), "min")
         return grads[0].sum(-1)
+
+    def get_grads_wrt_loss(self, shared_params, loss, retain_graph):
+        for p in shared_params:
+            if p.grad is not None:
+                p.grad.data.zero_()
+
+        self.scaler.scale(loss).backward(retain_graph=retain_graph)
+
+        grads = []
+        for p in shared_params:
+            if p.grad is not None:
+                grads.append(p.grad.flatten().clone())
+                p.grad.data.zero_()
+            else:
+                grads.append(torch.zeros_like(p).flatten())
+        return grads
+
+    def cfa(self, shared_params, losses):
+        grads_b = self.get_grads_wrt_loss(shared_params, losses[0], True)
+        grads_n = self.get_grads_wrt_loss(shared_params, losses[1], False)
+
+        grads = []
+        for grad_b, grad_n in zip(grads_b, grads_n):
+            gb = 0.5 * (1 - (grad_n.T@grad_b) / (grad_b.T@grad_b)) * grad_b
+            gn = 0.5 * (1 - (grad_b.T@grad_n) / (grad_n.T@grad_n)) * grad_n
+            grads.append(gb + gn)
+        return grads
 
 
 ########################### Taken from samsung mtl ############################

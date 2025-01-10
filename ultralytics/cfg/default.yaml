@@ -126,14 +126,14 @@ min_depth_threshold: 1
 min_scale: 0.8
 max_scale: 1.2
 overfit: False
-gradient_balancer: #"amtl"
-gradient_balancer_strategy: "distVSrest"
+gradient_balancer: "cfa"
+gradient_balancer_strategy: "depVSrest"
 # Distillation
-distillation: True
+distillation: False
 distillation_teacher: "self"
 distillation_temp: 2
-distillation_weight: 10.0
-distillation_loss: "cos"
+distillation_weight: 100.0
+distillation_loss: "soft"
 distillation_no_mixup: True
 use_pred_center: False
 
