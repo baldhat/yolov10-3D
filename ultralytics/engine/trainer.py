@@ -277,7 +277,8 @@ class BaseTrainer:
             dist.broadcast(self.amp, src=0)  # broadcast the tensor from rank 0 to all other ranks (returns None)
         self.amp = bool(self.amp)  # as boolean
         self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp)
-        self.gradient_balancer = GradientBalancer(self.scaler, balancer=self.args.gradient_balancer,
+        if self.args.gradient_balancer is not None:
+            self.gradient_balancer = GradientBalancer(self.scaler, balancer=self.args.gradient_balancer,
                                                   strategy=self.args.gradient_balancer_strategy)
         if world_size > 1:
             self.model = nn.parallel.DistributedDataParallel(self.model, device_ids=[RANK])
