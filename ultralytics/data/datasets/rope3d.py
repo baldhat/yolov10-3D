@@ -376,6 +376,7 @@ class Rope3Dataset(data.Dataset):
         egoc_rot_matrix = left_multiply_matrix @ egoc_rot_matrix
 
         in_pos = np.array([_center3d[0] + shift[0]*trans[0, 0], _center3d[1] + shift[1]*trans[1, 1]])
+        #in_pos = np.array([_center3d[0], _center3d[1]])
         _rot_mat = egoc_to_alloc_rot_matrix_torch(amodal_center=torch.from_numpy(in_pos).unsqueeze(0).float(),
                                                   egoc_rot_matrix=torch.from_numpy(egoc_rot_matrix).unsqueeze(0).float(),
                                                   calib=torch.from_numpy(calib.P2*ratio_pad[0, 0]).unsqueeze(0).float())[0].numpy().reshape(9)
@@ -533,7 +534,7 @@ class Rope3Dataset(data.Dataset):
                 bbox = bboxes[i, j].cpu().numpy()
                 bbox = (xywh2xyxy(bbox) / ratio_pad[i][0, [1, 0, 1, 0]]).tolist()
 
-                depth = pred_dep[i, j].numpy() * (self.virtual_focal_length / calibs[i].fv)
+                depth = pred_dep[i, j].numpy() / (self.virtual_focal_length / calibs[i].fv)
                 sigma = torch.exp(-pred_dep_un[i, j]).item()
 
                 if undo_augment:
@@ -553,7 +554,7 @@ class Rope3Dataset(data.Dataset):
                         locations = calibs[i].img_to_rect(x3d, y3d, depth).reshape(-1)
 
                 egoc_rot_mat = alloc_to_egoc_rot_matrix_torch(
-                    amodal_center=torch.tensor(np.array([x3d, y3d])).unsqueeze(0).cpu(),
+                    amodal_center=torch.tensor(c3d if undo_augment else np.array([x3d, y3d])).unsqueeze(0).cpu(),
                     alloc_rot_matrix=pred_rot_mat[i, j].unsqueeze(0).reshape(1, 3, 3).cpu(),
                     calib=torch.tensor(calibs[i].P2).unsqueeze(0).cpu()
                 )[0].numpy()
@@ -572,11 +573,7 @@ class Rope3Dataset(data.Dataset):
                 if roty:
                     c2g_trans = self.get_c2g(self.img_file2img_id[im_files[i].split(os.path.sep)[-1]])
                     roty = self.egoc_rot_matrix2rot_y(c2g_trans, egoc_rot_mat)
-                    if roty > np.pi:
-                        roty -= 2 * np.pi
-                    if roty < -np.pi:
-                        roty += 2 * np.pi
-                    alpha = calibs[i].ry2alpha(roty, x3d)
+                    alpha = calibs[i].ry2alpha(roty, c3d[0] if undo_augment else x3d)
                     targets.append([cls_id, alpha] + bbox + dimensions.tolist() + locations.tolist() + [roty, score])
                 else:
                     targets.append([cls_id] + egoc_rot_mat.ravel().tolist() + bbox + dimensions.tolist() + locations.tolist() + [score])

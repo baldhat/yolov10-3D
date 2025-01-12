@@ -429,7 +429,7 @@ class TaskAlignedAssigner3d(nn.Module):
         pd_size3d = self.decode_3d_size(pd_s3d, pd_scores, mean_sizes)
         gt_size_3d = self.add_cls_mean_size(gt_size_3d, gt_labels, mean_sizes)
 
-        gt_vdepth = gt_depth / gt_vdepth_factors
+        gt_vdepth = gt_depth * gt_vdepth_factors
         gt_keypoints = get_3d_keypoints(gt_center_3d, gt_vdepth, gt_size_3d, gt_rot_mat.reshape(self.bs, self.n_max_boxes, 3, 3), calibs)
         pd_keypoints = get_3d_keypoints(pd_center_3d, pd_dep, pd_size3d, pd_rot_mat.reshape(self.bs, self.num_anchors, 3, 3), calibs)
 

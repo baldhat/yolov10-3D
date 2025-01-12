@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Tuple, Dict, Any, Optional, List
 from scipy.spatial.transform import Rotation
 from tqdm import tqdm
+import os
 
 import cv2
 import matplotlib.pyplot as plt
@@ -1382,7 +1383,8 @@ class KITTIVisualizer():
                     translation = np.array((object[17], object[19])) * SCALE
                     translation[1] *= -1
                     translation += R
-                    ry = -Rotation.from_matrix(egoc_rot_matrix).as_euler("xyz")[1]
+                    c2g_trans = dataset.get_c2g(dataset.img_file2img_id[batch["im_file"][i].split(os.path.sep)[-1]])
+                    ry = dataset.egoc_rot_matrix2rot_y(c2g_trans, egoc_rot_matrix)
                 else:
                     dimensions = np.array([object[8], object[7]]) * SCALE
                     translation = np.array((object[9], object[11])) * SCALE
@@ -1402,7 +1404,8 @@ class KITTIVisualizer():
                         translation = np.array((object[17], object[19])) * SCALE
                         translation[1] *= -1
                         translation += R
-                        ry = -Rotation.from_matrix(egoc_rot_matrix).as_euler("xyz")[1]
+                        c2g_trans = dataset.get_c2g(dataset.img_file2img_id[batch["im_file"][i].split(os.path.sep)[-1]])
+                        ry = dataset.egoc_rot_matrix2rot_y(c2g_trans, egoc_rot_matrix)
                     else:
                         dimensions = np.array([object[8], object[7]]) * SCALE
                         translation = np.array((object[9], object[11])) * SCALE

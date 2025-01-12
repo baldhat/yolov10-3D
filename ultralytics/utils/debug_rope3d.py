@@ -17,10 +17,10 @@ def plot_bev(target, img, color=(0, 255, 0)):
 
 
 
-pred_directory = Path("/home/stud/mijo/dev/yolov10-3D/runs/detect/val2/preds")
+pred_directory = Path("/home/stud/mijo/dev/yolov10-3D/runs/detect/val15/preds")
 target_directory = Path("/home/stud/mijo/storage/group/deepscenario/rope3d/val/label_2/")
 
-file_name = "149116_sj8fas6n151d20211125air_420_1637222649_1637225138_357_obstacle.txt"
+file_name = "150696_sj8fas23e152d20211201air_420_1637290455_1637292954_455_obstacle.txt"
 pred_file = pred_directory / file_name
 
 MAX_DIST = 120
