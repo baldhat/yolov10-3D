@@ -137,9 +137,13 @@ class GradientBalancer(torch.nn.Module):
 
         grads = []
         for grad_b, grad_n in zip(grads_b, grads_n):
-            gb = 0.5 * (1 - (grad_n.T@grad_b) / (grad_b.T@grad_b)) * grad_b
-            gn = 0.5 * (1 - (grad_b.T@grad_n) / (grad_n.T@grad_n)) * grad_n
-            grads.append(gb + gn)
+            if grad_n.T@grad_b >= 0:
+                grad = (grad_n + grad_b) / 2
+            else:
+                gb = 0.5 * (1 - (grad_n.T@grad_b) / (grad_b.T@grad_b)) * grad_b
+                gn = 0.5 * (1 - (grad_b.T@grad_n) / (grad_n.T@grad_n)) * grad_n
+                grad = gb + gn
+            grads.append(grad)
         return grads
 
 
