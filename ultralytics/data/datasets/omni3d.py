@@ -438,15 +438,14 @@ class Omni3Dataset(data.Dataset):
         if not os.path.exists(python):
             python = os.path.join(Path.home(), "miniconda3/envs/cubercnn/bin/python")
         command = (f"{python} -u ultralytics/data/datasets/omni_eval/eval.py "
-                   f"--dataset_names [KITTI_val] "
-                   f"--pred_ann_files [{file_path}] "
-                   f"--gt_ann_files [/home/stud/mijo/storage/group/deepscenario/CDrone/annotations/val_omni.json] "
+                   f"--name KITTI_val "
+                   f"--pred_ann {file_path} "
+                   f"--gt_ann /home/stud/mijo/storage/group/deepscenario/CDrone/annotations/val_omni.json "
                    f"--log_dir {save_dir}/logs")
         lines = subprocess.check_output(command, shell= True, text= True, env={}).split("\n")
 
-        values = lines[23].split("|")
-        print("\n".join(lines[21:25]))
-        metric3d = float(values[6].strip())
+        print("\n".join(lines[41:]))
+        metric3d = float(lines[43].split("|")[6].strip())
         return metric3d
 
     def decode_preds_eval(self, preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=True,
