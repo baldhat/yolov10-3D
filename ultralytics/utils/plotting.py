@@ -707,6 +707,7 @@ def _plot_labels_3D(sizes3d, pos3d, occlusions, truncations, levels, save_dir, t
     LOGGER.info(f"Plotting labels to {save_dir / f'labels_correlogram_3D_{type_}.jpg'}... ")
     boxes = np.concatenate([pos3d, sizes3d], 1)  # limit to 150k boxes
     x = pd.DataFrame(boxes, columns=["x", "y", "z", "height", "width", "length"])
+    x.to_csv(os.path.join(save_dir, f"labels_{type_}.csv"))
 
     # Seaborn correlogram
     sn.pairplot(x, corner=True, diag_kind="auto", kind="hist", diag_kws=dict(bins=50), plot_kws=dict(pmax=0.9))
@@ -721,24 +722,24 @@ def plot_labels_3D(labels_: [Object3d], class2id={}, save_dir=Path(""), img_size
     warnings.filterwarnings("ignore", category=UserWarning, message="The figure layout has changed to tight")
     warnings.filterwarnings("ignore", category=FutureWarning)
 
-    labels_ = [label for label in labels_ if label.level_str not in ["DontCare", "UnKnown"]]
-    car_labels = [label for label in labels_ if label.cls_type == "Car"]
-    easy_labels = [label for label in labels_ if label.level == 1]
-    moderate_labels = [label for label in labels_ if label.level == 2]
-    hard_labels = [label for label in labels_ if label.level == 3]
+    labels_ = [label for label in labels_ if label.cls_type.lower() in ["car", "vehicle"]]
+    # car_labels = [label for label in labels_ if label.cls_type == "Car"]
+    # easy_labels = [label for label in labels_ if label.level == 1]
+    # moderate_labels = [label for label in labels_ if label.level == 2]
+    # hard_labels = [label for label in labels_ if label.level == 3]
 
-    label_list = [labels_, car_labels, easy_labels, moderate_labels, hard_labels]
-    for labels, type_ in zip(label_list, ["all", "cars", "easy", "moderate", "hard"]):
-        boxes2d = ops.xyxy2xywh(np.array([lb.box2d for lb in labels]))  # xywh
-        sizes3d = np.array([np.array([lb.h, lb.w, lb.l]) for lb in labels])  # h, w, l
-        pos3d = np.array([lb.pos for lb in labels])  # x (image -> right), y (image -> down), z (into plane)
-        occlusions = np.array([lb.occlusion for lb in labels])
-        truncations = np.array([lb.trucation for lb in labels])
-        classes = np.array([class2id[lb.cls_type] for lb in labels])
-        levels = np.array([lb.level for lb in labels])
+    # label_list = [labels_, car_labels, easy_labels, moderate_labels, hard_labels]
+    # for labels, type_ in zip(label_list, ["all", "cars", "easy", "moderate", "hard"]):
+    boxes2d = ops.xyxy2xywh(np.array([lb.box2d for lb in labels_]))  # xywh
+    sizes3d = np.array([np.array([lb.h, lb.w, lb.l]) for lb in labels_])  # h, w, l
+    pos3d = np.array([lb.pos for lb in labels_])  # x (image -> right), y (image -> down), z (into plane)
+    #     occlusions = np.array([lb.occlusion for lb in labels])
+    #     truncations = np.array([lb.trucation for lb in labels])
+    classes = np.array([class2id[lb.cls_type] for lb in labels_])
+    #     levels = np.array([lb.level for lb in labels])
 
-        plot_labels_2D(boxes2d, classes, class2id, save_dir, img_size, type_)
-        _plot_labels_3D(sizes3d, pos3d, occlusions, truncations, levels, save_dir, type_)
+    plot_labels_2D(boxes2d, classes, class2id, save_dir, img_size, "all")
+    _plot_labels_3D(sizes3d, pos3d, None, None, None, save_dir, "all")
 
 def plot_training_depth_dist(dataset, save_dir):
     print("Plotting training depth distribution...")

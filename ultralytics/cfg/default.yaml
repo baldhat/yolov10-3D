@@ -49,7 +49,7 @@ save_json: False # (bool) save results to JSON file
 save_hybrid: False # (bool) save hybrid version of labels (labels + additional predictions)
 conf: # (float, optional) object confidence threshold for detection (default 0.25 predict, 0.001 val)
 iou: 0.7 # (float) intersection over union (IoU) threshold for NMS
-max_det: 80 # (int) maximum number of detections per image
+max_det: 150 # (int) maximum number of detections per image
 half: False # (bool) use half precision (FP16)
 dnn: False # (bool) use OpenCV DNN for ONNX inference
 plot_labels: False
@@ -122,10 +122,10 @@ constrain_anchors: True
 # Training
 htl: False
 close_mixup: 0 # Epochs before the end to stop mixup augmentation
-max_depth_threshold: 120
+max_depth_threshold: 200
 min_depth_threshold: 1
-min_scale: 0.6
-max_scale: 1.4
+min_scale: 0.8
+max_scale: 1.2
 overfit: False
 distillation: False
 distillation_temp: 2

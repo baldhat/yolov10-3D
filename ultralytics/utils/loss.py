@@ -911,8 +911,8 @@ class DDDetectionLoss:
         return loss.sum() * batch_size, loss
 
     def plot_assignments(self, batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt):
-        self.debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor)
-        self.debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt)
+        #self.debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor)
+        #self.debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt)
         self.debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor)
 
     def compute_loss_weights(self, current_loss):
@@ -937,9 +937,9 @@ class DDDetectionLoss:
         return (size2d_loss + offset2d_loss) / num_targets
 
     def compute_box3d_loss(self, targets_3d, pred_3d, anchor_points, stride_tensor, fg_mask, num_targets):
-        pred_depth = pred_3d[fg_mask][..., -2] / targets_3d[4][fg_mask].squeeze()
+        pred_depth = pred_3d[fg_mask][..., -2]
         pred_depth_un = pred_3d[fg_mask][..., -1] 
-        target_depth = targets_3d[2][fg_mask].squeeze() 
+        target_depth = targets_3d[2][fg_mask].squeeze() * targets_3d[4][fg_mask].squeeze() 
         depth_loss = (laplacian_aleatoric_uncertainty_loss_new(pred_depth, target_depth, pred_depth_un).sum()
                       / num_targets * self.hyp.depth)
 

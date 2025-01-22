@@ -26,7 +26,7 @@ class Rope3Dataset(data.Dataset):
         self.class_name = ['Car', 'Pedestrian', 'Cyclist']
         self.writelist = ['Car', 'Pedestrian', 'Cyclist']
         self.resolution = np.array([960, 540])  # W * H
-        self.max_objs = 80
+        self.max_objs = 150
         self.use_camera_dis = False
         self.load_depth_maps = False
 
@@ -95,7 +95,7 @@ class Rope3Dataset(data.Dataset):
         labels = self.anns_by_img
         labels = [item for sublist in labels.values() for item in sublist]
         labels = [item for item in labels if item["category"] in self.writelist]
-        return labels
+        return get_objects_from_dict_rope(labels)
 
     def get_calib(self, idx):
         calib = np.array(self.imgs[idx]["K"])
