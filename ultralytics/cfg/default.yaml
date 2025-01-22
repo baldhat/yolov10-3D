@@ -126,8 +126,8 @@ min_depth_threshold: 1
 min_scale: 0.6
 max_scale: 1.4
 overfit: False
-gradient_balancer: "cfa"
-gradient_balancer_strategy: "depVSrest"
+gradient_balancer: #"cfa"
+gradient_balancer_strategy: #"depVSrest"
 # Distillation
 distillation: False
 distillation_teacher: "yolo"
@@ -136,6 +136,11 @@ distillation_weight: 100
 distillation_loss: "soft"
 distillation_no_mixup: True
 use_pred_center: False
+
+loss_scale_max_depth: 65
+loss_scale_min_depth: 10
+loss_scale_max_weight: 0.6
+loss_scale_min_weight: 1.4 
 
 load_depth_maps: False
 

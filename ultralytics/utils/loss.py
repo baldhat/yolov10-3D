@@ -1043,13 +1043,19 @@ class DDDetectionLoss:
         targets_3d = targets[4:9] # center, size, depth, head_bin, head_res
 
         #self.plot_assignments(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt)
+        
+        depths = targets_3d[-3][fg_mask].squeeze()
+        in_min, in_max = self.hyp.loss_scale_min_depth, self.hyp.loss_scale_max_depth, 
+        out_min, out_max = self.hyp.loss_scale_min_weight, self.hyp.loss_scale_max_weight
+        depth_weights = (depths - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
+        loss_weight = torch.maximum(torch.minimum(depth_weights, torch.tensor(1.4)), torch.tensor(0.6))
 
-        loss[0] = (self.compute_box2d_loss(targets_2d, pred_2d, anchor_points, stride_tensor, fg_mask, target_scores_sum)
+        loss[0] = (self.compute_box2d_loss(targets_2d, pred_2d, anchor_points, stride_tensor, fg_mask, target_scores_sum, loss_weight)
                    * self.hyp.loss2d)
         loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum * self.hyp.cls
 
         loss[2:6] = self.compute_box3d_loss(targets_3d, pred_3d, anchor_points, stride_tensor,
-                                            fg_mask, target_scores_sum)
+                                            fg_mask, target_scores_sum, loss_weight)
 
         if self.hyp.distillation and embeddings is not None:
             embeddings = torch.cat([emb.view(emb.shape[0], emb.shape[1], -1) for emb in embeddings], dim=2)
@@ -1079,7 +1085,7 @@ class DDDetectionLoss:
             weights[2:] = 0
         return weights
 
-    def compute_box2d_loss(self, targets_2d, pred_2d, anchor_points, stride_tensor, fg_mask, num_targets):
+    def compute_box2d_loss(self, targets_2d, pred_2d, anchor_points, stride_tensor, fg_mask, num_targets, loss_weight):
         target_center_2d, target_size_2d = targets_2d
         pred_2d = pred_2d * stride_tensor
         anchor_points = anchor_points * stride_tensor
@@ -1089,35 +1095,34 @@ class DDDetectionLoss:
         target_size = target_size_2d[fg_mask]
         target_offset = (target_center_2d - anchor_points)[fg_mask]
 
-        offset2d_loss = F.l1_loss(pred_offset, target_offset, reduction="mean")
-        size2d_loss = F.l1_loss(pred_size, target_size, reduction="mean")
+        offset2d_loss = (F.l1_loss(pred_offset, target_offset, reduction="none") * loss_weight.unsqueeze(-1).repeat(1, 2)).mean()
+        size2d_loss = (F.l1_loss(pred_size, target_size, reduction="none") * loss_weight.unsqueeze(-1).repeat(1, 2)).mean()
 
         return (size2d_loss + offset2d_loss) / num_targets
 
-    def compute_box3d_loss(self, targets_3d, pred_3d, anchor_points, stride_tensor, fg_mask, num_targets):
+    def compute_box3d_loss(self, targets_3d, pred_3d, anchor_points, stride_tensor, fg_mask, num_targets, loss_weight):
         pred_depth = pred_3d[fg_mask][..., -2]
         pred_depth_un = pred_3d[fg_mask][..., -1]
         target_depth = targets_3d[-3][fg_mask].squeeze()
-        depth_loss = (laplacian_aleatoric_uncertainty_loss_new(pred_depth, target_depth, pred_depth_un).sum()
+        depth_loss = ((laplacian_aleatoric_uncertainty_loss_new(pred_depth, target_depth, pred_depth_un)*loss_weight).sum()
                       / num_targets * self.hyp.depth)
 
         anchor_points = anchor_points * stride_tensor
         pred_offset = (pred_3d[..., :2] * stride_tensor)[fg_mask]
         target_center_3d = targets_3d[0]
         target_offset = (target_center_3d - anchor_points)[fg_mask]
-        offset3d_loss = (F.l1_loss(pred_offset, target_offset, reduction="mean")
+        offset3d_loss = ((F.l1_loss(pred_offset, target_offset, reduction="none") * loss_weight.unsqueeze(-1).repeat(1, 2)).mean()
                          / num_targets * self.hyp.offset3d)
 
         pred_size = pred_3d[fg_mask][..., 2:5]
         target_size = targets_3d[1][fg_mask]
-        size3d_loss = (F
-                       .l1_loss(pred_size, target_size, reduction="sum")
+        size3d_loss = ((F.l1_loss(pred_size, target_size, reduction="none")*loss_weight.unsqueeze(-1).repeat(1, 3)).sum()
                        / num_targets * self.hyp.size3d)
 
         pred_heading = pred_3d[fg_mask][..., 5:29]
         target_bin = targets_3d[-2][fg_mask]
         target_res = targets_3d[-1][fg_mask]
-        heading_loss = (compute_heading_loss(pred_heading, target_bin, target_res)
+        heading_loss = (compute_heading_loss(pred_heading, target_bin, target_res, loss_weight)
                         / num_targets * self.hyp.heading)
 
         if depth_loss != depth_loss:
@@ -1142,19 +1147,19 @@ def laplacian_aleatoric_uncertainty_loss_new(input, target, log_variance):
     return loss
 
 
-def compute_heading_loss(input, target_cls, target_reg):
+def compute_heading_loss(input, target_cls, target_reg, loss_weight):
     target_cls = target_cls.view(-1).long()
     target_reg = target_reg.view(-1)
 
     # classification loss
     input_cls = input[..., 0:12]
-    cls_loss = F.cross_entropy(input_cls, target_cls, reduction='sum')
+    cls_loss = (F.cross_entropy(input_cls, target_cls, reduction='none') * loss_weight).sum()
 
     # regression loss
     input_reg = input[..., 12:24]
     cls_onehot = torch.zeros(target_cls.shape[0], 12).cuda().scatter_(dim=1, index=target_cls.view(-1, 1), value=1)
     input_reg = torch.sum(input_reg * cls_onehot, 1)
-    reg_loss = F.l1_loss(input_reg, target_reg, reduction='sum')
+    reg_loss = (F.l1_loss(input_reg, target_reg, reduction='none') * loss_weight).sum()
 
     return cls_loss + reg_loss
 
