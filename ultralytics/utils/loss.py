@@ -1095,8 +1095,8 @@ class DDDetectionLoss:
         target_size = target_size_2d[fg_mask]
         target_offset = (target_center_2d - anchor_points)[fg_mask]
 
-        offset2d_loss = (F.l1_loss(pred_offset, target_offset, reduction="none") * loss_weight.unsqueeze(-1).repeat(1, 2)).mean()
-        size2d_loss = (F.l1_loss(pred_size, target_size, reduction="none") * loss_weight.unsqueeze(-1).repeat(1, 2)).mean()
+        offset2d_loss = (F.l1_loss(pred_offset, target_offset, reduction="none") * loss_weight.unsqueeze(-1).repeat(1, 2)).sum()
+        size2d_loss = (F.l1_loss(pred_size, target_size, reduction="none") * loss_weight.unsqueeze(-1).repeat(1, 2)).sum()
 
         return (size2d_loss + offset2d_loss) / num_targets
 
@@ -1111,7 +1111,7 @@ class DDDetectionLoss:
         pred_offset = (pred_3d[..., :2] * stride_tensor)[fg_mask]
         target_center_3d = targets_3d[0]
         target_offset = (target_center_3d - anchor_points)[fg_mask]
-        offset3d_loss = ((F.l1_loss(pred_offset, target_offset, reduction="none") * loss_weight.unsqueeze(-1).repeat(1, 2)).mean()
+        offset3d_loss = ((F.l1_loss(pred_offset, target_offset, reduction="none") * loss_weight.unsqueeze(-1).repeat(1, 2)).sum()
                          / num_targets * self.hyp.offset3d)
 
         pred_size = pred_3d[fg_mask][..., 2:5]
