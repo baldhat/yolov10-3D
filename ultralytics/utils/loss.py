@@ -911,8 +911,8 @@ class DDDetectionLoss:
         return loss.sum() * batch_size, loss
 
     def plot_assignments(self, batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt):
-        self.debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor)
-        self.debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt)
+        #self.debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor)
+        #self.debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt)
         self.debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor)
 
     def compute_loss_weights(self, current_loss):
@@ -1100,7 +1100,8 @@ class DDDetectionLoss:
 
             ax[i].imshow(space)
             ax[i].axis("off")
-        plt.show()
+        #plt.show()
+        plt.savefig("bev_assignments.png")
         print()
 
     def project_to_image(self, kps, calib):

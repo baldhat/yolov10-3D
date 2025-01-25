@@ -29,7 +29,7 @@ class Omni3Dataset(data.Dataset):
         self.mode = mode
         self.class_name = ['Car', 'Pedestrian', 'Bicycle']
         self.writelist = ['Car', 'Pedestrian', 'Bicycle']
-        self.resolution = np.array([960, 640])  # W * H
+        self.resolution = np.array([960, 540])  # W * H
         self.max_objs = 50
         self.use_camera_dis = False
 
@@ -150,7 +150,7 @@ class Omni3Dataset(data.Dataset):
 
             if np.random.random() < self.rotation:
                 random_rot_flag = True
-                rot_angle = int(np.random.uniform(-180, 180))
+                rot_angle = int(np.random.uniform(-60, 60))
 
         if random_mix_flag == True:
             count_num = 0
@@ -542,9 +542,10 @@ class Omni3Dataset(data.Dataset):
                         locations = calibs[i].camera_dis_to_rect(x3d, y3d, depth).reshape(-1)
                     else:
                         locations = calibs[i].img_to_rect(x3d, y3d, depth).reshape(-1)
+                    c3d = np.array([x3d, y3d])
 
                 egoc_rot_mat = alloc_to_egoc_rot_matrix_torch(
-                    amodal_center=torch.tensor(np.array([x3d, y3d])).unsqueeze(0).cpu(),
+                    amodal_center=torch.tensor(c3d).unsqueeze(0).cpu(),
                     alloc_rot_matrix=pred_rot_mat[i, j].unsqueeze(0).reshape(1, 3, 3).cpu(),
                     calib=torch.tensor(calibs[i].P2).unsqueeze(0).cpu()
                 )[0].numpy()
