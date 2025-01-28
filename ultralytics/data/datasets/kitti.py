@@ -6,6 +6,7 @@ import torch
 import pathlib
 from ultralytics.data.datasets.decode_helper import  *
 from ultralytics.data.datasets.kitti_eval import eval_from_scrach
+from ultralytics.data.augment import RandomHSV
 
 import torch.utils.data as data
 from PIL import Image
@@ -73,6 +74,9 @@ class KITTIDataset(data.Dataset):
         self.mixup = args.mixup
         self.max_depth_threshold = args.max_depth_threshold
         self.min_depth_thres = args.min_depth_threshold
+        self.hsv_h = args.hsv_h
+        self.hsv_s = args.hsv_s
+        self.hsv_v = args.hsv_h
 
         os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 
@@ -114,6 +118,19 @@ class KITTIDataset(data.Dataset):
 
     def __len__(self):
         return self.idx_list.__len__()
+    
+    def apply_hsv_aug(self, img, vals):
+        hue, sat, val = cv2.split(cv2.cvtColor(img, cv2.COLOR_BGR2HSV))
+        dtype = img.dtype  # uint8
+
+        x = np.arange(0, 256, dtype=vals.dtype)
+        lut_hue = ((x * vals[0]) % 180).astype(dtype)
+        lut_sat = np.clip(x * vals[1], 0, 255).astype(dtype)
+        lut_val = np.clip(x * vals[2], 0, 255).astype(dtype)
+
+        im_hsv = cv2.merge((cv2.LUT(hue, lut_hue), cv2.LUT(sat, lut_sat), cv2.LUT(val, lut_val)))
+        cv2.cvtColor(im_hsv, cv2.COLOR_HSV2BGR, dst=img)  # no return needed
+        return img
 
     def __getitem__(self, item):
         #  ============================   get inputs   ===========================
@@ -216,12 +233,14 @@ class KITTIDataset(data.Dataset):
                                             resample=Image.NEAREST, fillcolor=51))
 
         # image encoding
-        img = np.array(img).astype(np.float32) / 255.0
+        hsv_aug_vals = np.random.uniform(-1, 1, 3) * [self.hsv_v, self.hsv_s, self.hsv_v] + 1  # random gains
+        img = self.apply_hsv_aug(np.array(img), hsv_aug_vals)
+        img = img.astype(np.float32) / 255.0
         img = img.transpose(2, 0, 1)  # C * H * W
         if random_mix_flag:
-            img0 = np.array(img0).astype(np.float32) / 255.0
+            img0 = self.apply_hsv_aug(np.array(img0), hsv_aug_vals).astype(np.float32) / 255.0
             img0 = img0.transpose(2, 0, 1)  # C * H * W
-            img1 = np.array(img1).astype(np.float32) / 255.0
+            img1 = self.apply_hsv_aug(np.array(img1), hsv_aug_vals).astype(np.float32) / 255.0
             img1 = img1.transpose(2, 0, 1)  # C * H * W
 
         #  ============================   get labels   ==============================

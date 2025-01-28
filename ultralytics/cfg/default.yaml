@@ -139,8 +139,8 @@ use_pred_center: False
 
 loss_scale_max_depth: 65
 loss_scale_min_depth: 10
-loss_scale_max_weight: 1
-loss_scale_min_weight: 1
+loss_scale_max_weight: 0.5
+loss_scale_min_weight: 1.5
 
 load_depth_maps: False
 
