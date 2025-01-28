@@ -124,8 +124,8 @@ htl: False
 close_mixup: 0 # Epochs before the end to stop mixup augmentation
 max_depth_threshold: 150
 min_depth_threshold: 1
-min_scale: 1.0
-max_scale: 1.0
+min_scale: 0.8
+max_scale: 1.2
 overfit: False
 distillation: False
 distillation_temp: 2
