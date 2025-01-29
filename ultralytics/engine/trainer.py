@@ -19,7 +19,7 @@ import numpy as np
 import torch
 from torch import distributed as dist
 from torch import nn, optim
-from ultralytics.utils.callbacks.notion_upload import upload_to_notion
+from ultralytics.utils.callbacks.notion_upload import upload_to_notion, Run
 
 from ultralytics.cfg import get_cfg, get_save_dir
 from ultralytics.data.utils import check_cls_dataset, check_det_dataset
@@ -353,6 +353,8 @@ class BaseTrainer:
         if self.args.htl:
             ei_loss = self.compute_e0_loss()
             loss_weightor = htl.Hierarchical_Task_Learning()
+
+        Run.get_flops_(self.model)
 
         while True:
             self.epoch = epoch
