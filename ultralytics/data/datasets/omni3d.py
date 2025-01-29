@@ -411,6 +411,7 @@ class Omni3Dataset(data.Dataset):
                 omni_rot_matrix = Rotation.from_euler('xyz', omni_euler).as_matrix()
                 size3d = pred[14:14+3] # h,w,l
                 box2dxyxy = np.clip(np.array(pred[10:10+4]), 0, np.array([frame_pred["width"], frame_pred["height"], frame_pred["width"], frame_pred["height"]]))
+                calib = self.get_calib(frame_id)
 
                 pred_instance['image_id'] = frame_id
                 pred_instance['category_id'] = self.data_cls2data_id[self.train_id2cls[int(pred[0])]]
@@ -419,7 +420,8 @@ class Omni3Dataset(data.Dataset):
                 pred_instance['depth'] = location[-1]
                 pred_instance['bbox3D'] = self.get_3d_box(torch.tensor(location), torch.tensor(rotation), torch.tensor(size3d))[0, 0].numpy().tolist()
                 pred_instance['center_cam'] = location
-                pred_instance['center_2D'] = [pred_instance['bbox'][0] + pred_instance['bbox'][2] / 2, pred_instance['bbox'][1] + pred_instance['bbox'][3] / 2]
+                #pred_instance['center_2D'] = [pred_instance['bbox'][0] + pred_instance['bbox'][2] / 2, pred_instance['bbox'][1] + pred_instance['bbox'][3] / 2]
+                pred_instance['center_2D'] = calib.rect_to_img(np.array(location)[np.newaxis])
                 pred_instance['dimensions'] = [size3d[1], size3d[0], size3d[2]] # Needs: w, h, l
                 pred_instance['pose'] = omni_rot_matrix.tolist()
 
