@@ -126,8 +126,8 @@ min_depth_threshold: 1
 min_scale: 0.6
 max_scale: 1.4
 overfit: False
-gradient_balancer: #"cfa"
-gradient_balancer_strategy: #"depVSrest"
+gradient_balancer: "cfa"
+gradient_balancer_strategy: "depVSrest"
 # Distillation
 distillation: False
 distillation_teacher: "yolo"
@@ -139,8 +139,8 @@ use_pred_center: False
 
 loss_scale_max_depth: 65
 loss_scale_min_depth: 10
-loss_scale_max_weight: 1
-loss_scale_min_weight: 1
+loss_scale_max_weight: 0.5
+loss_scale_min_weight: 1.5
 
 load_depth_maps: False
 
@@ -154,9 +154,9 @@ pose: 12.0 # (float) pose loss gain
 kobj: 1.0 # (float) keypoint obj loss gain
 label_smoothing: 0.0 # (float) label smoothing (fraction)
 nbs: 64 # (int) nominal batch size
-hsv_h: 0.015 # (float) image HSV-Hue augmentation (fraction)
-hsv_s: 0.7 # (float) image HSV-Saturation augmentation (fraction)
-hsv_v: 0.4 # (float) image HSV-Value augmentation (fraction)
+hsv_h: 0.0 # (float) image HSV-Hue augmentation (fraction)
+hsv_s: 0.0 # (float) image HSV-Saturation augmentation (fraction)
+hsv_v: 0.0 # (float) image HSV-Value augmentation (fraction)
 degrees: 0.0 # (float) image rotation (+/- deg)
 translate: 0.1 # (float) image translation (+/- fraction)
 scale: 0.4 # (float) image scale (+/- gain)

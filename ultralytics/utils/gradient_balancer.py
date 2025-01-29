@@ -28,7 +28,7 @@ class GradientBalancer(torch.nn.Module):
         elif self.strategy == "depVSrestWdist":
             self.loss_groups = [
                 [2, 9], # dep # switched the groups, dep is the base now
-                [0, 1, 3, 4, 5, 6, 7, 8, 10, 11, 12]
+                [0, 1, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]
             ]
         elif self.strategy == "2dVS3d":
             self.loss_groups = [
@@ -53,7 +53,7 @@ class GradientBalancer(torch.nn.Module):
         elif self.strategy == "clsVSrestWdist":
             self.loss_groups = [
                 [0, 7], # cls
-                [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12]
+                [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13]
             ]
         else:
             raise NotImplementedError("Unknown gradient balancing strategy")
