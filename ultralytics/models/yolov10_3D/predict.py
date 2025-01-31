@@ -15,12 +15,13 @@ class YOLOv10_3DDetectionPredictor(DetectionPredictor):
         if preds.shape[-1] == 6:
             pass
         else:
-            preds = preds.transpose(-1, -2)
-            bboxes, scores, labels = ops.v10postprocess(preds, self.args.max_det, preds.shape[-1]-4)
-            bboxes = ops.xywh2xyxy(bboxes)
-            preds = torch.cat([bboxes, scores.unsqueeze(-1), labels.unsqueeze(-1)], dim=-1)
+            pass #preds = preds[0]
+            # preds = preds.transpose(-1, -2)
+            # bboxes, scores, labels = ops.v10_3Dpostprocess(preds, self.args.max_det, preds.shape[-1]-4)
+            # bboxes = ops.xywh2xyxy(bboxes)
+            # preds = torch.cat([bboxes, scores.unsqueeze(-1), labels.unsqueeze(-1)], dim=-1)
 
-        mask = preds[..., 4] > self.args.conf
+        mask = preds[..., -2] > self.args.conf
         if self.args.classes is not None:
             mask = mask & (preds[..., 5:6] == torch.tensor(self.args.classes, device=preds.device).unsqueeze(0)).any(2)
         
@@ -34,5 +35,7 @@ class YOLOv10_3DDetectionPredictor(DetectionPredictor):
             orig_img = orig_imgs[i]
             pred[:, :4] = ops.scale_boxes(img.shape[2:], pred[:, :4], orig_img.shape)
             img_path = self.batch[0][i]
-            results.append(Results(orig_img, path=img_path, names=self.model.names, boxes=pred))
+            bbox, _, scores, labels = pred.split(
+            (4, 2+3+24+1+1, 1, 1), dim=-1)
+            results.append(Results(orig_img, path=img_path, names=self.model.names, boxes=torch.cat((bbox, scores, labels), dim=-1)))
         return results

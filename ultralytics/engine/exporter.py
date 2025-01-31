@@ -229,8 +229,11 @@ class Exporter:
                 m.dynamic = self.args.dynamic
                 m.export = True
                 m.format = self.args.format
-                if isinstance(m, (v10Detect, v10Detect3d)):
-                    m.max_det = self.args.max_det
+            if isinstance(m, (v10Detect, v10Detect3d)):
+                m.dynamic = self.args.dynamic
+                m.export = True
+                m.format = self.args.format
+                m.max_det = self.args.max_det
 
             elif isinstance(m, C2f) and not any((saved_model, pb, tflite, edgetpu, tfjs)):
                 # EdgeTPU does not support FlexSplitV while split provides cleaner ONNX graph
@@ -389,7 +392,7 @@ class Exporter:
 
         # Checks
         model_onnx = onnx.load(f)  # load onnx model
-        # onnx.checker.check_model(model_onnx)  # check onnx model
+        onnx.checker.check_model(model_onnx)  # check onnx model
 
         # Simplify
         if self.args.simplify:
