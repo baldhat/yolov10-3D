@@ -836,6 +836,7 @@ def debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor):
                                lineType=cv2.LINE_AA)
         space = space[:R, :, :]
 
+        '''
         for j, anchor in enumerate(anchors[torch.logical_not(fg_mask[i])].cpu().numpy()):
             c = color[stride_tensor[j].item()]
             bottom_corners = (anchor[:4] * SCALE)
@@ -843,6 +844,7 @@ def debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor):
             y = -bottom_corners[:, 2] + R
             pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1).astype(np.int32)[[0, 1, 3, 2]]
             space = cv2.polylines(space, pts=[pts], isClosed=True, color=c)
+        '''
         for assigned in anchors[fg_mask[i]].cpu().numpy():
             bottom_corners = (assigned[:4] * SCALE)
             x = bottom_corners[:, 0] + R
