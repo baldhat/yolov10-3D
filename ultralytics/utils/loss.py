@@ -836,7 +836,6 @@ def debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor):
                                lineType=cv2.LINE_AA)
         space = space[:R, :, :]
 
-        '''
         for j, anchor in enumerate(anchors[torch.logical_not(fg_mask[i])].cpu().numpy()):
             c = color[stride_tensor[j].item()]
             bottom_corners = (anchor[:4] * SCALE)
@@ -844,7 +843,7 @@ def debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor):
             y = -bottom_corners[:, 2] + R
             pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1).astype(np.int32)[[0, 1, 3, 2]]
             space = cv2.polylines(space, pts=[pts], isClosed=True, color=c)
-        '''
+        
         for assigned in anchors[fg_mask[i]].cpu().numpy():
             bottom_corners = (assigned[:4] * SCALE)
             x = bottom_corners[:, 0] + R
@@ -862,7 +861,7 @@ def debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor):
 
         ax[i].imshow(space)
         ax[i].axis("off")
-    plt.show()
+    plt.savefig("/home/stud/mijo/bev.png")
     print()
 
 def project_to_image(kps, calib):
@@ -1050,7 +1049,7 @@ class DDDetectionLoss:
         in_min, in_max = self.hyp.loss_scale_min_depth, self.hyp.loss_scale_max_depth, 
         out_min, out_max = self.hyp.loss_scale_min_weight, self.hyp.loss_scale_max_weight
         depth_weights = (depths - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
-        loss_weight = torch.maximum(torch.minimum(depth_weights, torch.tensor(1.4)), torch.tensor(0.6))
+        loss_weight = torch.maximum(torch.minimum(depth_weights, torch.tensor(out_min)), torch.tensor(out_max))
 
         loss[0] = (self.compute_box2d_loss(targets_2d, pred_2d, anchor_points, stride_tensor, fg_mask, target_scores_sum, loss_weight)
                    * self.hyp.loss2d)

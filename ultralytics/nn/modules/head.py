@@ -628,14 +628,40 @@ class v10Detect3d(nn.Module):
             self.dep = self.build_head(self.dep_in_ch, channels["dep_c"], 1)
             self.dep_un = self.build_head(self.dep_un_in_ch, channels["dep_un_c"], 1)
 
-        self.o2o_heads = nn.ModuleList(
-            [self.cls, self.o2d, self.s2d, self.o3d, self.s3d, self.hd, self.dep, self.dep_un])
+        self.big_head = nn.ModuleList(
+            nn.Sequential(
+                v10Detect3d.build_conv(x*7, 64*7, self.kernel_size_1, self.dsconv, groups=7, deform=self.deform),
+                v10Detect3d.build_conv(64*7, 64*7 // 2 if self.half_channels else 64*7, self.kernel_size_2, groups=7, dsconv=self.dsconv),
+                nn.Conv2d(64*7 // 2 if self.half_channels else 64*7, 24*7, 1, groups=7)
+            ) for x in ch
+        )
+        self.bh_indices = [0, 1,                # o2d
+                           24  , 24+1,          # s2d
+                           48, 48+1,            # o3d
+                           72, 72+1, 72+2,      # s3d
+                           96, 96+1, 96+2, 96+3, 96+4, 96+5, 96+6, 96+7, 96+8, 96+9, 96+10, 96+11, 96+12, 96+13, 96+14, 96+15, 96+16, 96+17, 96+18, 96+19, 96+20, 96+21, 96+22, 96+23,
+                           120,
+                           144
+                           ]
+
+        self.o2o_heads = nn.ModuleList([self.cls, self.big_head])
         self.o2m_heads = copy.deepcopy(self.o2o_heads)
 
         if self.fgdm_pred:
             self.fgdm_predictor = DepthPredictor(ch)
             
+        
         self.is_padded = True 
+            
+        # def setter_fun(it, name, value):
+        #     self.__dict__[name] = value 
+        #     if name == "o2o_heads":
+        #         print()
+            
+        # self.__class__.__setattr__ = setter_fun
+        
+     
+    
 
     def build_head(self, in_channels, mid_channels, output_channels):
         return nn.ModuleList(nn.Sequential(v10Detect3d.build_conv(x, mid_channels, self.kernel_size_1, self.dsconv,  deform=self.deform),
@@ -653,11 +679,11 @@ class v10Detect3d(nn.Module):
          )
 
     @staticmethod
-    def build_conv(in_channels, out_channels, kernel_size, dsconv, deform=False):
+    def build_conv(in_channels, out_channels, kernel_size, dsconv, deform=False, groups=1):
         if dsconv:
             return nn.Sequential(Conv(in_channels, in_channels, kernel_size, g=in_channels, deform=deform), Conv(in_channels, out_channels, 1))
         else:
-            return Conv(in_channels, out_channels, kernel_size,  deform=deform)
+            return Conv(in_channels, out_channels, kernel_size, g=groups,  deform=deform)
 
     def mod(self, a, b):
         out = a - a // b * b
@@ -736,25 +762,29 @@ class v10Detect3d(nn.Module):
     
     def inference_forward_feat(self, x, heads):
         y = []
-        head_features = []
+        dep_features = [None, None]
         batch_sz = x[0].shape[0]
         head_names = list(self.output_channels.keys())
-        for i in range(self.nl):
-            if not hasattr(self, "is_padded") or self.is_padded:
-                for layer in heads[1][i]:
-                    if isinstance(layer, Conv):
-                        layer.conv.padding = (0,)
-            outputs = {}
-            head_feats = {}
-            outputs[head_names[0]], head_feats[head_names[0]] = self.single_head_forward(heads[1][i], x[i][..., :3, :3].repeat(400, 1, 1, 1))
-
-            #output_shape = (x[i].shape[0], self.no, x[i].shape[2], x[i].shape[3])
-            #ret = torch.zeros(output_shape, device=x[i].device)
-            #ret[:, :2] = outputs[head_names[0]][::8]
-            y.append(outputs[head_names[0]])
+        if not hasattr(self, "is_padded") or self.is_padded:
+            heads[1][0][0].conv.padding = (0,)
+            heads[1][1][0].conv.padding = (0,)
+            self.is_padded = False
         
-        self.is_padded = False
-        return y, head_features
+        for i in range(self.nl):
+            outputs = {}
+            outputs[head_names[0]] = heads[0][i](x[i])
+            
+            candidate_indices = self.select_candidates(outputs[head_names[0]], batch_sz)
+            inputs = self.extract_patches(x[i], candidate_indices)
+            out, dep_features[i] = self.single_head_forward(heads[1][i], inputs.repeat(1, 7, 1, 1))
+            head_output = torch.zeros((x[i].shape[0], 35, x[i].shape[2], x[i].shape[3]), device=x[i].device)
+            out = out[:, self.bh_indices, 0, 0].view(x[i].shape[0], self.max_det, 35).transpose(1, 2)
+            for b in range(x[i].shape[0]):
+                head_output[b, :, candidate_indices[b, :, 0], candidate_indices[b, :, 1]] = out[b].float()
+            outputs[head_names[1]] = head_output
+            y.append(torch.cat(list(outputs.values()), dim=1))
+        
+        return y, dep_features
     '''
     
     
@@ -793,26 +823,16 @@ class v10Detect3d(nn.Module):
         y = []
         embs = [None] * self.nl
         head_names = list(self.output_channels.keys())
+        if not hasattr(self, "is_padded") or not self.is_padded:
+            heads[1][0][0].conv.padding = (1,)
+            heads[1][1][0].conv.padding = (1,)
+            self.is_padded = True
+        
         for i in range(self.nl):
             outputs = {}
-            if self.common_head:
-                x[i] = self.common[i](x[i])
-            for j, module in enumerate(heads):
-                if self.use_predecessors and len(self.predecessors[head_names[j]]) > 0:
-                    inputs = [x[i]]
-                    predecessors = [outputs[key] if key != "dep"
-                                                else outputs[key] / self.dep_norm
-                                   for key in self.predecessors[head_names[j]]]
-                    inputs.extend([predecessor.detach() for predecessor in predecessors])
-                    if head_names[j] == "dep":
-                        outputs[head_names[j]], embs[i] = self.single_head_forward(module[i], (torch.cat(inputs, dim=1)))
-                    else:
-                        outputs[head_names[j]] = module[i](torch.cat(inputs, dim=1))
-                else:
-                    if head_names[j] == "dep":
-                        outputs[head_names[j]], embs[i] = self.single_head_forward(module[i], x[i])
-                    else:
-                        outputs[head_names[j]] = module[i](x[i])
+            outputs[head_names[0]] = heads[0][i](x[i])
+            out, embs[i] = self.single_head_forward(heads[1][i], x[i].repeat(1, 7, 1, 1))
+            outputs[head_names[1]] = out[:, self.bh_indices]
             y.append(torch.cat(list(outputs.values()), dim=1))
         return y, embs
     
@@ -825,15 +845,14 @@ class v10Detect3d(nn.Module):
             one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
 
         if not self.training:
-            #one2one = self.inference(one2one)
+            one2one = self.inference(one2one)
             if not self.export:
                 return {"one2one": one2one, "o2o_embs": o2o_embs}
             else:
-                # assert(self.max_det != -1)
-                # predsO = one2one.transpose(-1, -2)
-                # regO, scoresO, labelsO = ops.v10_3Dpostprocess(predsO, self.max_det, self.nc)
-                # return torch.cat((regO, scoresO.unsqueeze(-1), labelsO.unsqueeze(-1)), dim=-1)
-                return one2one
+                assert(self.max_det != -1)
+                predsO = one2one.transpose(-1, -2)
+                regO, scoresO, labelsO = ops.v10_3Dpostprocess(predsO, self.max_det, self.nc)
+                return torch.cat((regO, scoresO.unsqueeze(-1), labelsO.unsqueeze(-1)), dim=-1)
         else:
             one2many, o2m_embs, depth_maps = self._forward(x)
             return {"one2many": one2many, "one2one": one2one, "o2m_embs": o2m_embs, "o2o_embs": o2o_embs, "depth_maps": depth_maps}
@@ -842,7 +861,7 @@ class v10Detect3d(nn.Module):
         assert len(head) == 3
         embeddings = head[0](features)
         output = head[1](embeddings)
-        return head[2](output), embeddings
+        return head[2](output), embeddings[:, 6*64:7*64]
 
 
     def sum_predecessor_chs(self, predecessors):
@@ -933,15 +952,15 @@ class v10Detect3d(nn.Module):
             raise RuntimeError("Initialization only set for 1 and 3 scales")
         for i in range(self.nl):
             self.cls[i][-1].bias.data[: self.nc] = math.log(5 / self.nc / ((1280 / self.stride[i]) * (384 / self.stride[i])))
-            self.s2d[i][-1].bias.data.fill_(6)
-            self.o2d[i][-1].bias.data.fill_(0)
-            self.o3d[i][-1].bias.data.fill_(0)
-            self.s3d[i][-1].bias.data.fill_(0.0)
-            nn.init.normal_(self.s3d[i][-1].weight, std=0.05)
-            self.dep[i][-1].bias.data.fill_(deps[i])
-            nn.init.uniform_(self.dep[i][-1].weight, a=ranges[i][0], b=ranges[i][1])
+            self.big_head[i][-1].bias.data[24:26].fill_(6)
+            self.big_head[i][-1].bias.data[:2].fill_(0)
+            self.big_head[i][-1].bias.data[48:50].fill_(0)
+            self.big_head[i][-1].bias.data[72:75].fill_(0.0)
+            #nn.init.normal_(self.big_head[i][-1].weight[:64], std=0.05)
+            self.big_head[i][-1].bias.data[120].fill_(deps[i])
+            nn.init.uniform_(self.big_head[i][-1].weight[120], a=ranges[i][0], b=ranges[i][1])
 
-        self.o2o_heads = nn.ModuleList([self.cls, self.o2d, self.s2d, self.o3d, self.s3d, self.hd, self.dep, self.dep_un])
+        self.o2o_heads = nn.ModuleList([self.cls, self.big_head])
         self.o2m_heads = copy.deepcopy(self.o2o_heads)
         pass
 
