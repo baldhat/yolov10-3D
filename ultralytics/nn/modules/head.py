@@ -734,23 +734,26 @@ class v10Detect3d(nn.Module):
             topk_indices[b, :, 0], topk_indices[b, :, 1] = self.unravel_index(topk_ind, cls_scores_max[b].shape)
         return topk_indices
     
-    
-    
-    
     def inference_forward_feat(self, x, heads):
         y = []
         head_features = []
         batch_sz = x[0].shape[0]
         head_names = list(self.output_channels.keys())
         for i in range(self.nl):
+            if not hasattr(self, "is_padded") or self.is_padded:
+                for layer in heads[1][i]:
+                    if isinstance(layer, Conv):
+                        layer.conv.padding = (0,)
             outputs = {}
             head_feats = {}
-            outputs[head_names[0]], head_feats[head_names[0]] = self.single_head_forward(heads[1][i], x[i].repeat(8, 1, 1, 1))
+            outputs[head_names[0]], head_feats[head_names[0]] = self.single_head_forward(heads[1][i], x[i][..., :3, :3].repeat(400, 1, 1, 1))
 
             #output_shape = (x[i].shape[0], self.no, x[i].shape[2], x[i].shape[3])
             #ret = torch.zeros(output_shape, device=x[i].device)
             #ret[:, :2] = outputs[head_names[0]][::8]
             y.append(outputs[head_names[0]])
+        
+        self.is_padded = False
         return y, head_features
     '''
     
