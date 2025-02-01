@@ -117,13 +117,13 @@ class Run:
             for bs in batch_sizes:
                 im = torch.empty((bs, p.shape[1], *imgsz), device=p.device)  # input image in BCHW format
                 flops = thop.profile(deepcopy(model), inputs=[im], verbose=False)[0] / 1e9 * 2  # imgsz GFLOPs
-                for x in range(1000):
-                    model(im)
-                t1 = time.time()
-                for x in range(100):
-                    out = model(im)
-                t2 = time.time()
-                print(f"Batch size: {bs} Took: {(t2-t1) / 100 * 1000:.2f}ms, FLOPs: {flops:.2f} GFLOPs, batch size: {im.shape[0]}, ")
+                # for x in range(1000):
+                #     model(im)
+                # t1 = time.time()
+                # for x in range(100):
+                #     out = model(im)
+                # t2 = time.time()
+                # print(f"Batch size: {bs} Took: {(t2-t1) / 100 * 1000:.2f}ms, FLOPs: {flops:.2f} GFLOPs, batch size: {im.shape[0]}, ")
             return flops
         except Exception as e:
             print(f"Failed to calculate flops: {e}")

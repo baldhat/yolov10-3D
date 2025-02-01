@@ -1004,8 +1004,8 @@ class DDDetectionLoss:
         size3d_loss = ((F.l1_loss(pred_size, target_size, reduction="none")*loss_weight.unsqueeze(-1).repeat(1, 3)).sum()
                        / num_targets * self.hyp.size3d)
 
-        pred_rot_mat = pred_3d[fg_mask][..., 5:5+9][:6]
-        target_rot_mat = targets_3d[3][fg_mask][:6]
+        pred_rot_mat = pred_3d[fg_mask][..., 5:5+6]
+        target_rot_mat = targets_3d[3][fg_mask][..., :6]
         rot_loss = (F.l1_loss(pred_rot_mat, target_rot_mat, reduction="none") * loss_weight.unsqueeze(-1).repeat(1, 6) ).sum() / num_targets * self.hyp.heading
         '''
         target_bin = targets_3d[-2][fg_mask]

@@ -31,27 +31,27 @@ class Rope3Dataset(data.Dataset):
         self.load_depth_maps = False
 
         print("Loading Rope3D Dataset...")
-        self.raw_split = json.load(open(filepath, 'r'))
+        raw_split = json.load(open(filepath, 'r'))
         if args.overfit:
-            self.raw_split["images"] = [image for image in self.raw_split["images"] if image["id"] < 50]
-            self.raw_split["annotations"] = [anns for anns in self.raw_split["annotations"] if anns["image_id"] < 50]
+            raw_split["images"] = [image for image in raw_split["images"] if image["id"] < 50]
+            raw_split["annotations"] = [anns for anns in raw_split["annotations"] if anns["image_id"] < 50]
 
-        self.imgs = {img['id']: img for img in sorted(self.raw_split['images'], key=lambda img: img['id'])}
+        self.imgs = {img['id']: img for img in sorted(raw_split['images'], key=lambda img: img['id'])}
         self.idx_to_img_id = {idx: img_id for idx, img_id in enumerate(self.imgs)}
         self.img_file2img_id = {img["file_path"].split(os.path.sep)[-1]: idx for idx, img in self.imgs.items()}
 
         self.cls2train_id = {"Car": 0, "Pedestrian": 1, "Cyclist": 2}
         self.train_id2cls = {0: "Car", 1: "Pedestrian", 2: "Cyclist"}
 
-        self.data_cls2data_id = {value["name"].title(): value["id"] for value in self.raw_split["categories"]}
+        self.data_cls2data_id = {value["name"].title(): value["id"] for value in raw_split["categories"]}
         self.data_id2data_cls = {cls_id: cls_name for cls_name, cls_id in self.data_cls2data_id.items()}
 
         self.anns_by_img = defaultdict(list)
-        for ii, ann in enumerate(self.raw_split['annotations']):
+        for ii, ann in enumerate(raw_split['annotations']):
             ann["category"] = self.data_id2data_cls[ann["category_id"]]
             self.anns_by_img[ann['image_id']].append(ann)
 
-        self.labels = self.get_labels()
+        #self.labels = self.get_labels()
 
         ##h,w,l
         self.cls_mean_size = np.array([

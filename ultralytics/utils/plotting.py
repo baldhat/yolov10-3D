@@ -889,7 +889,6 @@ def plot_images(
                 boxes[..., 1::2] += y
                 for j, box in enumerate(boxes.astype(np.int64).tolist()):
                     if box[2] <= box[0] or box[3] <= box[1]:
-                        print(f"Warning: Invalid bounding box (xyxy): {box}")
                         continue
                     c = classes[j]
                     color = colors(c)
@@ -1355,7 +1354,6 @@ class KITTIVisualizer():
         ax = ax.ravel()
 
         for i, ((img_id, result), (_, target)) in enumerate(zip(preds.items(), targets.items())):
-            print(img_id)
             if i >= self.max_imgs:
                 break
             MAX_DIST = 60
