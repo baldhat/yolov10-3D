@@ -634,6 +634,8 @@ class v10Detect3d(nn.Module):
 
         if self.fgdm_pred:
             self.fgdm_predictor = DepthPredictor(ch)
+            
+        self.is_padded = True 
 
     def build_head(self, in_channels, mid_channels, output_channels):
         return nn.ModuleList(nn.Sequential(v10Detect3d.build_conv(x, mid_channels, self.kernel_size_1, self.dsconv,  deform=self.deform),
@@ -732,7 +734,8 @@ class v10Detect3d(nn.Module):
             topk_indices[b, :, 0], topk_indices[b, :, 1] = self.unravel_index(topk_ind, cls_scores_max[b].shape)
         return topk_indices
     
-    '''
+    
+    
     def inference_forward_feat(self, x, heads):
         y = []
         head_features = []
@@ -776,11 +779,10 @@ class v10Detect3d(nn.Module):
             inputs = self.extract_patches(x[i], candidate_indices)
             #inputs = self.extract_rois(x[i], candidate_indices)
             for j, module in enumerate(heads[1:]):
-                # paddings = []
-                # for layer in module[i]:
-                #     if isinstance(layer, Conv):
-                #         paddings.append(layer.conv.padding)
-                #         layer.conv.padding = (0,)
+                if not hasattr(self, "is_padded") or self.is_padded:
+                    for layer in module[i]:
+                        if isinstance(layer, Conv):
+                            layer.conv.padding = (0,)
                 out_, feats = self.single_head_forward(module[i], inputs)
 
                 output_shape = (x[i].shape[0], out_.shape[1], x[i].shape[2], x[i].shape[3])
@@ -799,12 +801,11 @@ class v10Detect3d(nn.Module):
                 #head_feats[head_names[j+1]] = feat_output
                 # if head_names[j+1] == "dep":
                 #     head_features.append(feat_output)
-                # for k, layer in enumerate(module[i]):
-                #     if isinstance(layer, Conv):
-                #         layer.conv.padding = paddings[k]
+                
             y.append(torch.cat(list(outputs.values()), dim=1))
+        self.is_padded = False
         return y, head_features
-    
+        '''
 
     def forward_feat(self, x, heads):
         y = []
@@ -815,6 +816,10 @@ class v10Detect3d(nn.Module):
             if self.common_head:
                 x[i] = self.common[i](x[i])
             for j, module in enumerate(heads):
+                # if not hasattr(self, "is_padded") or not self.is_padded:
+                #     for k, layer in enumerate(module[i]):
+                #         if isinstance(layer, Conv):
+                #             layer.conv.padding = (1,) if k == 0 else (0,)
                 if self.use_predecessors and len(self.predecessors[head_names[j]]) > 0:
                     inputs = [x[i]]
                     predecessors = [outputs[key] if key != "dep"
@@ -831,7 +836,29 @@ class v10Detect3d(nn.Module):
                     else:
                         outputs[head_names[j]] = module[i](x[i])
             y.append(torch.cat(list(outputs.values()), dim=1))
+        # self.is_padded = True
         return y, embs
+    
+    def forward(self, x):
+        if not self.training and not self.dense:
+            # one2one, o2o_embs = self.inference_forward_feat([xi.detach() for xi in x], self.o2o_heads)
+            # self.get_head_ranks()
+            one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
+        else:
+            one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
+
+        if not self.training:
+            one2one = self.inference(one2one)
+            if not self.export:
+                return {"one2one": one2one, "o2o_embs": o2o_embs}
+            else:
+                assert(self.max_det != -1)
+                predsO = one2one.transpose(-1, -2)
+                regO, scoresO, labelsO = ops.v10_3Dpostprocess(predsO, self.max_det, self.nc)
+                return torch.cat((regO, scoresO.unsqueeze(-1), labelsO.unsqueeze(-1)), dim=-1)
+        else:
+            one2many, o2m_embs, depth_maps = self._forward(x)
+            return {"one2many": one2many, "one2one": one2one, "o2m_embs": o2m_embs, "o2o_embs": o2o_embs, "depth_maps": depth_maps}
 
     def single_head_forward(self, head, features):
         assert len(head) == 3
@@ -901,27 +928,6 @@ class v10Detect3d(nn.Module):
             return y, embs, depth_maps
 
         return self.inference(y), embs, depth_maps
-
-    def forward(self, x):
-        if not self.training and not self.dense:
-            # one2one, o2o_embs = self.inference_forward_feat([xi.detach() for xi in x], self.o2o_heads)
-            # self.get_head_ranks()
-            one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
-        else:
-            one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
-
-        if not self.training:
-            one2one = self.inference(one2one)
-            if not self.export:
-                return {"one2one": one2one, "o2o_embs": o2o_embs}
-            else:
-                assert(self.max_det != -1)
-                predsO = one2one.transpose(-1, -2)
-                regO, scoresO, labelsO = ops.v10_3Dpostprocess(predsO, self.max_det, self.nc)
-                return torch.cat((regO, scoresO.unsqueeze(-1), labelsO.unsqueeze(-1)), dim=-1)
-        else:
-            one2many, o2m_embs, depth_maps = self._forward(x)
-            return {"one2many": one2many, "one2one": one2one, "o2m_embs": o2m_embs, "o2o_embs": o2o_embs, "depth_maps": depth_maps}
 
 
     def decode_bboxes(self, bboxes, anchors):
