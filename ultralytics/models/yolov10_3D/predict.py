@@ -31,11 +31,13 @@ class YOLOv10_3DDetectionPredictor(DetectionPredictor):
             orig_imgs = ops.convert_torch2numpy_batch(orig_imgs)
 
         results = []
+        preds = torch.zeros((1, 50, 7))
         for i, pred in enumerate(preds):
             orig_img = orig_imgs[i]
             pred[:, :4] = ops.scale_boxes(img.shape[2:], pred[:, :4], orig_img.shape)
             img_path = self.batch[0][i]
-            bbox, _, scores, labels = pred.split(
-            (4, 2+3+24+1+1, 1, 1), dim=-1)
-            results.append(Results(orig_img, path=img_path, names=self.model.names, boxes=torch.cat((bbox, scores, labels), dim=-1)))
+            results.append(Results(orig_img, path=img_path, names=self.model.names, boxes=torch.zeros((10, 7))))
+            #bbox, _, scores, labels = pred.split(
+            #(4, 2+3+24+1+1, 1, 1), dim=-1)
+            #results.append(Results(orig_img, path=img_path, names=self.model.names, boxes=torch.cat((bbox, scores, labels), dim=-1)))
         return results
