@@ -32,12 +32,13 @@ class WaymoDataset(data.Dataset):
         self.max_objs = 50
         self.use_camera_dis = False
 
-        self.raw_split = json.load(open(filepath, 'r'))
+        with open(filepath, 'r') as f:
+            raw_split = json.load(f)
         if args.overfit:
-            self.raw_split["images"] = [image for image in self.raw_split["images"] if image["id"] < 50]
-            self.raw_split["annotations"] = [anns for anns in self.raw_split["annotations"] if anns["image_id"] < 50]
+            raw_split["images"] = [image for image in raw_split["images"] if image["id"] < 50]
+            raw_split["annotations"] = [anns for anns in raw_split["annotations"] if anns["image_id"] < 50]
 
-        self.imgs = {img['id']: img for img in sorted(self.raw_split['images'], key=lambda img: img['id'])}
+        self.imgs = {img['id']: img for img in sorted(raw_split['images'], key=lambda img: img['id'])}
         self.idx_to_img_id = {idx: img_id for idx, img_id in enumerate(self.imgs)}
 
         self.cls2eval_id = {"unknown": 0, "Car": 1, "Pedestrian": 2, "Sign": 3, "Cyclist": 4}
@@ -46,12 +47,13 @@ class WaymoDataset(data.Dataset):
         self.train_id2cls = {0: "Car", 1: "Pedestrian", 2: "Cyclist"}
 
         self.anns_by_img = defaultdict(list)
-        for ii, ann in enumerate(self.raw_split['annotations']):
+        for ii, ann in enumerate(raw_split['annotations']):
             ann['train_obj_id'] = ii
             ann["category"] = self.data_id2cls[ann["category_id"]]
             self.anns_by_img[ann['image_id']].append(ann)
 
-        self.labels = self.get_labels()
+        #self.labels = self.get_labels()
+        self.load_depth_maps = False
 
         ##h,w,l
         #self.calc_mean_cls_size()
@@ -116,6 +118,7 @@ class WaymoDataset(data.Dataset):
         index = int(self.idx_to_img_id[item])  # index mapping, get real data id
         ori_img =  self.get_image(index)
         img = ori_img
+        img0, img1 = None, None
         img_size = np.array(ori_img.size)
         if self.split != 'test':
             dst_W, dst_H = img_size
@@ -131,9 +134,11 @@ class WaymoDataset(data.Dataset):
         if self.data_augmentation:
             if np.random.random() < 0.5 and self.mixup:
                 random_mix_flag = True
+                img0 = img.copy()
 
             if np.random.random() < self.random_flip:
                 random_flip_flag = True
+                img0 = img.transpose(Image.FLIP_LEFT_RIGHT)
                 img = img.transpose(Image.FLIP_LEFT_RIGHT)
 
             if np.random.random() < self.random_crop:
@@ -158,7 +163,7 @@ class WaymoDataset(data.Dataset):
                 calib_temp = self.get_calib(random_index)
 
                 if calib_temp.cu == calib.cu and calib_temp.cv == calib.cv and calib_temp.fu == calib.fu and calib_temp.fv == calib.fv:
-                    img_temp = self.get_image(random_index)
+                    img1 = self.get_image(random_index)
                     img_size_temp = np.array(img.size)
                     dst_W_temp, dst_H_temp = img_size_temp
                     if dst_W_temp == dst_W and dst_H_temp == dst_H:
@@ -167,9 +172,8 @@ class WaymoDataset(data.Dataset):
                         if len(objects_1) + len(objects_2) < self.max_objs:
                             random_mix_flag = True
                             if random_flip_flag == True:
-                                img_temp = img_temp.transpose(Image.FLIP_LEFT_RIGHT)
-                            img_blend = Image.blend(img, img_temp, alpha=0.5)
-                            img = img_blend
+                                img1 = img1.transpose(Image.FLIP_LEFT_RIGHT)
+                            img = Image.blend(img, img1, alpha=0.5)
                             break
 
         # add affine transformation for 2d images.
@@ -178,10 +182,24 @@ class WaymoDataset(data.Dataset):
                             method=Image.AFFINE,
                             data=tuple(trans_inv.reshape(-1).tolist()),
                             resample=Image.BILINEAR)
-
+        if random_mix_flag:
+            img0 = img0.transform(tuple(self.resolution.tolist()),
+                                  method=Image.AFFINE,
+                                  data=tuple(trans_inv.reshape(-1).tolist()),
+                                  resample=Image.BILINEAR)
+            img1 = img1.transform(tuple(self.resolution.tolist()),
+                                  method=Image.AFFINE,
+                                  data=tuple(trans_inv.reshape(-1).tolist()),
+                                  resample=Image.BILINEAR)
+        
         # image encoding
         img = np.array(img).astype(np.float32) / 255.0
         img = img.transpose(2, 0, 1)  # C * H * W
+        if random_mix_flag:
+            img0 = np.array(img0).astype(np.float32) / 255.0
+            img0 = img0.transpose(2, 0, 1)  # C * H * W
+            img1 = np.array(img1).astype(np.float32) / 255.0
+            img1 = img1.transpose(2, 0, 1)  # C * H * W
 
         #  ============================   get labels   ==============================
         gt_boxes_2d = []
@@ -193,6 +211,7 @@ class WaymoDataset(data.Dataset):
         gt_depth = []
         gt_heading_bin = []
         gt_heading_res = []
+        gt_src_img = [] # 0 or 1, when no mixup always 0
 
         if self.split != 'test':
             objects = self.get_label(index)
@@ -222,6 +241,7 @@ class WaymoDataset(data.Dataset):
                     gt_depth.append(_depth)
                     gt_heading_bin.append(_head_bin)
                     gt_heading_res.append(_head_res)
+                    gt_src_img.append(0) # object in img0
 
             if random_mix_flag == True:
                 # if False:
@@ -250,6 +270,7 @@ class WaymoDataset(data.Dataset):
                         gt_depth.append(_depth)
                         gt_heading_bin.append(_head_bin)
                         gt_heading_res.append(_head_res)
+                        gt_src_img.append(1) # object in img1
 
         inputs = torch.tensor(img)
         info = {'img_id': index,
@@ -285,7 +306,9 @@ class WaymoDataset(data.Dataset):
             "mean_sizes": torch.tensor(self.cls_mean_size),
             "heading_bin": torch.tensor(np.array(gt_heading_bin)),
             "heading_res": torch.tensor(np.array(gt_heading_res)),
-            "mixed": torch.tensor(np.array(random_mix_flag, dtype=np.uint8))
+            "mixed": torch.tensor(np.array(random_mix_flag, dtype=np.uint8)),
+            "src_img": torch.tensor(np.array(gt_src_img, dtype=np.uint8)),
+            "non_mix_imgs": torch.tensor(np.concatenate((img0[None],img1[None]) if random_mix_flag else (img[None], img[None]), axis=0))
         }
         return data
 
@@ -422,7 +445,7 @@ class WaymoDataset(data.Dataset):
         lines = subprocess.check_output(command, shell= True, text= True, env={})
 
         print(lines)
-        metric3d = float(lines.split("\n")[4].split("|")[2].strip().split(" ")[0])
+        metric3d = float(lines.split("\n")[4].split("|")[2].strip().split(" ")[0]) # 0.7 IoU, Level 1
         return metric3d
 
     def decode_preds_eval(self, preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=True, threshold=0.001):
@@ -546,10 +569,10 @@ class WaymoDataset(data.Dataset):
         values = list(zip(*[list(b.values()) for b in batch]))
         for i, k in enumerate(keys):
             value = values[i]
-            if k in ["img", "coord_range", "ratio_pad", "calib", "mixed"]:
+            if k in ["img", "coord_range", "ratio_pad", "calib", "mixed", "non_mix_imgs"]:
                 value = torch.stack(value, 0)
             if k in ["bboxes", "cls", "depth", "center_3d", "center_2d", "size_2d", "heading_bin",
-                     "heading_res", "size_3d"]:
+                     "heading_res", "size_3d", "src_img"]:
                 value = torch.cat(value, 0)
             if k not in ["mean_sizes"]:
                 new_batch[k] = value

@@ -24,26 +24,6 @@ import warnings
 from dinov2.eval.depth.models import build_depther
 
 
-def resize(input, size=None, scale_factor=None, mode="nearest", align_corners=None, warning=False):
-    if warning:
-        if size is not None and align_corners:
-            input_h, input_w = tuple(int(x) for x in input.shape[2:])
-            output_h, output_w = tuple(int(x) for x in size)
-            if output_h > input_h or output_w > output_h:
-                if (
-                    (output_h > 1 and output_w > 1 and input_h > 1 and input_w > 1)
-                    and (output_h - 1) % (input_h - 1)
-                    and (output_w - 1) % (input_w - 1)
-                ):
-                    warnings.warn(
-                        f"When align_corners={align_corners}, "
-                        "the output would more aligned if "
-                        f"input size {(input_h, input_w)} is `x+1` and "
-                        f"out size {(output_h, output_w)} is `nx+1`"
-                    )
-    return F.interpolate(input, size, scale_factor, mode, align_corners)
-
-
 class CenterPadding(torch.nn.Module):
     def __init__(self, multiple):
         super().__init__()
@@ -141,7 +121,7 @@ class DinoDepther(torch.nn.Module):
 
     def transform_back(self, depth_maps):
         t = transforms.Compose([
-            transforms.Resize(size=self.img_size, interpolation=InterpolationMode.NEAREST_EXACT)
+            transforms.Resize(size=self.img_size, interpolation=InterpolationMode.BILINEAR)
         ])
         return t(depth_maps)
 
@@ -259,13 +239,13 @@ class Args:
     cam_dis = False
     fliplr = 0.5
     random_crop = 0.5
-    scale = 0.4
-    min_scale = 0.6
-    max_scale = 1.4
+    scale = 0.2
+    min_scale = 0.8
+    max_scale = 1.2
     translate = 0.1
     mixup = 0.5
-    max_depth_threshold = 70
-    min_depth_threshold = 0.5
+    max_depth_threshold = 120
+    min_depth_threshold = 1
     seed = 1
     load_depth_maps = True
 
@@ -277,24 +257,24 @@ def main(save_dir):
     args = Args()
     train_dataset = KITTIDataset(train_file_path, "train", args)
     val_dataset = KITTIDataset(val_file_path, "val", args)
-    train_dataloader = build_dataloader(train_dataset, 12, 4, shuffle=True)
-    val_dataloader = build_dataloader(val_dataset, 12, 4, shuffle=False)
+    train_dataloader = build_dataloader(train_dataset, 24, 4, shuffle=True)
+    val_dataloader = build_dataloader(val_dataset, 24, 4, shuffle=False)
 
-    model = DinoDepther("small")
+    model = DinoDepther("base")
     model.train()
 
     #freeze_backbone(model)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=5e-5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
 
-    lr_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer=optimizer, start_factor=1.0, end_factor=0.1, total_iters=100)
+    lr_scheduler = torch.optim.lr_scheduler.LinearLR(optimizer=optimizer, start_factor=1.0, end_factor=0.1, total_iters=200)
 
     best_eval_loss = 100000
     best_epoch = 0
     train_losses = []
     val_losses = []
 
-    for epoch in range(100):
+    for epoch in range(200):
         train_loss = train_one_epoch(epoch, model, train_dataloader, optimizer)
         torch.cuda.empty_cache()
         eval_loss = validate(epoch, model, val_dataloader)

@@ -13,6 +13,7 @@ from ultralytics.utils.metrics import OKS_SIGMA
 from ultralytics.utils.ops import crop_mask, xywh2xyxy, xyxy2xywh
 from ultralytics.utils.tal import (RotatedTaskAlignedAssigner, TaskAlignedAssigner, TaskAlignedAssigner3d,
                                    dist2bbox, dist2rbox, make_anchors)
+
 from .metrics import bbox_iou, probiou
 from .tal import bbox2dist
 
@@ -736,16 +737,49 @@ class v10DetectLoss:
         loss_one2one = self.one2one(one2one, batch)
         return loss_one2many[0] + loss_one2one[0], torch.cat((loss_one2many[1], loss_one2one[1]))
 
+def project_to_image(kps, calib):
+    sample_num = kps.shape[0]
+    corners3d_hom = torch.cat((kps, torch.ones((sample_num, 8, 1), device=calib.device)), axis=2)  # (N, 8, 4)
+
+    mat = get_mat(calib)
+    img_pts = torch.matmul(corners3d_hom, mat.T.double()) # (N, 8, 3)
+    x, y = img_pts[:, :, 0] / img_pts[:, :, 2], img_pts[:, :, 1] / img_pts[:, :, 2]
+    boxes_corner = torch.cat((x.reshape(-1, 8, 1), y.reshape(-1, 8, 1)), axis=2)
+    return boxes_corner
+
+def get_mat(calib):
+    mat = torch.eye(4, device=calib.device)[:3]
+    cu, cv, fu, fv, tx, ty = calib.split((1, 1, 1, 1, 1, 1), dim=-1)
+    mat[0, 2] = cu
+    mat[1, 2] = cv
+    mat[0, 0] = fu
+    mat[1, 1] = fv
+    mat[0, 3] = tx * (-fu)
+    mat[1, 3] = ty * (-fv)
+    return mat
 
 class DetectLoss3d:
     def __init__(self, model):
-        self.one2many = DDDetectionLoss(model, tal_topk=model.args.tal_topk)
-        self.one2one = DDDetectionLoss(model, tal_topk=1)
         self.model = model
+        self.teacher_model = None
+        if self.model.args.distillation or self.model.args.fgdm_supervision:
+            if self.model.args.distillation_teacher == "yolo":
+                from .. import YOLOv10_3D
+                self.teacher_model = YOLOv10_3D(self.model.args.distillation_path).to("cuda")
+            elif self.model.args.distillation_teacher == "self":
+                self.teacher_model = self.model
+            else:
+                from .dino import DinoDepther
+                self.teacher_model = DinoDepther("base")
+                self.teacher_model.load(self.model.args.distillation_path)
+        self.one2many = DDDetectionLoss(model, tal_topk=model.args.tal_topk, teacher_model=self.teacher_model)
+        self.one2one = DDDetectionLoss(model, tal_topk=1, teacher_model=self.teacher_model)
+
         if self.model.args.fgdm_loss:
             self.fgdm_loss_func = ForegroundDepthMapLoss(self.model)
         if self.model.args.fgdm_supervision:
-            self.fgdm_supervisor = SupervisionLoss(self.model)
+            self.fgdm_supervisor = SupervisionLoss(self.model, self.teacher_model)
+
 
     def __call__(self, preds, batch):
         one2one, o2o_embs = preds["one2one"], preds["o2o_embs"]
@@ -772,7 +806,7 @@ class DetectLoss3d:
 
 
 class DDDetectionLoss:
-    def __init__(self, model, tal_topk=10):  # model must be de-paralleled
+    def __init__(self, model, tal_topk=10, teacher_model=None):  # model must be de-paralleled
         device = next(model.parameters()).device  # get model device
         h = model.args  # hyperparameters
 
@@ -790,17 +824,17 @@ class DDDetectionLoss:
                                               use_3d=model.args.tal_3d, kps_dist_metric=model.args.kps_dist_metric,
                                               constrain_anchors=model.args.constrain_anchors)
         if self.hyp.distillation:
-            self.supervisor = SupervisionLoss(model)
+            self.supervisor = SupervisionLoss(model, teacher_model)
 
     def preprocess(self, targets, batch_size, scale_tensor):
         """Preprocesses the target counts and matches with the input batch size to output a tensor."""
         if targets.shape[0] == 0:
-            out = torch.zeros(batch_size, 0, 25, device=self.device)
+            out = torch.zeros(batch_size, 0, 26, device=self.device)
         else:
             i = targets[:, 0]  # image index
             _, counts = i.unique(return_counts=True)
             counts = counts.to(dtype=torch.int32)
-            out = torch.zeros(batch_size, counts.max(), 25, device=self.device)
+            out = torch.zeros(batch_size, counts.max(), 26, device=self.device)
             for j in range(batch_size):
                 matches = i == j
                 n = matches.sum()
@@ -859,12 +893,13 @@ class DDDetectionLoss:
         gts = torch.cat((batch["batch_idx"].view(-1, 1), batch["cls"].view(-1, 1),
                                 batch["bboxes"], batch["center_2d"], batch["size_2d"],
                                 batch["center_3d"], batch["size_3d"], batch["depth"].view(-1, 1),
-                                batch["rot_mat"], batch["vdepth_factors"].view(-1, 1)), 1)
+                                batch["rot_mat"], batch["vdepth_factors"].view(-1, 1), batch["src_img"].view(-1, 1)), 1)
         gts = self.preprocess(gts.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
         calibs = batch["calib"]
         mean_sizes = batch["mean_sizes"]
-        gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_rot_mat, gt_vdepth_factors = gts.split(
-            (1, 4, 2, 2, 2, 3, 1, 9, 1), 2)
+        gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_rot_mat, gt_vdepth_factors, gt_src_img = gts.split(
+            (1, 4, 2, 2, 2, 3, 1, 9, 1, 1), 2)
+
         mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0)
 
         # Pboxes
@@ -893,26 +928,40 @@ class DDDetectionLoss:
         targets_3d = targets[4:] # center, size, depth, rot_mat, vdepth_factors
 
         #self.plot_assignments(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt)
+        
+        depths = targets_3d[-3][fg_mask].squeeze()
+        in_min, in_max = self.hyp.loss_scale_min_depth, self.hyp.loss_scale_max_depth, 
+        out_min, out_max = self.hyp.loss_scale_min_weight, self.hyp.loss_scale_max_weight
+        depth_weights = (depths - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
+        loss_weight = torch.maximum(torch.minimum(depth_weights, torch.tensor(out_min)), torch.tensor(out_max))
 
-        loss[0] = (self.compute_box2d_loss(targets_2d, pred_2d, anchor_points, stride_tensor, fg_mask, target_scores_sum)
+        loss[0] = (self.compute_box2d_loss(targets_2d, pred_2d, anchor_points, stride_tensor, fg_mask, target_scores_sum, loss_weight)
                    * self.hyp.loss2d)
         loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum * self.hyp.cls
 
         loss[2:6] = self.compute_box3d_loss(targets_3d, pred_3d, anchor_points, stride_tensor,
-                                            fg_mask, target_scores_sum)
+                                            fg_mask, target_scores_sum, loss_weight)
 
-        if self.hyp.distillation:
-            embeddings = torch.cat([emb.view(feats[0].shape[0], 128, -1) for emb in embeddings], dim=2)
-            loss[6] = self.supervisor.forward_head(
-                batch["img"].detach(), gt_center_3d, embeddings, fg_mask.bool(),
-                target_gt_idx, mask_gt.bool().squeeze(-1), batch["mixed"].bool()
-            ) / target_scores_sum
+        if self.hyp.distillation and embeddings is not None:
+            embeddings = torch.cat([emb.view(emb.shape[0], emb.shape[1], -1) for emb in embeddings], dim=2)
+            if self.hyp.distillation_teacher in ["yolo", "self"] :
+                forwards = (anchor_points, stride_tensor, self.no, self.nc, calibs, mean_sizes, self.assigner)
+                loss[6] = self.supervisor.distill_from_yolo(batch["non_mix_imgs"].detach(), embeddings,
+                                                            gt_src_img.squeeze(-1).long(), mask_gt,
+                                                            gts, forwards, batch["mixed"].bool(),
+                                                            fg_mask, target_gt_idx)
+            else:
+                loss[6] = self.supervisor.distill_from_dino(
+                    batch["non_mix_imgs"].detach(), gt_center_3d, pred_3d[..., :2], embeddings, fg_mask.bool(),
+                    target_gt_idx, mask_gt.bool().squeeze(-1), batch["mixed"].bool(), gt_src_img.squeeze(-1).long(),
+                    stride_tensor, anchor_points
+                ) / target_scores_sum
 
         return loss.sum() * batch_size, loss
 
     def plot_assignments(self, batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt):
-        #self.debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor)
-        #self.debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt)
+        self.debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor)
+        self.debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt)
         self.debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor)
 
     def compute_loss_weights(self, current_loss):
@@ -921,7 +970,7 @@ class DDDetectionLoss:
             weights[2:] = 0
         return weights
 
-    def compute_box2d_loss(self, targets_2d, pred_2d, anchor_points, stride_tensor, fg_mask, num_targets):
+    def compute_box2d_loss(self, targets_2d, pred_2d, anchor_points, stride_tensor, fg_mask, num_targets, loss_weight):
         target_center_2d, target_size_2d = targets_2d
         pred_2d = pred_2d * stride_tensor
         anchor_points = anchor_points * stride_tensor
@@ -931,38 +980,37 @@ class DDDetectionLoss:
         target_size = target_size_2d[fg_mask]
         target_offset = (target_center_2d - anchor_points)[fg_mask]
 
-        offset2d_loss = F.l1_loss(pred_offset, target_offset, reduction="mean")
-        size2d_loss = F.l1_loss(pred_size, target_size, reduction="mean")
+        offset2d_loss = (F.l1_loss(pred_offset, target_offset, reduction="none") * loss_weight.unsqueeze(-1).repeat(1, 2)).sum()
+        size2d_loss = (F.l1_loss(pred_size, target_size, reduction="none") * loss_weight.unsqueeze(-1).repeat(1, 2)).sum()
 
         return (size2d_loss + offset2d_loss) / num_targets
 
-    def compute_box3d_loss(self, targets_3d, pred_3d, anchor_points, stride_tensor, fg_mask, num_targets):
+    def compute_box3d_loss(self, targets_3d, pred_3d, anchor_points, stride_tensor, fg_mask, num_targets, loss_weight):
         pred_depth = pred_3d[fg_mask][..., -2]
         pred_depth_un = pred_3d[fg_mask][..., -1] 
         target_depth = targets_3d[2][fg_mask].squeeze() * targets_3d[4][fg_mask].squeeze() 
-        depth_loss = (laplacian_aleatoric_uncertainty_loss_new(pred_depth, target_depth, pred_depth_un).sum()
+        depth_loss = ((laplacian_aleatoric_uncertainty_loss_new(pred_depth, target_depth, pred_depth_un)*loss_weight).sum()
                       / num_targets * self.hyp.depth)
 
         anchor_points = anchor_points * stride_tensor
         pred_offset = (pred_3d[..., :2] * stride_tensor)[fg_mask]
         target_center_3d = targets_3d[0]
         target_offset = (target_center_3d - anchor_points)[fg_mask]
-        offset3d_loss = (F.l1_loss(pred_offset, target_offset, reduction="mean")
+        offset3d_loss = ((F.l1_loss(pred_offset, target_offset, reduction="none") * loss_weight.unsqueeze(-1).repeat(1, 2)).sum()
                          / num_targets * self.hyp.offset3d)
 
         pred_size = pred_3d[fg_mask][..., 2:2+3]
         target_size = targets_3d[1][fg_mask]
-        size3d_loss = (F
-                       .l1_loss(pred_size, target_size, reduction="sum")
+        size3d_loss = ((F.l1_loss(pred_size, target_size, reduction="none")*loss_weight.unsqueeze(-1).repeat(1, 3)).sum()
                        / num_targets * self.hyp.size3d)
 
         pred_rot_mat = pred_3d[fg_mask][..., 5:5+9][:6]
         target_rot_mat = targets_3d[3][fg_mask][:6]
-        rot_loss = F.l1_loss(pred_rot_mat, target_rot_mat, reduction="sum") / num_targets * self.hyp.heading
+        rot_loss = (F.l1_loss(pred_rot_mat, target_rot_mat, reduction="none") * loss_weight.unsqueeze(-1).repeat(1, 6) ).sum() / num_targets * self.hyp.heading
         '''
         target_bin = targets_3d[-2][fg_mask]
         target_res = targets_3d[-1][fg_mask]
-        rot_loss = (compute_heading_loss(pred_heading, target_bin, target_res)
+        rot_loss = (compute_heading_loss(pred_heading, target_bin, target_res, loss_weight)
                         / num_targets * self.hyp.heading)
         '''
 
@@ -1135,30 +1183,29 @@ def laplacian_aleatoric_uncertainty_loss_new(input, target, log_variance):
     return loss
 
 
-def compute_heading_loss(input, target_cls, target_reg):
+def compute_heading_loss(input, target_cls, target_reg, loss_weight):
     target_cls = target_cls.view(-1).long()
     target_reg = target_reg.view(-1)
 
     # classification loss
     input_cls = input[..., 0:12]
-    cls_loss = F.cross_entropy(input_cls, target_cls, reduction='sum')
+    cls_loss = (F.cross_entropy(input_cls, target_cls, reduction='none') * loss_weight).sum()
 
     # regression loss
     input_reg = input[..., 12:24]
     cls_onehot = torch.zeros(target_cls.shape[0], 12).cuda().scatter_(dim=1, index=target_cls.view(-1, 1), value=1)
     input_reg = torch.sum(input_reg * cls_onehot, 1)
-    reg_loss = F.l1_loss(input_reg, target_reg, reduction='sum')
+    reg_loss = (F.l1_loss(input_reg, target_reg, reduction='none') * loss_weight).sum()
 
     return cls_loss + reg_loss
 
 class SupervisionLoss:
-    def __init__(self, model):
-        from ultralytics.utils.dino import DinoDepther
+    def __init__(self, model, teacher_model):
         self.device = next(model.parameters()).device  # get model device
         self.args = model.args
         self.model = model
-        self.foundation_model = DinoDepther()
-        self.foundation_model.load(self.args.dino_path)
+
+        self.teacher_model = teacher_model
         self.T = self.args.distillation_temp
         self.weight = self.args.distillation_weight
         self.fgdm_supervision_weight = self.args.fgdm_supervision_weight
@@ -1169,50 +1216,148 @@ class SupervisionLoss:
         elif self.criterion == "mse":
             self.loss = nn.MSELoss()
 
-    def forward_head(self, imgs, gt_center_3d, pred_embeddings, fg_mask, target_gt_idx, mask_gt, mixed_mask):
+    def distill_from_yolo(self, imgs, pred_embeddings, src_img, mask_gt, gts, forwards, mixed_mask, pred_fg_mask, pred_target_gt_idx):
+        with torch.inference_mode():
+            teacher_pred0, teacher_embeddings0 = self.forward_teacher(imgs[:, 0])
+            teacher_embeddings1 = torch.zeros_like(teacher_embeddings0)
+            teacher_pred1 = torch.zeros_like(teacher_pred0)
+            if mixed_mask.sum() > 0:
+                teacher_pred1[mixed_mask], teacher_embeddings1[mixed_mask] = self.forward_teacher(imgs[mixed_mask][:, 1])
+            teacher_embeddings1[~mixed_mask] = teacher_embeddings0[~mixed_mask]
+            teacher_pred1[~mixed_mask] = teacher_pred0[~mixed_mask]
+
+        mask_gt0 = mask_gt.bool() & (src_img.unsqueeze(-1) == 0)
+        mask_gt1 = mask_gt.bool() & (src_img.unsqueeze(-1) == 1)
+        teacher_fg_mask0, teacher_target_gt_idx0 = self.get_teacher_assignments(teacher_pred0, gts, mask_gt0, *forwards)
+        teacher_fg_mask1, teacher_target_gt_idx1 = self.get_teacher_assignments(teacher_pred1, gts, mask_gt1, *forwards)
+
+        loss = torch.zeros((pred_embeddings.shape[0]), device=imgs.device)
+        count = 0
+
+        for i in range(imgs.shape[0]):
+            teacher_fg_mask0_, teacher_target_gt_idx0_ = teacher_fg_mask0[i], teacher_target_gt_idx0[i]
+
+            pred_fg_mask_, pred_target_gt_idx_ = pred_fg_mask[i], pred_target_gt_idx[i]
+            teacher_fg_embeddings0_ = teacher_embeddings0[i].transpose(-2,-1)[teacher_fg_mask0_]
+            teacher_fg_target_gt_idx0_ = teacher_target_gt_idx0_[teacher_fg_mask0_]
+
+            if mixed_mask[i]:
+                teacher_fg_mask1_, teacher_target_gt_idx1_ = teacher_fg_mask1[i], teacher_target_gt_idx1[i]
+                teacher_fg_embeddings1_ = teacher_embeddings1[i].transpose(-2, -1)[teacher_fg_mask1_]
+                teacher_fg_target_gt_idx1_ = teacher_target_gt_idx1_[teacher_fg_mask1_]
+
+            pred_fg_embeddings0_ = pred_embeddings[i].transpose(-2, -1)[pred_fg_mask_]
+            pred_fg_target_gt_idx0_ = pred_target_gt_idx_[pred_fg_mask_]
+
+            pairs = []
+            k = 0
+            for pred_embedding, pred_gt_idx in zip(pred_fg_embeddings0_, pred_fg_target_gt_idx0_):
+                for teacher_embedding0, teacher_gt_idx in zip(teacher_fg_embeddings0_, teacher_fg_target_gt_idx0_):
+                    if pred_gt_idx == teacher_gt_idx:
+                        pairs.append((pred_embedding, teacher_embedding0))
+                        k += 1
+                if mixed_mask[i]:
+                    for teacher_embedding1, teacher_gt_idx in zip(teacher_fg_embeddings1_, teacher_fg_target_gt_idx1_):
+                        if pred_gt_idx == teacher_gt_idx:
+                            pairs.append((pred_embedding, teacher_embedding1))
+                            k += 1
+            if k > 0:
+                pred_embs = torch.stack([p[0] for p in pairs], dim=0)
+                teach_embs = torch.stack([p[1] for p in pairs], dim=0)
+                loss[i] = self.get_loss(pred_embs, teach_embs)
+            count += k
+
+        return loss.sum() / count
+
+    def get_loss(self, pred_emb, teach_emb):
+        if self.criterion == "soft":
+            soft_targets = nn.functional.softmax(teach_emb / self.T, dim=-1)
+            soft_prob = nn.functional.log_softmax(pred_emb / self.T, dim=-1)
+            if soft_targets.shape[0] == 0:
+                loss = torch.zeros(1, requires_grad=True)
+            else:
+                loss = torch.sum(soft_targets * (soft_targets.log() - soft_prob)) / soft_prob.size()[0] * (
+                        self.T ** 2)
+        elif self.criterion == "mse":
+            loss = self.loss(pred_emb, teach_emb)
+        elif self.criterion == "cos":
+            loss = self.loss(pred_emb, teach_emb,
+                                        target=torch.ones(teach_emb.size(0)).to(teach_emb.device))
+        else:
+            loss = torch.zeros(1, requires_grad=True)
+        return loss.sum()  * self.weight
+
+    def distill_from_dino(self, imgs, gt_center_3d, pred_center_3d, pred_embeddings, fg_mask, target_gt_idx, mask_gt, mixed_mask, src_img, stride_tensor, anchor_points):
         loss = torch.zeros(imgs.shape[0], device=imgs.device)
 
-        with torch.no_grad():
-            depth_maps, dino_embeddings = self.foundation_model(imgs)
+        with torch.inference_mode():
+            _, teacher_embeddings0 = self.forward_teacher(imgs[:, 0])
+            teacher_embeddings1 = torch.zeros_like(teacher_embeddings0)
+            if mixed_mask.sum() > 0:
+                _, teacher_embeddings1[mixed_mask] = self.forward_teacher(imgs[mixed_mask][:, 1])
+            teacher_embeddings1[~mixed_mask] = teacher_embeddings0[~mixed_mask]
         #self.plot_depth_maps(depth_maps, imgs)
 
-        for batch_idx in range(depth_maps.shape[0]):
-            if mask_gt[batch_idx].any() and (not self.no_mixup or not mixed_mask[batch_idx]):
-                img_size = torch.tensor(imgs.shape[2:][::-1], device=gt_center_3d.device)
-                dino_embed_size = torch.tensor(dino_embeddings.shape[2:][::-1], device=gt_center_3d.device)
-                center3d = gt_center_3d[batch_idx][mask_gt[batch_idx]] / img_size * dino_embed_size
-                dino_emb = dino_embeddings.transpose(1, 3)[
-                        batch_idx,
-                        center3d[:, 0].round().long().clamp(min=0, max=dino_embed_size[0] - 1),
-                        center3d[:, 1].round().long().clamp(min=0, max=dino_embed_size[1] - 1)
-                ][target_gt_idx[batch_idx][fg_mask[batch_idx]]]
-                pred_emb = pred_embeddings.transpose(1, 2)[batch_idx][fg_mask[batch_idx]]
+        anchor_points = anchor_points * stride_tensor
+        pred_offset = pred_center_3d * stride_tensor
+        predcenter3d = (anchor_points + pred_offset)
 
-                if self.criterion == "soft":
-                    soft_targets = nn.functional.softmax(dino_emb / self.T, dim=-1)
-                    soft_prob = nn.functional.log_softmax(pred_emb / self.T, dim=-1)
-                    loss[batch_idx] = torch.sum(soft_targets * (soft_targets.log() - soft_prob)) / soft_prob.size()[0] * (
-                            self.T ** 2)
-                elif self.criterion == "mse":
-                    loss[batch_idx] = self.loss(pred_emb, dino_emb)
-                elif self.criterion == "cos":
-                    loss[batch_idx] = self.loss(pred_emb, dino_emb, target=torch.ones(dino_emb.size(0)).to(dino_emb.device))
-                else:
-                    raise RuntimeError(f"Unknown criterion function: {self.criterion}")
+        img_size = torch.tensor(imgs.shape[3:][::-1], device=gt_center_3d.device)
+
+        for batch_idx in range(teacher_embeddings0.shape[0]):
+            if self.args.use_pred_center:
+                center3d = (predcenter3d / (img_size / 2) - 1)[batch_idx][fg_mask[batch_idx]]
+                center3d_0 = center3d[
+                    src_img[batch_idx][mask_gt[batch_idx]][target_gt_idx[batch_idx][fg_mask[batch_idx]]] == 0]
+                center3d_1 = center3d[
+                    src_img[batch_idx][mask_gt[batch_idx]][target_gt_idx[batch_idx][fg_mask[batch_idx]]] == 1]
             else:
-                loss[batch_idx] = 0
+                center3d = gt_center_3d[batch_idx][mask_gt[batch_idx]] / (img_size / 2) - 1
+                center3d_0 = center3d[src_img[batch_idx][mask_gt[batch_idx]] == 0]
+                center3d_1 = center3d[src_img[batch_idx][mask_gt[batch_idx]] == 1]
+
+            # self.visualize_centers(imgs[batch_idx], img_size, center3d_0, center3d_1)
+
+            dino_emb0 = torch.nn.functional.grid_sample(teacher_embeddings0[batch_idx].unsqueeze(0),
+                                                        center3d_0.unsqueeze(0).unsqueeze(0), mode="bilinear",
+                                                        padding_mode="border")[0, :, 0]
+            dino_emb1 = torch.nn.functional.grid_sample(teacher_embeddings1[batch_idx].unsqueeze(0),
+                                                        center3d_1.unsqueeze(0).unsqueeze(0), mode="bilinear",
+                                                        padding_mode="border")[0, :, 0]
+
+            if self.args.use_pred_center:
+                teacher_emb = torch.cat((dino_emb0, dino_emb1), dim=1).transpose(0, 1)
+            else:
+                teacher_emb = torch.cat((dino_emb0, dino_emb1), dim=1).transpose(0, 1)[
+                    target_gt_idx[batch_idx][fg_mask[batch_idx]]]
+
+            pred_emb = pred_embeddings.transpose(1, 2)[batch_idx][fg_mask[batch_idx]]
+
+            if self.criterion == "soft":
+                soft_targets = nn.functional.softmax(teacher_emb / self.T, dim=-1)
+                soft_prob = nn.functional.log_softmax(pred_emb / self.T, dim=-1)
+                if soft_targets.shape[0] == 0:
+                    loss[batch_idx] = torch.zeros(1, requires_grad=True)
+                else:
+                    loss[batch_idx] = torch.sum(soft_targets * (soft_targets.log() - soft_prob)) / soft_prob.size()[0] * (
+                        self.T ** 2)
+            elif self.criterion == "mse":
+                loss[batch_idx] = self.loss(pred_emb, teacher_emb)
+            elif self.criterion == "cos":
+                loss[batch_idx] = self.loss(pred_emb, teacher_emb, target=torch.ones(teacher_emb.size(0)).to(teacher_emb.device))
+            else:
+                raise RuntimeError(f"Unknown criterion function: {self.criterion}")
         return loss.sum() * self.weight
 
     def forward_fgdm(self, imgs, fgdm_embeddings, gt_depth_maps):
         with torch.no_grad():
-            _, dino_embeddings = self.foundation_model(imgs)
+            _, dino_embeddings = self.teacher_model(imgs)
 
         transform = transforms.Resize(size=(fgdm_embeddings.shape[2], fgdm_embeddings.shape[3]),
-                          interpolation=InterpolationMode.NEAREST_EXACT)
-        chs = fgdm_embeddings.shape[1]
-        mask = (transform(gt_depth_maps) > 0).unsqueeze(1).repeat(1, chs, 1, 1)
-        dino_emb = transform(dino_embeddings)[mask]
-        pred_emb = fgdm_embeddings[mask]
+                          interpolation=InterpolationMode.BILINEAR)
+        mask = (transform(gt_depth_maps) > 0)
+        dino_emb = transform(dino_embeddings).transpose(1, 2).transpose(2, 3)[mask]
+        pred_emb = fgdm_embeddings.transpose(1, 2).transpose(2, 3)[mask]
 
         if self.criterion == "soft":
             soft_targets = nn.functional.softmax(dino_emb / self.T, dim=1)
@@ -1226,6 +1371,44 @@ class SupervisionLoss:
 
         return loss * self.fgdm_supervision_weight
 
+    def forward_teacher(self, imgs):
+        from ultralytics.models import YOLOv10_3D
+        from ..nn.tasks import YOLOv10_3DDetectionModel
+        from ultralytics.nn.modules.conv import Conv
+        if isinstance(self.teacher_model, YOLOv10_3D):
+            self.teacher_model.model.model[-1].dense = True # Set the detection head to dense
+            for head in self.teacher_model.model.model[-1].o2o_heads:
+                for i in range(self.teacher_model.model.model[-1].nl):
+                    for k, layer in enumerate(head[i]):
+                        if isinstance(layer, Conv) and k >= 1:
+                            layer.conv.padding = (0,)
+                        if isinstance(layer, Conv) and k == 0:
+                            layer.conv.padding = (1,1)
+            for head in self.teacher_model.model.model[-1].o2m_heads:
+                for i in range(self.teacher_model.model.model[-1].nl):
+                    for k, layer in enumerate(head[i]):
+                        if isinstance(layer, Conv) and k >= 1:
+                            layer.conv.padding = (0,)
+                        if isinstance(layer, Conv) and k == 0:
+                            layer.conv.padding = (1,1)
+            res_dict = self.teacher_model.model(imgs)
+            pred = res_dict["one2one"][1]
+            pred_shape = pred[0].shape
+            preds = torch.cat([xi.view(pred_shape[0], pred_shape[1], -1) for xi in pred], 2)
+            return preds, torch.cat([x.reshape(x.shape[0], x.shape[1], -1) for x in res_dict["o2o_embs"]], dim=2)
+        elif isinstance(self.teacher_model, YOLOv10_3DDetectionModel):
+            self.teacher_model.model[-1].dense = True # Set the detection head to dense
+            res_dict = self.teacher_model(imgs)
+            self.teacher_model.model[-1].dense = False
+            pred = res_dict["one2one"]
+            if isinstance(pred, tuple):
+                pred = pred[1]
+            pred_shape = pred[0].shape
+            preds = torch.cat([xi.view(pred_shape[0], pred_shape[1], -1) for xi in pred], 2)
+            return preds, torch.cat([x.reshape(x.shape[0], x.shape[1], -1) for x in res_dict["o2o_embs"]], dim=2)
+        else:
+            return self.teacher_model(imgs)
+
     def plot_depth_maps(self, depth_maps, imgs):
         fig ,axes = plt.subplots(2, 2, figsize=(18, 12))
         fig.tight_layout()
@@ -1238,6 +1421,71 @@ class SupervisionLoss:
 
         plt.show()
 
+    def visualize_centers(self, imgs, img_size, center3d_0, center3d_1):
+        fig, axes = plt.subplots(2, 1, figsize=(18, 12))
+        fig.tight_layout()
+        axes = axes.ravel()
+        img0 = (255 * imgs[0].cpu().numpy().transpose(1, 2, 0)).astype(np.uint8)
+        axes[0].imshow(img0)
+        center3d0 = ((center3d_0 + 1) * img_size / 2).detach().cpu()
+        axes[0].scatter(center3d0[:, 0], center3d0[:, 1])
+
+        img1 = (255 * imgs[1].cpu().numpy().transpose(1, 2, 0)).astype(np.uint8)
+        axes[1].imshow(img1)
+        center3d1 = ((center3d_1 + 1) * img_size / 2).detach().cpu()
+        axes[1].scatter(center3d1[:, 0], center3d1[:, 1])
+
+        plt.show()
+        return
+
+    def bbox_decode(self, anchor_points, pred_2d, stride_tensor):
+        # anchor_points:
+        # pred_2d: offset_2d (2), size_2d(2)
+        offset, size = pred_2d.split((2, 2), dim=-1)
+        centers = anchor_points + offset
+        xy1 = centers - size / 2
+        xy2 = centers + size / 2
+        return torch.cat((xy1, xy2), dim=-1) * stride_tensor
+
+    def get_teacher_assignments(self, feats, gts, mask_gt, anchor_points, stride_tensor, no, nc, calibs, mean_sizes, assigner):
+        pred_scores, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un = (
+            feats.split(
+                (nc, 2, 2, 2, 3, 24, 1, 1), 1
+            ))
+
+        # num classes
+        pred_scores = pred_scores.permute(0, 2, 1).contiguous()
+        # offset 2d (2), size 2d (2) = 4
+        pred_2d = torch.cat((pred_o2d.permute(0, 2, 1).contiguous(), pred_s2d.permute(0, 2, 1).contiguous()), -1)
+        # offset 3d (2), size 3d (3) = 5
+        pred_3d = torch.cat((pred_o3d.permute(0, 2, 1).contiguous(),  # offset 3d (2)
+                             pred_s3d.permute(0, 2, 1).contiguous(),  # size 3d (3)
+                             pred_hd.permute(0, 2, 1).contiguous(),  # heading bins (12) + heading res (12)
+                             pred_dep.permute(0, 2, 1).contiguous(),  # depth (1)
+                             pred_dep_un.permute(0, 2, 1).contiguous()), -1)  # depth uncertainty (1)
+        # = 38
+
+        gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin, gt_heading_res, gt_src_img = gts.split(
+            (1, 4, 2, 2, 2, 3, 1, 1, 1, 1), 2)
+        #mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0)
+
+        # Pboxes
+        pred_bboxes = self.bbox_decode(anchor_points, pred_2d, stride_tensor)
+
+        targets, fg_mask, target_gt_idx, pred_kps, gt_kps = assigner(
+            pred_scores.detach().sigmoid(),
+            pred_bboxes.detach().type(gt_bboxes.dtype),
+            pred_3d.detach(),
+            anchor_points * stride_tensor,
+            (gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin,
+             gt_heading_res),
+            mask_gt,
+            stride_tensor,
+            calibs,
+            mean_sizes
+        )
+        #debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor)
+        return fg_mask, target_gt_idx
 
 class ForegroundDepthMapLoss(nn.Module):
 

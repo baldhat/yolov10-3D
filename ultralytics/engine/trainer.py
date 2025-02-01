@@ -19,7 +19,7 @@ import numpy as np
 import torch
 from torch import distributed as dist
 from torch import nn, optim
-from ultralytics.utils.callbacks.notion_upload import upload_to_notion
+from ultralytics.utils.callbacks.notion_upload import upload_to_notion, Run
 
 from ultralytics.cfg import get_cfg, get_save_dir
 from ultralytics.data.utils import check_cls_dataset, check_det_dataset
@@ -41,6 +41,7 @@ from ultralytics.utils.autobatch import check_train_batch_size
 from ultralytics.utils.checks import check_amp, check_file, check_imgsz, check_model_file_from_stem, print_args
 from ultralytics.utils.dist import ddp_cleanup, generate_ddp_command
 from ultralytics.utils.files import get_latest_run
+from ultralytics.utils.gradient_balancer import GradientBalancer
 from ultralytics.utils.torch_utils import (
     EarlyStopping,
     ModelEMA,
@@ -276,6 +277,9 @@ class BaseTrainer:
             dist.broadcast(self.amp, src=0)  # broadcast the tensor from rank 0 to all other ranks (returns None)
         self.amp = bool(self.amp)  # as boolean
         self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp)
+        if self.args.gradient_balancer is not None:
+            self.gradient_balancer = GradientBalancer(self.scaler, balancer=self.args.gradient_balancer,
+                                                  strategy=self.args.gradient_balancer_strategy)
         if world_size > 1:
             self.model = nn.parallel.DistributedDataParallel(self.model, device_ids=[RANK])
 
@@ -350,6 +354,8 @@ class BaseTrainer:
             ei_loss = self.compute_e0_loss()
             loss_weightor = htl.Hierarchical_Task_Learning()
 
+        Run.get_flops_(self.model)
+
         while True:
             self.epoch = epoch
             self.run_callbacks("on_train_epoch_start")
@@ -405,7 +411,10 @@ class BaseTrainer:
                     )
 
                 # Backward
-                self.scaler.scale(self.loss).backward()
+                if self.args.gradient_balancer is not None:
+                    self.gradient_balancer.step(self.model, self.loss_items)
+                else:
+                    self.scaler.scale(self.loss).backward()
 
                 # Optimize - https://pytorch.org/docs/master/notes/amp_examples.html
                 if ni - last_opt_step >= self.accumulate:

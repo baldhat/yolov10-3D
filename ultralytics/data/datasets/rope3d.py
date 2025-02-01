@@ -115,6 +115,7 @@ class Rope3Dataset(data.Dataset):
         index = int(self.idx_to_img_id[item])  # index mapping, get real data id
         ori_img =  self.get_image(index)
         img = ori_img
+        img0, img1 = None, None
         img_size = np.array(ori_img.size)
         if self.split != 'test':
             dst_W, dst_H = img_size
@@ -134,9 +135,11 @@ class Rope3Dataset(data.Dataset):
         if self.data_augmentation:
             if np.random.random() < 0.5 and self.mixup:
                 random_mix_flag = True
+                img0 = img.copy()
 
             if np.random.random() < self.random_flip:
                 random_flip_flag = True
+                img0 = img.transpose(Image.FLIP_LEFT_RIGHT)
                 img = img.transpose(Image.FLIP_LEFT_RIGHT)
 
             if np.random.random() < self.random_crop:
@@ -166,8 +169,8 @@ class Rope3Dataset(data.Dataset):
                 vdepth_factor1 = self.virtual_focal_length / calib_temp.fv
                 
                 if calib_temp.cu == calib.cu and calib_temp.cv == calib.cv and calib_temp.fu == calib.fu and calib_temp.fv == calib.fv:
-                    img_temp = self.get_image(random_index)
-                    img_size_temp = np.array(img.size)
+                    img1 = self.get_image(random_index)
+                    img_size_temp = np.array(img1.size)
                     dst_W_temp, dst_H_temp = img_size_temp
                     if dst_W_temp == dst_W and dst_H_temp == dst_H:
                         objects_1 = self.get_label(index)
@@ -175,8 +178,8 @@ class Rope3Dataset(data.Dataset):
                         if len(objects_1) + len(objects_2) < self.max_objs:
                             random_mix_flag = True
                             if random_flip_flag == True:
-                                img_temp = img_temp.transpose(Image.FLIP_LEFT_RIGHT)
-                            img_blend = Image.blend(img, img_temp, alpha=0.5)
+                                img1 = img1.transpose(Image.FLIP_LEFT_RIGHT)
+                            img_blend = Image.blend(img, img1, alpha=0.5)
                             img = img_blend
                             break
 
@@ -186,9 +189,25 @@ class Rope3Dataset(data.Dataset):
                             method=Image.AFFINE,
                             data=tuple(trans_inv.reshape(-1).tolist()),
                             resample=Image.BILINEAR)
+        
+        if random_mix_flag:
+            img0 = img0.transform(tuple(self.resolution.tolist()),
+                                  method=Image.AFFINE,
+                                  data=tuple(trans_inv.reshape(-1).tolist()),
+                                  resample=Image.BILINEAR)
+            img1 = img1.transform(tuple(self.resolution.tolist()),
+                                  method=Image.AFFINE,
+                                  data=tuple(trans_inv.reshape(-1).tolist()),
+                                  resample=Image.BILINEAR)
+        
         # image encoding
         img = np.array(img).astype(np.float32) / 255.0
         img = img.transpose(2, 0, 1)  # C * H * W
+        if random_mix_flag:
+            img0 = np.array(img0).astype(np.float32) / 255.0
+            img0 = img0.transpose(2, 0, 1)  # C * H * W
+            img1 = np.array(img1).astype(np.float32) / 255.0
+            img1 = img1.transpose(2, 0, 1)  # C * H * W
 
         ratio_pad = np.array([self.resolution / img_size, np.array([0, 0])])
 
@@ -204,6 +223,7 @@ class Rope3Dataset(data.Dataset):
         gt_heading_res = []
         gt_rot_mat = []
         gt_vdep_factors = []
+        gt_src_img = [] # 0 or 1, when no mixup always 0
 
         if self.split != 'test':
             objects = self.get_label(index)
@@ -215,8 +235,6 @@ class Rope3Dataset(data.Dataset):
                     object.box2d[0], object.box2d[2] = img_size[0] - x2, img_size[0] - x1
                     object.pos[0] *= -1 # object position is expressed in camera coordinates
                     object.rot_mat = self.left_multiply_matrix @ object.rot_mat @ self.right_multiply_matrix
-            if random_rot_flag:
-                pass
 
 
             object_num = len(objects) if len(objects) < self.max_objs else self.max_objs
@@ -236,6 +254,7 @@ class Rope3Dataset(data.Dataset):
                     gt_heading_res.append(_head_res)
                     gt_rot_mat.append(_rot_mat)
                     gt_vdep_factors.append(vdepth_factor0)
+                    gt_src_img.append(0)
 
             if random_mix_flag == True:
                 objects = self.get_label(random_index)
@@ -263,6 +282,7 @@ class Rope3Dataset(data.Dataset):
                         gt_heading_res.append(_head_res)
                         gt_rot_mat.append(_rot_mat)
                         gt_vdep_factors.append(vdepth_factor1)
+                        gt_src_img.append(1)
 
         inputs = torch.tensor(img)
         info = {'img_id': index,
@@ -301,7 +321,11 @@ class Rope3Dataset(data.Dataset):
             "mixed": torch.tensor(np.array(random_mix_flag, dtype=np.uint8)),
             "rot_mat": torch.tensor(gt_rot_mat),
             "shift": torch.tensor(shift),
-            "vdepth_factors": torch.tensor(gt_vdep_factors)
+            "vdepth_factors": torch.tensor(gt_vdep_factors),
+            "mixed": torch.tensor(np.array(random_mix_flag, dtype=np.uint8)),
+            "src_img": torch.tensor(np.array(gt_src_img, dtype=np.uint8)),
+            "non_mix_imgs": torch.tensor(np.concatenate((img0[None],img1[None]) if random_mix_flag else (img[None], img[None]), axis=0))
+        
         }
         return data
 
@@ -589,10 +613,10 @@ class Rope3Dataset(data.Dataset):
         values = list(zip(*[list(b.values()) for b in batch]))
         for i, k in enumerate(keys):
             value = values[i]
-            if k in ["img", "coord_range", "ratio_pad", "calib", "mixed", "shift"]:
+            if k in ["img", "coord_range", "ratio_pad", "calib", "mixed", "shift", "non_mix_imgs"]:
                 value = torch.stack(value, 0)
             if k in ["bboxes", "cls", "depth", "center_3d", "center_2d", "size_2d", "heading_bin",
-                     "heading_res", "size_3d", "rot_mat", "vdepth_factors"]:
+                     "heading_res", "size_3d", "rot_mat", "vdepth_factors", "src_img"]:
                 value = torch.cat(value, 0)
             if k not in ["mean_sizes"]:
                 new_batch[k] = value
