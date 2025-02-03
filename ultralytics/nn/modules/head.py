@@ -771,18 +771,33 @@ class v10Detect3d(nn.Module):
             self.is_padded = False
         
         for i in range(self.nl):
-            outputs = {}
-            outputs[head_names[0]] = heads[0][i](x[i])
+            out = heads[0][i](x[i])
             
-            candidate_indices = self.select_candidates(outputs[head_names[0]], batch_sz)
+            candidate_indices = self.select_candidates(out, batch_sz)
             inputs = self.extract_patches(x[i], candidate_indices)
-            out, dep_features[i] = self.single_head_forward(heads[1][i], inputs.repeat(1, 7, 1, 1))
+            head_out, _ = self.single_head_forward(heads[1][i], inputs.repeat(1, 7, 1, 1))
+            
+            ## 1
+            # head_out = head_out[:, self.bh_indices, 0, 0]
+            # cls_out = []
+            # for b in range(x[i].shape[0]):
+            #     cls_out.append(out[b, :, candidate_indices[b, :, 0], candidate_indices[b, :, 1]])
+            # y.append(
+            #     torch.cat((
+            #         torch.stack(cls_out, dim=0).transpose(1, 2), 
+            #         head_out.unsqueeze(0).reshape(x[i].shape[0], self.max_det, head_out.shape[1])
+            #     ), dim=2)
+            # )
+            
+            ## 2
+            #y.append(head_out)
+            
+            ## 3
             head_output = torch.zeros((x[i].shape[0], 35, x[i].shape[2], x[i].shape[3]), device=x[i].device)
-            out = out[:, self.bh_indices, 0, 0].view(x[i].shape[0], self.max_det, 35).transpose(1, 2)
+            head_out = head_out[:, self.bh_indices, 0, 0].view(x[i].shape[0], self.max_det, 35).transpose(1, 2)
             for b in range(x[i].shape[0]):
-                head_output[b, :, candidate_indices[b, :, 0], candidate_indices[b, :, 1]] = out[b].float()
-            outputs[head_names[1]] = head_output
-            y.append(torch.cat(list(outputs.values()), dim=1))
+                head_output[b, :, candidate_indices[b, :, 0], candidate_indices[b, :, 1]] = head_out[b].float()
+            y.append(torch.cat([out, head_output], dim=1))
         
         return y, dep_features
     '''
@@ -845,14 +860,15 @@ class v10Detect3d(nn.Module):
             one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
 
         if not self.training:
-            one2one = self.inference(one2one)
+            #one2one = self.inference(one2one)
             if not self.export:
                 return {"one2one": one2one, "o2o_embs": o2o_embs}
             else:
-                assert(self.max_det != -1)
-                predsO = one2one.transpose(-1, -2)
-                regO, scoresO, labelsO = ops.v10_3Dpostprocess(predsO, self.max_det, self.nc)
-                return torch.cat((regO, scoresO.unsqueeze(-1), labelsO.unsqueeze(-1)), dim=-1)
+                # assert(self.max_det != -1)
+                # predsO = one2one.transpose(-1, -2)
+                # regO, scoresO, labelsO = ops.v10_3Dpostprocess(predsO, self.max_det, self.nc)
+                # return torch.cat((regO, scoresO.unsqueeze(-1), labelsO.unsqueeze(-1)), dim=-1)
+                return one2one
         else:
             one2many, o2m_embs, depth_maps = self._forward(x)
             return {"one2many": one2many, "one2one": one2one, "o2m_embs": o2m_embs, "o2o_embs": o2o_embs, "depth_maps": depth_maps}
