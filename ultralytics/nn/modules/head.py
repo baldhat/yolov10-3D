@@ -764,7 +764,6 @@ class v10Detect3d(nn.Module):
         y = []
         dep_features = [None, None]
         batch_sz = x[0].shape[0]
-        head_names = list(self.output_channels.keys())
         if not hasattr(self, "is_padded") or self.is_padded:
             heads[1][0][0].conv.padding = (0,)
             heads[1][1][0].conv.padding = (0,)
@@ -777,24 +776,8 @@ class v10Detect3d(nn.Module):
             inputs = self.extract_patches(x[i], candidate_indices)
             head_out, _ = self.single_head_forward(heads[1][i], inputs.repeat(1, 7, 1, 1))
             
-            ## 1
-            # head_out = head_out[:, self.bh_indices, 0, 0]
-            # cls_out = []
-            # for b in range(x[i].shape[0]):
-            #     cls_out.append(out[b, :, candidate_indices[b, :, 0], candidate_indices[b, :, 1]])
-            # y.append(
-            #     torch.cat((
-            #         torch.stack(cls_out, dim=0).transpose(1, 2), 
-            #         head_out.unsqueeze(0).reshape(x[i].shape[0], self.max_det, head_out.shape[1])
-            #     ), dim=2)
-            # )
-            
-            ## 2
-            #y.append(head_out)
-            
-            ## 3
-            head_output = torch.zeros((x[i].shape[0], 35, x[i].shape[2], x[i].shape[3]), device=x[i].device)
-            head_out = head_out[:, self.bh_indices, 0, 0].view(x[i].shape[0], self.max_det, 35).transpose(1, 2)
+            head_output = torch.zeros((x[i].shape[0], self.no-self.nc, x[i].shape[2], x[i].shape[3]), device=x[i].device)
+            head_out = head_out[:, self.bh_indices, 0, 0].view(x[i].shape[0], self.max_det, self.no-self.nc).transpose(1, 2)
             for b in range(x[i].shape[0]):
                 head_output[b, :, candidate_indices[b, :, 0], candidate_indices[b, :, 1]] = head_out[b].float()
             y.append(torch.cat([out, head_output], dim=1))
@@ -860,7 +843,7 @@ class v10Detect3d(nn.Module):
             one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
 
         if not self.training:
-            #one2one = self.inference(one2one)
+            one2one = self.inference(one2one)
             if not self.export:
                 return {"one2one": one2one, "o2o_embs": o2o_embs}
             else:
