@@ -66,7 +66,7 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
 
     def preprocess_batch(self, batch):
         """Allows custom preprocessing model inputs and ground truths depending on task type."""
-        batch["calib"] = batch["calib"].to(self.device)
+        #batch["calibs"] = batch["calibs"].to(self.device)
         batch["img"] = batch["img"].to(self.device)
         batch["non_mix_imgs"] = batch["non_mix_imgs"].to(self.device, non_blocking=True)
         batch["non_mix_imgs"] = (batch["non_mix_imgs"].half() if self.args.half else batch["non_mix_imgs"].float())

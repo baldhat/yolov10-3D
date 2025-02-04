@@ -431,9 +431,15 @@ class TaskAlignedAssigner3d(nn.Module):
 
         gt_vdepth = gt_depth * gt_vdepth_factors
         gt_keypoints = get_3d_keypoints(gt_center_3d, gt_vdepth, gt_size_3d, gt_rot_mat.reshape(self.bs, self.n_max_boxes, 3, 3), calibs)
-        pd_keypoints = get_3d_keypoints(pd_center_3d, pd_dep, pd_size3d, pd_rot_mat.reshape(self.bs, self.num_anchors, 3, 3), calibs)
+        pd_keypoints1 = get_3d_keypoints(pd_center_3d, pd_dep, pd_size3d, pd_rot_mat.reshape(self.bs, self.num_anchors, 3, 3), calibs[:, 0])
+        last_calibs = torch.tensor(
+            [calibs[i][mask_gt.bool().squeeze()[i]][-1].cpu().numpy() if calibs[i][mask_gt.bool().squeeze()[i]].numel() > 0 
+             else calibs[i, 0] for i in range(calibs.shape[0]) 
+             ]).cuda()
+        pd_keypoints2 = get_3d_keypoints(pd_center_3d, pd_dep, pd_size3d, pd_rot_mat.reshape(self.bs, self.num_anchors, 3, 3), last_calibs)
+        pd_keypoints = torch.stack((pd_keypoints1, pd_keypoints2), dim=-1)
 
-        mask_pos, align_metric, overlaps = self.get_pos_mask(
+        mask_pos, align_metric, overlaps, indx = self.get_pos_mask(
             pd_scores, pd_bboxes, pd_keypoints, gt_labels, gt_bboxes, gt_keypoints, anc_points, mask_gt
         )
 
@@ -449,7 +455,7 @@ class TaskAlignedAssigner3d(nn.Module):
         norm_align_metric = (align_metric * pos_overlaps / (pos_align_metrics + self.eps)).amax(-2).unsqueeze(-1)
         targets[1] = targets[1] * norm_align_metric
 
-        return targets, fg_mask.bool(), target_gt_idx, pd_keypoints, gt_keypoints
+        return targets, fg_mask.bool(), target_gt_idx, pd_keypoints[..., 0], gt_keypoints
 
     def decode_3d_center(self, pd_o3d, anc_points, stride_tensor):
         center3d = anc_points + (pd_o3d * stride_tensor)
@@ -473,11 +479,18 @@ class TaskAlignedAssigner3d(nn.Module):
         """Get in_gts mask, (b, max_num_obj, h*w)."""
         mask_in_gts = self.select_candidates_in_gts(anc_points, gt_bboxes)
         num_anchors = mask_in_gts.shape[-1]
+        indx = None
         # Get anchor_align metric, (b, max_num_obj, h*w)
         if self.use_3d and self.use_2d:
-            align_metric, overlaps = self.get_box_kp_metrics(pd_scores, pd_bboxes, pd_keypoints, gt_labels, gt_bboxes,
+            align_metric1, overlaps1 = self.get_box_kp_metrics(pd_scores, pd_bboxes, pd_keypoints[..., 0], gt_labels, gt_bboxes,
                          gt_keypoints,
                          mask_in_gts * mask_gt if self.constrain_anchors else mask_gt.repeat(1, 1, num_anchors).bool())
+            align_metric2, overlaps2 = self.get_box_kp_metrics(pd_scores, pd_bboxes, pd_keypoints[..., 1], gt_labels, gt_bboxes,
+                         gt_keypoints,
+                         mask_in_gts * mask_gt if self.constrain_anchors else mask_gt.repeat(1, 1, num_anchors).bool())
+            align_metric, indx = torch.stack((align_metric1, align_metric2), dim=-1).max(-1, keepdim=True)
+            overlaps = torch.stack((overlaps1, overlaps2), dim=-1).take_along_dim(indx, dim=-1).squeeze(-1)
+            align_metric = align_metric.squeeze(-1)
         elif self.use_3d and not self.use_2d:
             align_metric, overlaps = self.get_keypoint_metrics(pd_scores, pd_keypoints, gt_labels, gt_keypoints,
                          mask_in_gts * mask_gt if self.constrain_anchors else mask_gt.repeat(1, 1, num_anchors).bool())
@@ -503,7 +516,7 @@ class TaskAlignedAssigner3d(nn.Module):
         if self.topk > 1:
             self.plot_overlaps_vs_dist(overlaps[mask_topk.bool()], align_metric[mask_topk.bool()], gt_keypoints[mask_gt.squeeze(-1).bool()])
         '''
-        return mask_pos, align_metric, overlaps
+        return mask_pos, align_metric, overlaps, indx
 
     def plot_overlaps_vs_dist(self, overlaps, align_metric, gt_keypoints):
         for i, gt_kp in enumerate(gt_keypoints):

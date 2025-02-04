@@ -9,7 +9,8 @@ def get_object_keypoints(center_3d, size3d, roty):
 
 
 def get_3d_keypoints(center_3d, dep, size3d, alloc_rot_mat, calibs):
-    calibs = calibs.unsqueeze(1).repeat(1, center_3d.shape[1], 1)
+    if len(calibs.shape) < 3:
+        calibs = calibs.unsqueeze(1).repeat(1, center_3d.shape[1], 1)
     locations = img_to_rect(center_3d, dep, calibs)
     boxes_object_frame = get_box_corners(size3d)
     #rotations = get_roty(center_3d, heading_bin, heading_res, calibs)

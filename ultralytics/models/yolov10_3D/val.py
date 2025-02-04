@@ -111,7 +111,7 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
         batch["non_mix_imgs"] = batch["non_mix_imgs"].to(self.device, non_blocking=True)
         batch["non_mix_imgs"] = (batch["non_mix_imgs"].half() if self.args.half else batch["non_mix_imgs"].float())
         for k in ["batch_idx", "bboxes", "cls", "depth", "center_3d", "center_2d", "size_2d", "heading_bin",
-                  "heading_res", "size_3d", "calib", "src_img", "rot_mat", "vdepth_factors"]:
+                  "heading_res", "size_3d", "src_img", "rot_mat", "vdepth_factors", "calibs"]:
             batch[k] = batch[k].to(self.device)
         self.batch = batch
         return batch
@@ -209,7 +209,16 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
 
     def _prepare_batch(self, batch):
         infos_ = self.collate_infos(batch)
-        calibs = [self.dataloader.dataset.get_calib(info) for info in infos_['img_id']]
+        calibs = []
+        for b,(img_id, mixup_img_id) in enumerate(zip(infos_["img_id"], infos_["mixup_img_id"])):
+            c = []
+            mask = batch["batch_idx"] == b
+            for gt in batch["src_img"][mask]:
+                if gt == 0:
+                    c.append(self.dataloader.dataset.get_calib(img_id))   
+                else:
+                    c.append(self.dataloader.dataset.get_calib(mixup_img_id))   
+            calibs.append(c)
         return self.dataloader.dataset.decode_batch_eval(batch, calibs)
 
     def _prepare_preds(self, preds, batch):

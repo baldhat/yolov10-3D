@@ -1221,7 +1221,7 @@ class KITTIVisualizer():
 
     def plot_batch(self, batch, dataset, filename):
         infos_ = self.collate_infos(batch)
-        calibs = [dataset.get_calib(info) for info in infos_["img_id"]]
+        calibs = self.get_calibs(batch, dataset, infos_)
 
         targets = dataset.decode_batch(batch, calibs, undo_augment=False)
         images, infos = batch["img"], batch["info"]
@@ -1238,7 +1238,7 @@ class KITTIVisualizer():
             #img = np.clip((img * dataset.std + dataset.mean), 0, 255).astype(np.uint8)
             img = cv2.resize(img, info["img_size"])
 
-            for object in result:
+            for j, object in enumerate(result):
                 cls = object[0]
                 if dataset.pred_rot_mat:
                     egoc_rot_matrix = np.array(object[1:10]).reshape(3, 3)
@@ -1255,7 +1255,7 @@ class KITTIVisualizer():
                 self.plot_3d_obj(img,
                                  VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
                                              dimensions, bbox2d, cls),
-                                 np.copy(calib.P2), gt=True)
+                                 calib[j].P2, gt=True)
 
             ax[i].imshow(img)
             ax[i].axis("off")
@@ -1274,10 +1274,25 @@ class KITTIVisualizer():
                 ax[i].axis("off")
             plt.savefig(str(filename) + "depth.png", dpi=300, bbox_inches="tight")
 
+    def get_calibs(self, batch, dataset, infos_):
+        calibs = []
+        for b,(img_id, mixup_img_id) in enumerate(zip(infos_["img_id"], infos_["mixup_img_id"])):
+            c = []
+            mask = batch["batch_idx"] == b
+            for gt in batch["src_img"][mask]:
+                if gt == 0:
+                    c.append(dataset.get_calib(img_id))   
+                else:
+                    c.append(dataset.get_calib(mixup_img_id))   
+            calibs.append(c)
+        return calibs
+
     def plot_preds(self, batch, preds, dataset, paths, fname, names, threshold=0.1):
         infos_ = self.collate_infos(batch)
-        calibs = [dataset.get_calib(info) for info in infos_['img_id']]
-        preds = dataset.decode_preds(preds, calibs,  batch["im_file"], batch["ratio_pad"], infos_['trans_inv'],
+        
+        calib = [dataset.get_calib(info) for info in infos_['img_id']]
+        calibs = self.get_calibs(batch, dataset, infos_)
+        preds = dataset.decode_preds(preds, calib,  batch["im_file"], batch["ratio_pad"], infos_['trans_inv'],
                              threshold=threshold, undo_augment=False)
         targets = dataset.decode_batch(batch, calibs, undo_augment=False)
         images, infos = batch["img"], batch["info"]
@@ -1287,7 +1302,7 @@ class KITTIVisualizer():
                                figsize=(36, 12), gridspec_kw={'wspace': 0, 'hspace': 0}, constrained_layout=True)
         ax = ax.ravel()
 
-        for i, (image, calib, (img_id, result), (_, target), info) in enumerate(zip(images, calibs, preds.items(), targets.items(), infos)):
+        for i, (image, calib_, (img_id, result), (_, target), info) in enumerate(zip(images, calib, preds.items(), targets.items(), infos)):
             if i >= self.max_imgs:
                 break
             img = image.detach().cpu().numpy().transpose(1, 2, 0).copy()
@@ -1312,7 +1327,7 @@ class KITTIVisualizer():
                 self.plot_3d_obj(img,
                                  VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
                                              dimensions, bbox2d, cls),
-                                 np.copy(calib.P2), bbox2d=False)
+                                 np.copy(calib[0].P2), bbox2d=False)
 
             for object in target:
                 cls = object[0]
@@ -1331,7 +1346,7 @@ class KITTIVisualizer():
                 self.plot_3d_obj(img,
                                  VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
                                              dimensions, bbox2d, cls),
-                                 np.copy(calib.P2), bbox2d=False, gt=True)
+                                 np.copy(calib_.P2), bbox2d=False, gt=True)
 
             ax[i].imshow(img)
             ax[i].axis("off")
@@ -1340,10 +1355,11 @@ class KITTIVisualizer():
 
     def plot_bev(self, batch, preds, dataset, fname, threshold=0.1):
         infos_ = self.collate_infos(batch)
-        calibs = [dataset.get_calib(info) for info in infos_['img_id']]
+        calibs = self.get_calibs(batch, dataset, infos_)
         targets = dataset.decode_batch(batch, calibs, undo_augment=False)
         if preds is not None:
-            preds = dataset.decode_preds(preds, calibs, batch["im_file"], batch["ratio_pad"],
+            calib_ = [dataset.get_calib(info) for info in infos_['img_id']]
+            preds = dataset.decode_preds(preds, calib_, batch["im_file"], batch["ratio_pad"],
                                          infos_['trans_inv'], threshold=threshold, undo_augment=False)
         else:
             preds = {key: None for key in targets.keys()}

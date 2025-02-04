@@ -7,9 +7,9 @@ mode: train # (str) YOLO mode, i.e. train, val, predict, export, track, benchmar
 # Train settings -------------------------------------------------------------------------------------------------------
 model: # (str, optional) path to model file, i.e. yolov8n.pt, yolov8n.yaml
 data: # (str, optional) path to data file, i.e. coco128.yaml
-epochs: 400 # (int) number of epochs to train for
+epochs: 200 # (int) number of epochs to train for
 time: # (float, optional) number of hours to train for, overrides epochs if supplied
-patience: 150 # (int) epochs to wait for no observable improvement for early stopping of training
+patience: 80 # (int) epochs to wait for no observable improvement for early stopping of training
 batch: 32 # (int) number of images per batch (-1 for AutoBatch)
 imgsz: [960, 640] # (int | list) input images size as int for train and val modes, or list[w,h] for predict and export modes
 save: True # (bool) save train checkpoints and predict results
@@ -128,8 +128,8 @@ min_depth_threshold: 1
 min_scale: 0.8
 max_scale: 1.2
 overfit: False
-gradient_balancer: "cfa"
-gradient_balancer_strategy: "depVSrest"
+gradient_balancer: #"cfa"
+gradient_balancer_strategy: #"depVSrest"
 # Distillation
 distillation: False
 distillation_teacher: "yolo"

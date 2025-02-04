@@ -829,12 +829,12 @@ class DDDetectionLoss:
     def preprocess(self, targets, batch_size, scale_tensor):
         """Preprocesses the target counts and matches with the input batch size to output a tensor."""
         if targets.shape[0] == 0:
-            out = torch.zeros(batch_size, 0, 26, device=self.device)
+            out = torch.zeros(batch_size, 0, 32, device=self.device)
         else:
             i = targets[:, 0]  # image index
             _, counts = i.unique(return_counts=True)
             counts = counts.to(dtype=torch.int32)
-            out = torch.zeros(batch_size, counts.max(), 26, device=self.device)
+            out = torch.zeros(batch_size, counts.max(), 32, device=self.device)
             for j in range(batch_size):
                 matches = i == j
                 n = matches.sum()
@@ -893,12 +893,13 @@ class DDDetectionLoss:
         gts = torch.cat((batch["batch_idx"].view(-1, 1), batch["cls"].view(-1, 1),
                                 batch["bboxes"], batch["center_2d"], batch["size_2d"],
                                 batch["center_3d"], batch["size_3d"], batch["depth"].view(-1, 1),
-                                batch["rot_mat"], batch["vdepth_factors"].view(-1, 1), batch["src_img"].view(-1, 1)), 1)
+                                batch["rot_mat"], batch["vdepth_factors"].view(-1, 1), batch["src_img"].view(-1, 1),
+                                batch["calibs"]), 1)
         gts = self.preprocess(gts.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
-        calibs = batch["calib"]
+        
         mean_sizes = batch["mean_sizes"]
-        gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_rot_mat, gt_vdepth_factors, gt_src_img = gts.split(
-            (1, 4, 2, 2, 2, 3, 1, 9, 1, 1), 2)
+        gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_rot_mat, gt_vdepth_factors, gt_src_img, calibs = gts.split(
+            (1, 4, 2, 2, 2, 3, 1, 9, 1, 1, 6), 2)
 
         mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0)
 
