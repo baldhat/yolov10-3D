@@ -1327,7 +1327,7 @@ class KITTIVisualizer():
                 self.plot_3d_obj(img,
                                  VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
                                              dimensions, bbox2d, cls),
-                                 np.copy(calib[0].P2), bbox2d=False)
+                                 np.copy(calib_.P2), bbox2d=False)
 
             for object in target:
                 cls = object[0]
