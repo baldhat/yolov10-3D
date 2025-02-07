@@ -128,7 +128,7 @@ max_depth_threshold: 200
 min_depth_threshold: 1
 min_scale: 0.8
 max_scale: 1.2
-overfit: True
+overfit: False
 gradient_balancer: "cfa"
 gradient_balancer_strategy: "depVSrest" #"depVSrestWdist"
 # Distillation
@@ -152,7 +152,7 @@ fgdm_loss_weight: 2
 fgdm_supervision: False
 fgdm_supervision_weight: 1
 
-virtual_focal_length: 3000
+virtual_focal_length: 2600
 
 dfl: 1.5 # (float) dfl loss gain
 pose: 12.0 # (float) pose loss gain
