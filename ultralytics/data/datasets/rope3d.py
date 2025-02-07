@@ -23,8 +23,8 @@ class Rope3Dataset(data.Dataset):
         self.path = "/".join(filepath.split("/")[:-1])
         self.split = mode
         self.mode = mode
-        self.class_name = ['Car', 'Pedestrian', 'Cyclist']
-        self.writelist = ['Car', 'Pedestrian', 'Cyclist']
+        self.class_name = ['Car', 'Pedestrian', 'Cyclist', 'Big_Vehicle']
+        self.writelist = ['Car', 'Pedestrian', 'Cyclist', 'Big_Vehicle']
         self.resolution = np.array([960, 540])  # W * H
         self.max_objs = 150
         self.use_camera_dis = False
@@ -40,8 +40,8 @@ class Rope3Dataset(data.Dataset):
         self.idx_to_img_id = {idx: img_id for idx, img_id in enumerate(self.imgs)}
         self.img_file2img_id = {img["file_path"].split(os.path.sep)[-1]: idx for idx, img in self.imgs.items()}
 
-        self.cls2train_id = {"Car": 0, "Pedestrian": 1, "Cyclist": 2}
-        self.train_id2cls = {0: "Car", 1: "Pedestrian", 2: "Cyclist"}
+        self.cls2train_id = {"Car": 0, "Pedestrian": 1, "Cyclist": 2, "Big_Vehicle": 3}
+        self.train_id2cls = {0: "Car", 1: "Pedestrian", 2: "Cyclist", 3: "Big_Vehicle"}
 
         self.data_cls2data_id = {value["name"].title(): value["id"] for value in raw_split["categories"]}
         self.data_id2data_cls = {cls_id: cls_name for cls_name, cls_id in self.data_cls2data_id.items()}
@@ -54,10 +54,12 @@ class Rope3Dataset(data.Dataset):
         #self.labels = self.get_labels()
 
         ##h,w,l
+        # self.calc_mean_cls_size()
         self.cls_mean_size = np.array([
-            [1.52563191462, 1.62856739989, 3.88311640418],
-            [1.76255119, 0.66068622, 0.84422524],
-            [1.73698127, 0.59706367, 1.76282397]])
+            [ 1.32,       1.697,      4.2838],
+            [1.5962,     0.47972,     0.46642],
+            [1.4301,     0.56834,      1.6529],
+            [2.8294,      2.4396,      8.8558]])
 
         # data augmentation configuration
         self.data_augmentation = True if self.mode in ['train', 'trainval'] else False
@@ -81,6 +83,22 @@ class Rope3Dataset(data.Dataset):
         self.right_multiply_matrix = np.array([[-1, 0, 0], [0, 1, 0.], [0, 0, -1]])
 
         print("Finished loading!")
+
+    def calc_mean_cls_size(self):
+        dims = {
+            "Car": (np.array([0, 0, 0], dtype=np.float64), 0),
+            "Pedestrian": (np.array([0, 0, 0], dtype=np.float64), 0),
+            "Cyclist": (np.array([0, 0, 0], dtype=np.float64), 0),
+            "Big_Vehicle": (np.array([0, 0, 0], dtype=np.float64), 0),
+        }
+        for i in range(self.__len__()):
+            index = int(self.idx_to_img_id[i])
+            objs = self.get_label(index)
+            for obj in objs:
+                dims[obj.cls_type] = (dims[obj.cls_type][0] + np.array([obj.h, obj.w, obj.l], dtype=np.float32), dims[obj.cls_type][1] + 1)
+        for key, value in dims.items():
+            dims[key] = (value[0] / value[1], value[1])
+        print(f"Mean dimensions (h, w, l): {dims}")
 
     def get_image(self, idx):
         img_file = os.path.join(self.path, self.imgs[idx]["file_path"].replace("images/", ""))
@@ -341,7 +359,6 @@ class Rope3Dataset(data.Dataset):
             "mixed": torch.tensor(np.array(random_mix_flag, dtype=np.uint8)),
             "src_img": torch.tensor(np.array(gt_src_img, dtype=np.uint8)),
             "non_mix_imgs": torch.tensor(np.concatenate((img0[None],img1[None]) if random_mix_flag else (img[None], img[None]), axis=0))
-        
         }
         return data
 

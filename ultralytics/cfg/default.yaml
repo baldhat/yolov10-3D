@@ -25,7 +25,7 @@ exist_ok: False # (bool) whether to overwrite existing experiment
 pretrained: True # (bool | str) whether to use a pretrained model (bool) or a model to load weights from (str)
 optimizer: AdamW # (str) optimizer to use, choices=[SGD, Adam, Adamax, AdamW, NAdam, RAdam, RMSProp, auto]
 verbose: True # (bool) whether to print verbose output
-seed: 5 # (int) random seed for reproducibility
+seed: 1 # (int) random seed for reproducibility
 deterministic: True # (bool) whether to enable deterministic mode
 single_cls: False # (bool) train multi-class data as single-class
 rect: False # (bool) rectangular training if mode='train' or rectangular validation if mode='val'
@@ -173,7 +173,7 @@ random_crop: 0.5 # (float) image crop (probability)
 bgr: 0.0 # (float) image channel BGR (probability)
 mosaic: 1.0 # (float) image mosaic (probability)
 mixup: 0.5 # (float) image mixup (probability)
-rotation: 0.5
+rotation: 0.0
 cam_dis: False
 copy_paste: 0.0 # (float) segment copy-paste (probability)
 auto_augment: randaugment # (str) auto augmentation policy for classification (randaugment, autoaugment, augmix)
