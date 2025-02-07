@@ -7,6 +7,6 @@ test: test.json
 
 # Classes
 names:
-  0: Car
-  1: Pedestrian
-  2: Cyclist
+  0: Pedestrian
+  1: Car
+  2: Bicycle

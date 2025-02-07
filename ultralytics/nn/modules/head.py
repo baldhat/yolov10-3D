@@ -938,7 +938,6 @@ class v10Detect3d(nn.Module):
 
         return self.inference(y), embs, depth_maps
 
-
     def decode_bboxes(self, bboxes, anchors):
         # anchor_points:
         # pred_2d: offset_2d (2), size_2d(2)

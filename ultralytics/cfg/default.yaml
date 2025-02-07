@@ -11,7 +11,7 @@ epochs: 200 # (int) number of epochs to train for
 time: # (float, optional) number of hours to train for, overrides epochs if supplied
 patience: 80 # (int) epochs to wait for no observable improvement for early stopping of training
 batch: 32 # (int) number of images per batch (-1 for AutoBatch)
-imgsz: [960, 640] # (int | list) input images size as int for train and val modes, or list[w,h] for predict and export modes
+imgsz: [960, 540] # (int | list) input images size as int for train and val modes, or list[w,h] for predict and export modes
 save: True # (bool) save train checkpoints and predict results
 save_period: -1 # (int) Save checkpoint every x epochs (disabled if < 1)
 val_period: 2
@@ -124,7 +124,7 @@ constrain_anchors: True
 # Training
 htl: False
 close_mixup: 0 # Epochs before the end to stop mixup augmentation
-max_depth_threshold: 200
+max_depth_threshold: 150
 min_depth_threshold: 1
 min_scale: 0.8
 max_scale: 1.2
@@ -173,7 +173,7 @@ random_crop: 0.5 # (float) image crop (probability)
 bgr: 0.0 # (float) image channel BGR (probability)
 mosaic: 1.0 # (float) image mosaic (probability)
 mixup: 0.5 # (float) image mixup (probability)
-rotation: 0.0
+rotation: 0.5
 cam_dis: False
 copy_paste: 0.0 # (float) segment copy-paste (probability)
 auto_augment: randaugment # (str) auto augmentation policy for classification (randaugment, autoaugment, augmix)

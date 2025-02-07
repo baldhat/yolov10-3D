@@ -1061,7 +1061,8 @@ class DDDetectionLoss:
 
             ax.imshow(img)
             ax.axis("off")
-        plt.show()
+        #plt.show()
+        plt.savefig("2d_assignments.png")
         print()
 
     def debug_show_assigned_targets3d(self, batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt):
@@ -1097,7 +1098,8 @@ class DDDetectionLoss:
 
             ax.imshow(img)
             ax.axis("off")
-        plt.show()
+        #plt.show()
+        plt.savefig("3d_assignments.png")
         print()
 
     def debug_show_pred_bevs(self, pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor):
@@ -1150,7 +1152,6 @@ class DDDetectionLoss:
             ax[i].imshow(space)
             ax[i].axis("off")
         plt.savefig("/home/stud/mijo/dev/bev_assignments.jpg", dpi=300)
-        #plt.show()
         print()
 
     def project_to_image(self, kps, calib):

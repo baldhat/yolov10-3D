@@ -29,7 +29,7 @@ class Omni3Dataset(data.Dataset):
         self.mode = mode
         self.class_name = ['Car', 'Pedestrian', 'Bicycle']
         self.writelist = ['Car', 'Pedestrian', 'Bicycle']
-        self.resolution = np.array([960, 640])  # W * H
+        self.resolution = np.array([960, 540])  # W * H
         self.max_objs = 50
         self.use_camera_dis = False
 
@@ -150,7 +150,7 @@ class Omni3Dataset(data.Dataset):
 
             if np.random.random() < self.rotation:
                 random_rot_flag = True
-                rot_angle = int(np.random.uniform(-180, 180))
+                rot_angle = int(np.random.uniform(-60, 60))
 
         if random_mix_flag == True:
             count_num = 0
@@ -411,6 +411,7 @@ class Omni3Dataset(data.Dataset):
                 omni_rot_matrix = Rotation.from_euler('xyz', omni_euler).as_matrix()
                 size3d = pred[14:14+3] # h,w,l
                 box2dxyxy = np.clip(np.array(pred[10:10+4]), 0, np.array([frame_pred["width"], frame_pred["height"], frame_pred["width"], frame_pred["height"]]))
+                calib = self.get_calib(frame_id)
 
                 pred_instance['image_id'] = frame_id
                 pred_instance['category_id'] = self.data_cls2data_id[self.train_id2cls[int(pred[0])]]
@@ -419,7 +420,8 @@ class Omni3Dataset(data.Dataset):
                 pred_instance['depth'] = location[-1]
                 pred_instance['bbox3D'] = self.get_3d_box(torch.tensor(location), torch.tensor(rotation), torch.tensor(size3d))[0, 0].numpy().tolist()
                 pred_instance['center_cam'] = location
-                pred_instance['center_2D'] = [pred_instance['bbox'][0] + pred_instance['bbox'][2] / 2, pred_instance['bbox'][1] + pred_instance['bbox'][3] / 2]
+                #pred_instance['center_2D'] = [pred_instance['bbox'][0] + pred_instance['bbox'][2] / 2, pred_instance['bbox'][1] + pred_instance['bbox'][3] / 2]
+                pred_instance['center_2D'] = calib.rect_to_img(np.array(location)[np.newaxis])
                 pred_instance['dimensions'] = [size3d[1], size3d[0], size3d[2]] # Needs: w, h, l
                 pred_instance['pose'] = omni_rot_matrix.tolist()
 
@@ -438,15 +440,14 @@ class Omni3Dataset(data.Dataset):
         if not os.path.exists(python):
             python = os.path.join(Path.home(), "miniconda3/envs/cubercnn/bin/python")
         command = (f"{python} -u ultralytics/data/datasets/omni_eval/eval.py "
-                   f"--dataset_names [KITTI_val] "
-                   f"--pred_ann_files [{file_path}] "
-                   f"--gt_ann_files [/home/stud/mijo/storage/group/deepscenario/CDrone/annotations/val_omni.json] "
+                   f"--name KITTI_val "
+                   f"--pred_ann {file_path} "
+                   f"--gt_ann /home/stud/mijo/storage/group/deepscenario/CDrone/annotations/val_omni.json "
                    f"--log_dir {save_dir}/logs")
         lines = subprocess.check_output(command, shell= True, text= True, env={}).split("\n")
 
-        values = lines[23].split("|")
-        print("\n".join(lines[21:25]))
-        metric3d = float(values[6].strip())
+        print("\n".join(lines[41:]))
+        metric3d = float(lines[43].split("|")[6].strip())
         return metric3d
 
     def decode_preds_eval(self, preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=True,
@@ -543,9 +544,10 @@ class Omni3Dataset(data.Dataset):
                         locations = calibs[i].camera_dis_to_rect(x3d, y3d, depth).reshape(-1)
                     else:
                         locations = calibs[i].img_to_rect(x3d, y3d, depth).reshape(-1)
+                    c3d = np.array([x3d, y3d])
 
                 egoc_rot_mat = alloc_to_egoc_rot_matrix_torch(
-                    amodal_center=torch.tensor(np.array([x3d, y3d])).unsqueeze(0).cpu(),
+                    amodal_center=torch.tensor(c3d).unsqueeze(0).cpu(),
                     alloc_rot_matrix=pred_rot_mat[i, j].unsqueeze(0).reshape(1, 3, 3).cpu(),
                     calib=torch.tensor(calibs[i].P2).unsqueeze(0).cpu()
                 )[0].numpy()
