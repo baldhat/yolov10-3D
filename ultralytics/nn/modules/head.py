@@ -632,16 +632,16 @@ class v10Detect3d(nn.Module):
             nn.Sequential(
                 v10Detect3d.build_conv(x*7, 64*7, self.kernel_size_1, self.dsconv, groups=7, deform=self.deform),
                 v10Detect3d.build_conv(64*7, 64*7 // 2 if self.half_channels else 64*7, self.kernel_size_2, groups=7, dsconv=self.dsconv),
-                nn.Conv2d(64*7 // 2 if self.half_channels else 64*7, 24*7, 1, groups=7)
+                nn.Conv2d(64*7 // 2 if self.half_channels else 64*7, 6*7, 1, groups=7)
             ) for x in ch
         )
         self.bh_indices = [0, 1,                # o2d
-                           24  , 24+1,          # s2d
-                           48, 48+1,            # o3d
-                           72, 72+1, 72+2,      # s3d
-                           96, 96+1, 96+2, 96+3, 96+4, 96+5, 96+6, 96+7, 96+8, 96+9, 96+10, 96+11, 96+12, 96+13, 96+14, 96+15, 96+16, 96+17, 96+18, 96+19, 96+20, 96+21, 96+22, 96+23,
-                           120,
-                           144
+                           6  , 6+1,          # s2d
+                           12, 12+1,            # o3d
+                           18, 18+1, 18+2,      # s3d
+                           24, 24+1, 24+2, 24+3, 24+4, 24+5,
+                           30,
+                           36
                            ]
 
         self.o2o_heads = nn.ModuleList([self.cls, self.big_head])
@@ -756,7 +756,7 @@ class v10Detect3d(nn.Module):
         cls_scores_max = torch.max(scores, dim=1)[0]
         topk_indices = torch.zeros((batch_size, self.max_det, 2), dtype=torch.long, device=scores.device)
         for b in range(batch_size):
-            _, topk_ind = torch.topk(cls_scores_max[b].view(-1), 50, dim=0, largest=True)
+            _, topk_ind = torch.topk(cls_scores_max[b].view(-1), self.max_det, dim=0, largest=True)
             topk_indices[b, :, 0], topk_indices[b, :, 1] = self.unravel_index(topk_ind, cls_scores_max[b].shape)
         return topk_indices
     
@@ -964,13 +964,13 @@ class v10Detect3d(nn.Module):
             raise RuntimeError("Initialization only set for 1 and 3 scales")
         for i in range(self.nl):
             self.cls[i][-1].bias.data[: self.nc] = math.log(5 / self.nc / ((1280 / self.stride[i]) * (384 / self.stride[i])))
-            self.big_head[i][-1].bias.data[24:26].fill_(6)
+            self.big_head[i][-1].bias.data[6:8].fill_(6)
             self.big_head[i][-1].bias.data[:2].fill_(0)
-            self.big_head[i][-1].bias.data[48:50].fill_(0)
-            self.big_head[i][-1].bias.data[72:75].fill_(0.0)
+            self.big_head[i][-1].bias.data[12:14].fill_(0)
+            self.big_head[i][-1].bias.data[18:21].fill_(0.0)
             #nn.init.normal_(self.big_head[i][-1].weight[:64], std=0.05)
-            self.big_head[i][-1].bias.data[120].fill_(deps[i])
-            nn.init.uniform_(self.big_head[i][-1].weight[120], a=ranges[i][0], b=ranges[i][1])
+            self.big_head[i][-1].bias.data[30].fill_(deps[i])
+            nn.init.uniform_(self.big_head[i][-1].weight[30], a=ranges[i][0], b=ranges[i][1])
 
         self.o2o_heads = nn.ModuleList([self.cls, self.big_head])
         self.o2m_heads = copy.deepcopy(self.o2o_heads)
