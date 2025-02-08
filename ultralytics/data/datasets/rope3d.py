@@ -477,6 +477,7 @@ class Rope3Dataset(data.Dataset):
         out = subprocess.check_output(command, shell= True, text= True, executable="/bin/bash")
         lines = out.split("\n")
         
+        print(out)
         metric3d = float(lines[11].split(" ")[3].strip()) # 0.7 moderate
         #metric3d = float(lines[12].split(" ")[3].strip()) # 0.7 hard
         #metric3d = float(lines[14].split(" ")[3].strip()) # 0.5 moderate
