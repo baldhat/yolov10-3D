@@ -478,10 +478,12 @@ class Rope3Dataset(data.Dataset):
         lines = out.split("\n")
         
         print(out)
-        metric3d = float(lines[11].split(" ")[3].strip()) # 0.7 moderate
-        #metric3d = float(lines[12].split(" ")[3].strip()) # 0.7 hard
-        #metric3d = float(lines[14].split(" ")[3].strip()) # 0.5 moderate
-        #metric3d = float(lines[15].split(" ")[3].strip()) # 0.5 hard
+        for line in lines:
+            if line.startswith("car_3d_0.70/moderate"):
+                metric3d = float(line.split(" ")[3].strip()) # 0.7 moderate
+                #metric3d = float(lines[12].split(" ")[3].strip()) # 0.7 hard
+                #metric3d = float(lines[14].split(" ")[3].strip()) # 0.5 moderate
+                #metric3d = float(lines[15].split(" ")[3].strip()) # 0.5 hard
         return metric3d
     
     def egoc_rot_matrix2rot_y(self, c2g_trans: np.ndarray, egoc_rot_matrix: np.ndarray) -> torch.Tensor:
