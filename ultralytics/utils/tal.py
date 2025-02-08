@@ -433,8 +433,8 @@ class TaskAlignedAssigner3d(nn.Module):
         gt_keypoints = get_3d_keypoints(gt_center_3d, gt_vdepth, gt_size_3d, gt_rot_mat.reshape(self.bs, self.n_max_boxes, 3, 3), calibs)
         pd_keypoints1 = get_3d_keypoints(pd_center_3d, pd_dep, pd_size3d, pd_rot_mat.reshape(self.bs, self.num_anchors, 3, 3), calibs[:, 0])
         last_calibs = torch.tensor(
-            [calibs[i][mask_gt.bool().squeeze()[i]][-1].cpu().numpy() 
-             if calibs[i][mask_gt.bool().squeeze()[i]].numel() > 0 
+            [calibs[i][mask_gt.bool().squeeze()[i]][-1].cpu().numpy().tolist()
+             if calibs[i][mask_gt.bool().squeeze()[i]].numel() > 0 and len(calibs[i][mask_gt.bool().squeeze()[i]][-1].shape) == 1
              else calibs[i, 0].cpu().numpy().tolist() for i in range(calibs.shape[0]) 
              ]).cuda()
         pd_keypoints2 = get_3d_keypoints(pd_center_3d, pd_dep, pd_size3d, pd_rot_mat.reshape(self.bs, self.num_anchors, 3, 3), last_calibs)
