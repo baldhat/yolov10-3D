@@ -982,7 +982,6 @@ class DDDetectionLoss:
     def __call__(self, preds, batch, embeddings):
         """Calculate the sum of the loss for box, cls and dfl multiplied by batch size."""
         loss = torch.zeros(7 if self.hyp.distillation else 6, device=self.device)  # box, cls, dep, o3d, s3d, hd
-        loss.requires_grad = True
         feats = preds[1] if isinstance(preds, tuple) else preds
         pred_scores, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un = (
             torch.cat([xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2).split(
