@@ -10,3 +10,4 @@ names:
   0: Car
   1: Pedestrian
   2: Cyclist
+  3: Big_Vehicle
