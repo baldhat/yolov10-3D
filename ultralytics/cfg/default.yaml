@@ -25,7 +25,7 @@ exist_ok: False # (bool) whether to overwrite existing experiment
 pretrained: True # (bool | str) whether to use a pretrained model (bool) or a model to load weights from (str)
 optimizer: AdamW # (str) optimizer to use, choices=[SGD, Adam, Adamax, AdamW, NAdam, RAdam, RMSProp, auto]
 verbose: True # (bool) whether to print verbose output
-seed: 1 # (int) random seed for reproducibility
+seed: 4 # (int) random seed for reproducibility
 deterministic: True # (bool) whether to enable deterministic mode
 single_cls: False # (bool) train multi-class data as single-class
 rect: False # (bool) rectangular training if mode='train' or rectangular validation if mode='val'
@@ -127,10 +127,10 @@ min_depth_threshold: 1
 min_scale: 0.6
 max_scale: 1.4
 overfit: False
-gradient_balancer: "cfa"
-gradient_balancer_strategy: "depVSrestWdist"
+gradient_balancer: #"cfa"
+gradient_balancer_strategy: #"depVSrestWdist"
 # Distillation
-distillation: True
+distillation: False
 distillation_teacher: "yolo"
 distillation_temp: 2
 distillation_weight: 100
