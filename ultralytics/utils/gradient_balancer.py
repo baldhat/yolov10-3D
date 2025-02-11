@@ -35,6 +35,11 @@ class GradientBalancer(torch.nn.Module):
                 [2, 3, 4, 5, 8, 9, 10, 11],  # switched the groups, 3d is the base now
                 [0, 1, 6, 7] # box, cls
             ]
+        elif self.strategy == "2dVS3dWdist":
+            self.loss_groups = [
+                [2, 3, 4, 5, 6, 9, 10, 11, 12, 13],  # switched the groups, 3d is the base now
+                [0, 1, 7, 8] # box, cls
+            ]
         elif self.strategy == "3dVS2d":
             self.loss_groups = [
                 [0, 1, 6, 7], # box, cls
