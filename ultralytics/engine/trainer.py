@@ -411,10 +411,14 @@ class BaseTrainer:
                     )
 
                 # Backward
-                if self.args.gradient_balancer is not None:
-                    self.gradient_balancer.step(self.model, self.loss_items)
-                else:
-                    self.scaler.scale(self.loss).backward()
+                try:
+                    if self.args.gradient_balancer is not None:
+                        self.gradient_balancer.step(self.model, self.loss_items)
+                    else:
+                        self.scaler.scale(self.loss).backward()
+                except:
+                    print("Failed to backward")
+                    continue
 
                 # Optimize - https://pytorch.org/docs/master/notes/amp_examples.html
                 if ni - last_opt_step >= self.accumulate:

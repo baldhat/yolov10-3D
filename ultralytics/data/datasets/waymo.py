@@ -325,9 +325,10 @@ class WaymoDataset(data.Dataset):
         _head_res = 0
 
         if ((object_.cls_type not in self.writelist)
-                or (object_.level_str == 'UnKnown' or (object_.pos[-1] * scale < self.min_depth_thres))
-                or (object_.cls_type == "Car" and object_.num_lidar <= 100)
-                or (object_.cls_type != 'Car' and object_.num_lidar <= 50)):
+            or (object_.level_str == 'UnKnown' or (object_.pos[-1] * scale < self.min_depth_thres))
+            or (object_.cls_type == "Car" and object_.num_lidar < 5)
+            or (object_.cls_type != 'Car' and object_.num_lidar < 1)
+            or object_.h < 1.4 or object_.w < 0.4 or object_.l < 0.4):
             return valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res
 
         # process 3d bbox & get 3d center
