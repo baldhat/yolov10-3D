@@ -23,8 +23,8 @@ class Rope3Dataset(data.Dataset):
         self.path = "/".join(filepath.split("/")[:-1])
         self.split = mode
         self.mode = mode
-        self.class_name = ['Car', 'Pedestrian', 'Cyclist', 'Big_Vehicle']
-        self.writelist = ['Car', 'Pedestrian', 'Cyclist', 'Big_Vehicle']
+        self.class_name = ['Car', 'Pedestrian', 'Cyclist'] #, 'Big_Vehicle']
+        self.writelist = ['Car', 'Pedestrian', 'Cyclist'] #, 'Big_Vehicle']
         self.resolution = np.array([960, 540])  # W * H
         self.max_objs = 150
         self.use_camera_dis = False
@@ -40,8 +40,8 @@ class Rope3Dataset(data.Dataset):
         self.idx_to_img_id = {idx: img_id for idx, img_id in enumerate(self.imgs)}
         self.img_file2img_id = {img["file_path"].split(os.path.sep)[-1]: idx for idx, img in self.imgs.items()}
 
-        self.cls2train_id = {"Car": 0, "Pedestrian": 1, "Cyclist": 2, "Big_Vehicle": 3}
-        self.train_id2cls = {0: "Car", 1: "Pedestrian", 2: "Cyclist", 3: "Big_Vehicle"}
+        self.cls2train_id = {"Car": 0, "Pedestrian": 1, "Cyclist": 2} #, "Big_Vehicle": 3}
+        self.train_id2cls = {0: "Car", 1: "Pedestrian", 2: "Cyclist"} #, 3: "Big_Vehicle"}
 
         self.data_cls2data_id = {value["name"].title(): value["id"] for value in raw_split["categories"]}
         self.data_id2data_cls = {cls_id: cls_name for cls_name, cls_id in self.data_cls2data_id.items()}
@@ -58,8 +58,8 @@ class Rope3Dataset(data.Dataset):
         self.cls_mean_size = np.array([
             [ 1.32,       1.697,      4.2838],
             [1.5962,     0.47972,     0.46642],
-            [1.4301,     0.56834,      1.6529],
-            [2.8294,      2.4396,      8.8558]])
+            [1.4301,     0.56834,      1.6529]]) #,
+            #[2.8294,      2.4396,      8.8558]])
 
         # data augmentation configuration
         self.data_augmentation = True if self.mode in ['train', 'trainval'] else False
