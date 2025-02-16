@@ -1182,29 +1182,24 @@ class SupervisionLoss:
         elif self.criterion == "mse":
             self.loss = nn.MSELoss()
 
-    def distill_from_yolo(self, img, pred_embeddings, mask_gt, gts, forwards, mixed_mask, pred_fg_mask, pred_target_gt_idx):
+    def distill_from_yolo(self, imgs, pred_embeddings, src_img, mask_gt, gts, forwards, mixed_mask, pred_fg_mask, pred_target_gt_idx):
         with torch.inference_mode():
-            teacher_pred0, teacher_embeddings0 = self.forward_teacher(img)
-            clean_preds = teacher_pred0[~mixed_mask]
-            mixed_preds = teacher_pred0[mixed_mask]
-            clean_embs = teacher_embeddings0[~mixed_mask]
-            mixed_embs = teacher_embeddings0[mixed_mask]
+            teacher_pred0, teacher_embeddings0 = self.forward_teacher(imgs[:, 0])
 
+        mask_gt0 = mask_gt.bool() & (src_img.unsqueeze(-1) == 0)
+        teacher_fg_mask0, teacher_target_gt_idx0 = self.get_teacher_assignments(teacher_pred0, gts, mask_gt0, *forwards)
 
         loss = torch.zeros((pred_embeddings.shape[0]), device=imgs.device)
         count = 0
 
         for i in range(imgs.shape[0]):
+            if mixed_mask[i]:
+                continue
             teacher_fg_mask0_, teacher_target_gt_idx0_ = teacher_fg_mask0[i], teacher_target_gt_idx0[i]
 
             pred_fg_mask_, pred_target_gt_idx_ = pred_fg_mask[i], pred_target_gt_idx[i]
             teacher_fg_embeddings0_ = teacher_embeddings0[i].transpose(-2,-1)[teacher_fg_mask0_]
             teacher_fg_target_gt_idx0_ = teacher_target_gt_idx0_[teacher_fg_mask0_]
-
-            if mixed_mask[i]:
-                teacher_fg_mask1_, teacher_target_gt_idx1_ = teacher_fg_mask1[i], teacher_target_gt_idx1[i]
-                teacher_fg_embeddings1_ = teacher_embeddings1[i].transpose(-2, -1)[teacher_fg_mask1_]
-                teacher_fg_target_gt_idx1_ = teacher_target_gt_idx1_[teacher_fg_mask1_]
 
             pred_fg_embeddings0_ = pred_embeddings[i].transpose(-2, -1)[pred_fg_mask_]
             pred_fg_target_gt_idx0_ = pred_target_gt_idx_[pred_fg_mask_]
@@ -1216,11 +1211,6 @@ class SupervisionLoss:
                     if pred_gt_idx == teacher_gt_idx:
                         pairs.append((pred_embedding, teacher_embedding0))
                         k += 1
-                if mixed_mask[i]:
-                    for teacher_embedding1, teacher_gt_idx in zip(teacher_fg_embeddings1_, teacher_fg_target_gt_idx1_):
-                        if pred_gt_idx == teacher_gt_idx:
-                            pairs.append((pred_embedding, teacher_embedding1))
-                            k += 1
             if k > 0:
                 pred_embs = torch.stack([p[0] for p in pairs], dim=0)
                 teach_embs = torch.stack([p[1] for p in pairs], dim=0)
