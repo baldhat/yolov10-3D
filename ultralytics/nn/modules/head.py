@@ -860,7 +860,7 @@ class v10Detect3d(nn.Module):
         assert len(head) == 3
         embeddings = head[0](features)
         output = head[1](embeddings)
-        return head[2](output), embeddings[:, 5*64:6*64]
+        return head[2](output), embeddings
 
 
     def sum_predecessor_chs(self, predecessors):
