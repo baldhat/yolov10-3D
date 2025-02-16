@@ -36,8 +36,6 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
     def postprocess(self, preds):
         if isinstance(preds, dict):
             predsO = preds["one2one"]
-        else:
-            predsO = preds
 
         if isinstance(predsO, (list, tuple)):
             predsO = predsO[0]

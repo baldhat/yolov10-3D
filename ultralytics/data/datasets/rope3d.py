@@ -359,6 +359,7 @@ class Rope3Dataset(data.Dataset):
             "mixed": torch.tensor(np.array(random_mix_flag, dtype=np.uint8)),
             "src_img": torch.tensor(np.array(gt_src_img, dtype=np.uint8)),
             "non_mix_imgs": torch.tensor(np.concatenate((img0[None],img1[None]) if random_mix_flag else (img[None], img[None]), axis=0))
+        
         }
         return data
 
