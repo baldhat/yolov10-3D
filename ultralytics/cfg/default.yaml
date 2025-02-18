@@ -151,7 +151,7 @@ fgdm_loss_weight: 2
 fgdm_supervision: False
 fgdm_supervision_weight: 1
 
-virtual_focal_length: 3000
+virtual_focal_length: 2600
 
 dfl: 1.5 # (float) dfl loss gain
 pose: 12.0 # (float) pose loss gain
