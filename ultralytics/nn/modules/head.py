@@ -628,22 +628,6 @@ class v10Detect3d(nn.Module):
             self.dep = self.build_head(self.dep_in_ch, channels["dep_c"], 1)
             self.dep_un = self.build_head(self.dep_un_in_ch, channels["dep_un_c"], 1)
 
-        self.big_head = nn.ModuleList(
-            nn.Sequential(
-                v10Detect3d.build_conv(x*7, 64*7, self.kernel_size_1, self.dsconv, groups=7, deform=self.deform),
-                v10Detect3d.build_conv(64*7, 64*7 // 2 if self.half_channels else 64*7, self.kernel_size_2, groups=7, dsconv=self.dsconv),
-                nn.Conv2d(64*7 // 2 if self.half_channels else 64*7, 24*7, 1, groups=7)
-            ) for x in ch
-        )
-        self.bh_indices = [0, 1,                # o2d
-                           24  , 24+1,          # s2d
-                           48, 48+1,            # o3d
-                           72, 72+1, 72+2,      # s3d
-                           96, 96+1, 96+2, 96+3, 96+4, 96+5, 96+6, 96+7, 96+8, 96+9, 96+10, 96+11, 96+12, 96+13, 96+14, 96+15, 96+16, 96+17, 96+18, 96+19, 96+20, 96+21, 96+22, 96+23,
-                           120,
-                           144
-                           ]
-
         self.o2o_heads = nn.ModuleList(
             [self.cls, self.o2d, self.s2d, self.o3d, self.s3d, self.hd, self.dep, self.dep_un])
 
@@ -652,17 +636,7 @@ class v10Detect3d(nn.Module):
         if self.fgdm_pred:
             self.fgdm_predictor = DepthPredictor(ch)
             
-        
         self.is_padded = True 
-            
-        # def setter_fun(it, name, value):
-        #     self.__dict__[name] = value 
-        #     if name == "o2o_heads":
-        #         print()
-            
-        # self.__class__.__setattr__ = setter_fun
-        
-     
     
 
     def build_head(self, in_channels, mid_channels, output_channels):

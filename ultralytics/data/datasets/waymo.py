@@ -444,7 +444,6 @@ class WaymoDataset(data.Dataset):
         command = f"{python} -u ultralytics/data/datasets/waymo_eval.py --iou 0.7 --pred {file_path}"
         lines = subprocess.check_output(command, shell= True, text= True, env={})
 
-        print(lines)
         metric3d = float(lines.split("\n")[4].split("|")[2].strip().split(" ")[0]) # 0.7 IoU, Level 1
         return metric3d
 
