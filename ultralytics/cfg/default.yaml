@@ -113,9 +113,9 @@ heading: 1 # (float) 3d heading loss gain
 # Task aligned learning
 tal_topk: 8 # (int) number of assignments per groundtruth for o2m head
 tal_alpha: 0.5 # class assignemnt score exponent
-tal_beta: 1.0 # 2D assignment score exponent
+tal_beta: 6.0 # 2D assignment score exponent
 tal_gamma: 1.0 # 3D assignment score exponent
-tal_3d: True
+tal_3d: False
 tal_2d: True
 kps_dist_metric: l1
 constrain_anchors: True
@@ -140,8 +140,8 @@ use_pred_center: False
 
 loss_scale_max_depth: 65
 loss_scale_min_depth: 10
-loss_scale_max_weight: 0.5
-loss_scale_min_weight: 1.5
+loss_scale_max_weight: 1.0
+loss_scale_min_weight: 1.0
 
 load_depth_maps: False
 
