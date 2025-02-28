@@ -592,7 +592,7 @@ class Rope3Dataset(data.Dataset):
                 dimensions = pred_s3d[i, j].numpy()
                 dimensions += self.cls_mean_size[int(cls_id)]
                 bbox = bboxes[i, j].cpu().numpy()
-                bbox = (xywh2xyxy(bbox) / ratio_pad[i][0, [1, 0, 1, 0]]).tolist()
+                bbox = (bbox / ratio_pad[i][0, [1, 0, 1, 0]]).tolist()
 
                 depth = pred_dep[i, j].numpy() / (self.virtual_focal_length / calibs[i].fv)
                 sigma = torch.exp(-pred_dep_un[i, j]).item()
