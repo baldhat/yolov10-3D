@@ -489,7 +489,7 @@ class Omni3Dataset(data.Dataset):
         command = (f"{python} -u ultralytics/data/datasets/omni_eval/eval.py "
                    f"--name KITTI_val "
                    f"--pred_ann {file_path} "
-                   f"--gt_ann /home/stud/mijo/storage/group/deepscenario/CDrone/annotations/val_omni.json "
+                   f"--gt_ann /storage/group/deepscenario/CDrone/annotations/val_omni.json "
                    f"--log_dir {save_dir}/logs")
         lines = subprocess.check_output(command, shell= True, text= True, env={}).split("\n")
 
