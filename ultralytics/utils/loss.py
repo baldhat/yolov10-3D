@@ -1450,9 +1450,9 @@ class SupervisionLoss:
         return torch.cat((xy1, xy2), dim=-1) * stride_tensor
 
     def get_teacher_assignments(self, feats, gts, mask_gt, anchor_points, stride_tensor, no, nc, calibs, mean_sizes, assigner):
-        pred_scores, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un = (
+        pred_scores, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_rot, pred_dep, pred_dep_un = (
             feats.split(
-                (nc, 2, 2, 2, 3, 24, 1, 1), 1
+                (nc, 2, 2, 2, 3, 6, 1, 1), 1
             ))
 
         # num classes
@@ -1462,14 +1462,13 @@ class SupervisionLoss:
         # offset 3d (2), size 3d (3) = 5
         pred_3d = torch.cat((pred_o3d.permute(0, 2, 1).contiguous(),  # offset 3d (2)
                              pred_s3d.permute(0, 2, 1).contiguous(),  # size 3d (3)
-                             pred_hd.permute(0, 2, 1).contiguous(),  # heading bins (12) + heading res (12)
+                             self.decode_rot_pred(pred_rot.permute(0, 2, 1).contiguous()),  # heading bins (12) + heading res (12)
                              pred_dep.permute(0, 2, 1).contiguous(),  # depth (1)
                              pred_dep_un.permute(0, 2, 1).contiguous()), -1)  # depth uncertainty (1)
         # = 38
 
-        gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin, gt_heading_res, gt_src_img = gts.split(
-            (1, 4, 2, 2, 2, 3, 1, 1, 1, 1), 2)
-        #mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0)
+        gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_rot_mat, gt_vdepth_factors, gt_src_img, calibs = gts.split(
+            (1, 4, 2, 2, 2, 3, 1, 9, 1, 1, 6), 2)
 
         # Pboxes
         pred_bboxes = self.bbox_decode(anchor_points, pred_2d, stride_tensor)
@@ -1479,8 +1478,7 @@ class SupervisionLoss:
             pred_bboxes.detach().type(gt_bboxes.dtype),
             pred_3d.detach(),
             anchor_points * stride_tensor,
-            (gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin,
-             gt_heading_res),
+            (gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_rot_mat, gt_vdepth_factors),
             mask_gt,
             stride_tensor,
             calibs,
@@ -1488,6 +1486,14 @@ class SupervisionLoss:
         )
         #debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor)
         return fg_mask, target_gt_idx
+    
+    def decode_rot_pred(self, rot_pred):
+        a1, a2 = rot_pred[..., :3], rot_pred[..., 3:]
+        b1 = F.normalize(a1, dim=-1)
+        b2 = a2 - (b1 * a2).sum(-1, keepdim=True) * b1
+        b2 = F.normalize(b2, dim=-1)
+        b3 = torch.cross(b1, b2, dim=-1)
+        return torch.cat((b1, b2, b3), dim=-1)
 
 class ForegroundDepthMapLoss(nn.Module):
 
