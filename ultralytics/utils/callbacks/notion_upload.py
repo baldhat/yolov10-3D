@@ -1,5 +1,8 @@
 import os
-from notion_client import Client
+try:
+    from notion_client import Client
+except:
+    print("Notion upload disabled")
 import pandas as pd
 import yaml
 import numpy as np
@@ -107,7 +110,7 @@ class Run:
         }
 
     @staticmethod
-    def get_flops_(model, imgsz=[1280, 384], batch_sizes=[1]):
+    def get_flops_(model, imgsz=[1280, 384], batch_sizes=[]):
         try:
             import torch
             from copy import deepcopy

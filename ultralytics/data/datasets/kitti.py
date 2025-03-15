@@ -41,7 +41,12 @@ class KITTIDataset(data.Dataset):
             [1.73698127, 0.59706367, 1.76282397]])
 
         # data split loading
-        assert mode in ['train', 'val', 'trainval', 'test']
+        assert mode in ['train', 'val', 'test']
+        if args.trainval:
+            image_file_path = image_file_path.replace("train.txt", "trainval.txt")
+        if mode == "val" and args.split == "test":
+            mode = "test"
+            image_file_path = image_file_path.replace("val.txt", "test.txt")
         self.split = mode
         self.mode = mode
         root_dir = pathlib.Path(image_file_path).parent.parent
@@ -49,6 +54,8 @@ class KITTIDataset(data.Dataset):
         self.idx_list = [x.strip() for x in open(split_dir).readlines()]
         if args.overfit:
             self.idx_list = self.idx_list[:64]
+        if len(self.idx_list) > 7517:
+            self.idx_list = self.idx_list[:7517]
 
         # path configuration
         self.data_dir = os.path.join(root_dir, 'testing' if self.mode == 'test' else 'training')
@@ -122,7 +129,7 @@ class KITTIDataset(data.Dataset):
         img = ori_img
         img0, img1 = None, None
         img_size = np.array(ori_img.size)
-        if self.split != 'test':
+        if True: #self.split != 'test':
             dst_W, dst_H = img_size
 
             if self.load_depth_maps:
@@ -236,7 +243,7 @@ class KITTIDataset(data.Dataset):
         gt_heading_res = []
         gt_src_img = [] # 0 or 1, when no mixup always 0
 
-        if self.split != 'test':
+        if True: #self.split != 'test':
             objects = self.get_label(index)
             # data augmentation for labels
             if random_flip_flag:
