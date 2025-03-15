@@ -1227,7 +1227,7 @@ class SupervisionLoss:
                 teacher_pred1[mixed_mask], teacher_embeddings1[mixed_mask] = self.forward_teacher(imgs[mixed_mask][:, 1])
             teacher_embeddings1[~mixed_mask] = teacher_embeddings0[~mixed_mask]
             teacher_pred1[~mixed_mask] = teacher_pred0[~mixed_mask]
-
+        
         mask_gt0 = mask_gt.bool() & (src_img.unsqueeze(-1) == 0)
         mask_gt1 = mask_gt.bool() & (src_img.unsqueeze(-1) == 1)
         teacher_fg_mask0, teacher_target_gt_idx0 = self.get_teacher_assignments(teacher_pred0, gts, mask_gt0, *forwards)
@@ -1253,16 +1253,18 @@ class SupervisionLoss:
 
             pairs = []
             k = 0
+            teacher_dict0 = {teacher_gt_idx.item(): teacher_embedding0 for teacher_gt_idx, teacher_embedding0 in zip(teacher_fg_target_gt_idx0_, teacher_fg_embeddings0_)}
+            if mixed_mask[i]:
+                teacher_dict1 = {teacher_gt_idx.item(): teacher_embedding1 for teacher_gt_idx, teacher_embedding1 in zip(teacher_fg_target_gt_idx1_, teacher_fg_embeddings1_)}
+
             for pred_embedding, pred_gt_idx in zip(pred_fg_embeddings0_, pred_fg_target_gt_idx0_):
-                for teacher_embedding0, teacher_gt_idx in zip(teacher_fg_embeddings0_, teacher_fg_target_gt_idx0_):
-                    if pred_gt_idx == teacher_gt_idx:
-                        pairs.append((pred_embedding, teacher_embedding0))
-                        k += 1
+                if pred_gt_idx.item() in teacher_dict0:
+                    pairs.append((pred_embedding, teacher_dict0[pred_gt_idx.item()]))
+                    k += 1
                 if mixed_mask[i]:
-                    for teacher_embedding1, teacher_gt_idx in zip(teacher_fg_embeddings1_, teacher_fg_target_gt_idx1_):
-                        if pred_gt_idx == teacher_gt_idx:
-                            pairs.append((pred_embedding, teacher_embedding1))
-                            k += 1
+                    if pred_gt_idx.item() in teacher_dict1:
+                        pairs.append((pred_embedding, teacher_dict1[pred_gt_idx.item()]))
+                        k += 1
             if k > 0:
                 pred_embs = torch.stack([p[0] for p in pairs], dim=0)
                 teach_embs = torch.stack([p[1] for p in pairs], dim=0)
