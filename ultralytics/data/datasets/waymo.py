@@ -28,7 +28,7 @@ class WaymoDataset(data.Dataset):
         self.mode = mode
         self.class_name = ['Car', 'Pedestrian', 'Cyclist']
         self.writelist = ['Car', 'Pedestrian', 'Cyclist']
-        self.resolution = np.array([960, 640])  # W * H
+        self.resolution = np.array([1440, 960])  # W * H
         self.max_objs = 50
         self.use_camera_dis = False
 
