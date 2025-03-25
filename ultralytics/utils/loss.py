@@ -810,7 +810,7 @@ def debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps, gt_kps, 
     print()
 
 def debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor):
-    max_imgs = 4
+    max_imgs = 16
     fig, ax = plt.subplots(math.ceil(max_imgs ** 0.5), math.ceil(max_imgs ** 0.5),
                            figsize=(36, 18), gridspec_kw={'wspace': 0, 'hspace': 0}, constrained_layout=True)
     ax = ax.ravel()
@@ -843,6 +843,9 @@ def debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor):
             y = -bottom_corners[:, 2] + R
             pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1).astype(np.int32)[[0, 1, 3, 2]]
             space = cv2.polylines(space, pts=[pts], isClosed=True, color=c)
+        
+        #np.save(f"/home/stud/mijo/dev/2DTAL_{i}.npy", anchors[fg_mask[i]].cpu().numpy())
+        #np.save(f"/home/stud/mijo/dev/GT_{i}.npy", gt_kps[i][mask_gt[i].bool().squeeze(-1)].cpu().numpy())
         
         for assigned in anchors[fg_mask[i]].cpu().numpy():
             bottom_corners = (assigned[:4] * SCALE)
@@ -1044,7 +1047,7 @@ class DDDetectionLoss:
         targets_2d = targets[2:4]
         targets_3d = targets[4:9] # center, size, depth, head_bin, head_res
 
-        #self.plot_assignments(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt)
+        self.plot_assignments(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt)
         
         depths = targets_3d[-3][fg_mask].squeeze()
         in_min, in_max = self.hyp.loss_scale_min_depth, self.hyp.loss_scale_max_depth, 
@@ -1077,8 +1080,8 @@ class DDDetectionLoss:
         return loss.sum() * batch_size, loss
 
     def plot_assignments(self, batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt):
-        debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor)
-        debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt)
+        #debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor)
+        #debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt)
         debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor)
 
     def compute_loss_weights(self, current_loss):
