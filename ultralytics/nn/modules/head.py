@@ -584,59 +584,18 @@ class v10Detect3d(nn.Module):
 
         self.dense = False
 
-        self.use_predecessors = use_predecessors
-        self.detach_predecessors = detach_predecessors
-        self.predecessors = {
-            "cls": [],
-            "o2d": [],
-            "s2d": [],
-            "o3d": ["cls"],
-            "s3d": ["cls"],
-            "hd": ["cls"],
-            "dep": ["cls", "s3d"],
-            "dep_un": ["cls", "s3d", "dep"]
-        }
-        self.dep_norm = 65.0
-
         ch = [ch[i] for i in range(self.nl)]
-        self.cls_in_ch = [ch_ + self.sum_predecessor_chs(self.predecessors["cls"]) if self.use_predecessors else ch_ for ch_ in ch]
-        self.o2d_in_ch = [ch_ + self.sum_predecessor_chs(self.predecessors["o2d"]) if self.use_predecessors else ch_ for ch_ in ch]
-        self.s2d_in_ch = [ch_ + self.sum_predecessor_chs(self.predecessors["s2d"]) if self.use_predecessors else ch_ for ch_ in ch]
-        self.o3d_in_ch = [ch_ + self.sum_predecessor_chs(self.predecessors["o3d"]) if self.use_predecessors else ch_ for ch_ in ch]
-        self.s3d_in_ch = [ch_ + self.sum_predecessor_chs(self.predecessors["s3d"]) if self.use_predecessors else ch_ for ch_ in ch]
-        self.hd_in_ch = [ch_ + self.sum_predecessor_chs(self.predecessors["hd"]) if self.use_predecessors else ch_ for ch_ in ch]
-        self.dep_in_ch = [ch_ + self.sum_predecessor_chs(self.predecessors["dep"]) if self.use_predecessors else ch_ for ch_ in ch]
-        self.dep_un_in_ch = [ch_ + self.sum_predecessor_chs(self.predecessors["dep_un"]) if self.use_predecessors else ch_ for ch_ in ch]
-
-        if self.common_head:
-            self.common = nn.ModuleList(v10Detect3d.build_conv(ch_, ch_, 3, dsconv) for ch_ in ch)
-            self.cls = self.build_small_head(ch, channels["cls_c"], self.nc)
-            self.o2d = self.build_small_head(ch, channels["o2d_c"], 2)
-            self.s2d = self.build_small_head(ch, channels["s2d_c"], 2)
-            self.o3d = self.build_small_head(ch, channels["o3d_c"], 2)
-            self.s3d = self.build_small_head(ch, channels["s3d_c"], 3)
-            self.hd = self.build_small_head(ch, channels["hd_c"], 24)
-            self.dep = self.build_small_head(ch, channels["dep_c"], 1)
-            self.dep_un = self.build_small_head(ch, channels["dep_un_c"], 1)
-        else:
-            self.cls = self.build_head(self.cls_in_ch, channels["cls_c"], self.nc)
-            self.o2d = self.build_head(self.o2d_in_ch, channels["o2d_c"], 2)
-            self.s2d = self.build_head(self.s2d_in_ch, channels["s2d_c"], 2)
-            self.o3d = self.build_head(self.o3d_in_ch, channels["o3d_c"], 2)
-            self.s3d = self.build_head(self.s3d_in_ch, channels["s3d_c"], 3)
-            self.hd = self.build_head(self.hd_in_ch, channels["hd_c"], 24)
-            self.dep = self.build_head(self.dep_in_ch, channels["dep_c"], 1)
-            self.dep_un = self.build_head(self.dep_un_in_ch, channels["dep_un_c"], 1)
-
+        
+        self.cls = self.build_head(ch, channels["cls_c"], self.nc)
         self.big_head = nn.ModuleList(
             nn.Sequential(
-                v10Detect3d.build_conv(x*7, 64*7, self.kernel_size_1, self.dsconv, groups=7, deform=self.deform),
+                v10Detect3d.build_conv(x, 64*7, self.kernel_size_1, self.dsconv, groups=1, deform=self.deform),
                 v10Detect3d.build_conv(64*7, 64*7 // 2 if self.half_channels else 64*7, self.kernel_size_2, groups=7, dsconv=self.dsconv),
                 nn.Conv2d(64*7 // 2 if self.half_channels else 64*7, 24*7, 1, groups=7)
             ) for x in ch
         )
-        self.bh_indices = [0, 1,                # o2d
-                           24  , 24+1,          # s2d
+        self.bh_indices = [0,  1,                # o2d
+                           24, 24+1,          # s2d
                            48, 48+1,            # o3d
                            72, 72+1, 72+2,      # s3d
                            96, 96+1, 96+2, 96+3, 96+4, 96+5, 96+6, 96+7, 96+8, 96+9, 96+10, 96+11, 96+12, 96+13, 96+14, 96+15, 96+16, 96+17, 96+18, 96+19, 96+20, 96+21, 96+22, 96+23,
@@ -774,7 +733,7 @@ class v10Detect3d(nn.Module):
             
             candidate_indices = self.select_candidates(out, batch_sz)
             inputs = self.extract_patches(x[i], candidate_indices)
-            head_out, _ = self.single_head_forward(heads[1][i], inputs.repeat(1, 7, 1, 1))
+            head_out, _ = self.single_head_forward(heads[1][i], inputs)
             
             head_output = torch.zeros((x[i].shape[0], self.no-self.nc, x[i].shape[2], x[i].shape[3]), device=x[i].device)
             head_out = head_out[:, self.bh_indices, 0, 0].view(x[i].shape[0], self.max_det, self.no-self.nc).transpose(1, 2)
@@ -829,7 +788,7 @@ class v10Detect3d(nn.Module):
         for i in range(self.nl):
             outputs = {}
             outputs[head_names[0]] = heads[0][i](x[i])
-            out, embs[i] = self.single_head_forward(heads[1][i], x[i].repeat(1, 7, 1, 1))
+            out, embs[i] = self.single_head_forward(heads[1][i], x[i])
             outputs[head_names[1]] = out[:, self.bh_indices]
             y.append(torch.cat(list(outputs.values()), dim=1))
         return y, embs

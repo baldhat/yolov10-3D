@@ -110,7 +110,7 @@ class Run:
         }
 
     @staticmethod
-    def get_flops_(model, imgsz=[1280, 384], batch_sizes=[]):
+    def get_flops_(model, imgsz=[1280, 384], batch_sizes=[1]):
         try:
             import torch
             from copy import deepcopy
@@ -126,13 +126,22 @@ class Run:
                 for bs in batch_sizes:
                     im = torch.empty((bs, p.shape[1], *imgsz), device=p.device)  # input image in BCHW format
                     flops = thop.profile(deepcopy(model), inputs=[im], verbose=False)[0] / 1e9 * 2  # imgsz GFLOPs
-                    for x in range(1000):
-                        model(im)
-                    t1 = time.time()
-                    for x in range(50):
-                        out = model(im)
-                    t2 = time.time()
-                    print(f"Batch size: {bs} Took: {(t2-t1) / 50 * 1000:.2f}ms, FLOPs: {flops:.2f} GFLOPs, batch size: {im.shape[0]}, ")
+                    start_event = torch.cuda.Event(enable_timing=True)
+                    end_event = torch.cuda.Event(enable_timing=True)
+                    torch.cuda.synchronize()
+                    
+                    for _ in range(100):
+                        _ = model(im)
+
+                    start_event.record()
+                    for _ in range(100):
+                        _ = model(im)
+                    end_event.record()
+                    torch.cuda.synchronize()
+
+                    inference_time = start_event.elapsed_time(end_event) / 100 
+                    print("Inference time:", inference_time)
+                    #print(f"Batch size: {bs} Took: {(t2-t1) / 50 * 1000:.2f}ms, FLOPs: {flops:.2f} GFLOPs, batch size: {im.shape[0]}, ")
             return 0 #flops
         except Exception as e:
             print(f"Failed to calculate flops: {e}")
