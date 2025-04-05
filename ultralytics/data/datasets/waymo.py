@@ -419,6 +419,20 @@ class WaymoDataset(data.Dataset):
                 location = gt["translation"]
                 ry = [gt["rotation_y"]]
                 score = "1.0"
+                
+                calib = self.get_calib(frame_id)
+                center_3d = np.array(location) - np.array([0, dim[0] / 2, 0])  # real 3D center in 3D space
+                r_center_3d = center_3d.reshape(-1, 3)  # shape adjustment (N, 3)
+                center_3d, _ = calib.rect_to_img(r_center_3d)  # project 3D center to image plane
+                center_3d = center_3d[0]  # shape adjustment
+                center_heatmap = center_3d.astype(np.int32)
+                outside = (center_heatmap[0] < 0 or center_heatmap[0] >= 1920 or center_heatmap[1] < 0 or center_heatmap[1] >= 1080)
+                if ((gt["num_lidar"] <= 100 and self.data_id2cls[gt["category_id"]] == "Car") or
+                    (gt["num_lidar"] <= 50 and self.data_id2cls[gt["category_id"]] != "Car") or 
+                    location[-1] < 2 or
+                    outside):
+                    continue
+                
                 gt_annos["bbox"].append(location + dim[::-1] + ry) # h,w,l -> l,w,h
                 #gt_annos["bbox"].append(location + dim + ry)  FIXME
                 gt_annos["type"].append(cls)

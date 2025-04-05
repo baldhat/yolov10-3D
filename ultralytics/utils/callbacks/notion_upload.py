@@ -110,7 +110,7 @@ class Run:
         }
 
     @staticmethod
-    def get_flops_(model, imgsz=[1280, 384], batch_sizes=[]):
+    def get_flops_(model, imgsz=[1280, 384], batch_sizes=[1,1,1]):
         try:
             import torch
             from copy import deepcopy
