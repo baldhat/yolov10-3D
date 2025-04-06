@@ -1047,7 +1047,7 @@ class DDDetectionLoss:
         targets_2d = targets[2:4]
         targets_3d = targets[4:9] # center, size, depth, head_bin, head_res
 
-        self.plot_assignments(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt)
+        #self.plot_assignments(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt)
         
         depths = targets_3d[-3][fg_mask].squeeze()
         in_min, in_max = self.hyp.loss_scale_min_depth, self.hyp.loss_scale_max_depth, 
