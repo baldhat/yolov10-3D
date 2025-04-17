@@ -30,6 +30,7 @@ class Rope3Dataset(data.Dataset):
         self.use_camera_dis = False
         self.load_depth_maps = False
 
+        self.eval_script = os.environ["ROPE_EVAL_SCRIPT"] # /home/stud/mijo/dev/rope3d_eval/evaluate.sh
         print("Loading Rope3D Dataset...")
         raw_split = json.load(open(filepath, 'r'))
         if args.overfit:
@@ -473,7 +474,7 @@ class Rope3Dataset(data.Dataset):
     def get_stats(self, results, save_dir):
         output_dir = self.save_preds(results, save_dir)
 
-        command = (f"source /home/stud/mijo/dev/rope3d_eval/evaluate.sh {output_dir}")
+        command = (f"source {self.eval_script} {output_dir}")
         out = subprocess.check_output(command, shell= True, text= True, executable="/bin/bash")
         lines = out.split("\n")
         
