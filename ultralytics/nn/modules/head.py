@@ -637,24 +637,24 @@ class v10Detect3d(nn.Module):
                            ]
         self.head2d = nn.ModuleList(
             nn.Sequential(
-                v10Detect3d.build_conv(x, 64*2, self.kernel_size_1, self.dsconv, groups=1, deform=self.deform),
-                v10Detect3d.build_conv(64*2, 64*2 // 2 if self.half_channels else 64*2, self.kernel_size_2, groups=1, dsconv=self.dsconv),
-                nn.Conv2d(64*2 // 2 if self.half_channels else 64*2, 4, 1, groups=1)
+                v10Detect3d.build_conv(x, int(64*1.5), self.kernel_size_1, self.dsconv, groups=1, deform=self.deform),
+                v10Detect3d.build_conv(int(64*1.5), int(64*1.5) // 2 if self.half_channels else int(64*1.5), self.kernel_size_2, groups=1, dsconv=self.dsconv),
+                nn.Conv2d(int(64*1.5) // 2 if self.half_channels else int(64*1.5), 4, 1, groups=1)
             ) for x in ch
         )
         
         self.head3d = nn.ModuleList(
             nn.Sequential(
-                v10Detect3d.build_conv(x, 64*3, self.kernel_size_1, self.dsconv, groups=1, deform=self.deform),
-                v10Detect3d.build_conv(64*3, 64*3 // 2 if self.half_channels else 64*3, self.kernel_size_2, groups=1, dsconv=self.dsconv),
-                nn.Conv2d(64*3 // 2 if self.half_channels else 64*3, 31, 1, groups=1)
+                v10Detect3d.build_conv(x, 64*2, self.kernel_size_1, self.dsconv, groups=1, deform=self.deform),
+                v10Detect3d.build_conv(64*2, 64*2 // 2 if self.half_channels else 64*2, self.kernel_size_2, groups=1, dsconv=self.dsconv),
+                nn.Conv2d(64*2 // 2 if self.half_channels else 64*2, 31, 1, groups=1)
             ) for x in ch
         )
 
         self.o2o_heads = nn.ModuleList([self.cls, self.head2d, self.head3d])
         self.o2m_heads = copy.deepcopy(self.o2o_heads)
         
-        self.embedding_layer = nn.Conv2d(64*3, 64, 1, 1)
+        self.embedding_layer = nn.Conv2d(64*2, 64, 1, 1)
 
         if self.fgdm_pred:
             self.fgdm_predictor = DepthPredictor(ch)
@@ -839,8 +839,9 @@ class v10Detect3d(nn.Module):
         if not hasattr(self, "is_padded") or not self.is_padded:
             heads[1][0][0].conv.padding = (1,)
             heads[1][1][0].conv.padding = (1,)
-            heads[2][0][0].conv.padding = (1,)
-            heads[2][1][0].conv.padding = (1,)
+            if len(heads) > 2:
+                heads[2][0][0].conv.padding = (1,)
+                heads[2][1][0].conv.padding = (1,)
             self.is_padded = True
         
         for i in range(self.nl):
