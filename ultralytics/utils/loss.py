@@ -770,7 +770,7 @@ def debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, strid
 
         ax.imshow(img)
         ax.axis("off")
-    plt.show()
+    plt.savefig("/home/stud/mijo/tmp/assignedTargets2d.png")
     print()
 
 def debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt):
@@ -806,7 +806,7 @@ def debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps, gt_kps, 
 
         ax.imshow(img)
         ax.axis("off")
-    plt.show()
+    plt.savefig("/home/stud/mijo/tmp/assignedTargets3d.png")
     print()
 
 def debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor):
@@ -864,7 +864,7 @@ def debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor):
 
         ax[i].imshow(space)
         ax[i].axis("off")
-    plt.savefig("/home/stud/mijo/bev.png")
+    plt.savefig("/home/stud/mijo/tmp/assignments_bev.png")
     print()
 
 def project_to_image(kps, calib):
@@ -1080,8 +1080,8 @@ class DDDetectionLoss:
         return loss.sum() * batch_size, loss
 
     def plot_assignments(self, batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt):
-        #debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor)
-        #debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt)
+        debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor)
+        debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt)
         debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor)
 
     def compute_loss_weights(self, current_loss):

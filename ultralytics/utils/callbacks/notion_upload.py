@@ -111,31 +111,64 @@ class Run:
 
     @staticmethod
     def get_flops_(model, imgsz=[1280, 384], batch_sizes=[]):
-        try:
-            import torch
-            from copy import deepcopy
-            import thop
-            import time
-            torch.backends.cudnn.enable = True
-            torch.backends.cudnn.benchmark = True
-            with torch.inference_mode():
-                model = model.eval()
-                model = model.cuda()
-                #model = torch.compile(model)
-                p = next(model.parameters())
-                for bs in batch_sizes:
-                    im = torch.empty((bs, p.shape[1], *imgsz), device=p.device)  # input image in BCHW format
-                    flops = thop.profile(deepcopy(model), inputs=[im], verbose=False)[0] / 1e9 * 2  # imgsz GFLOPs
-                    for x in range(1000):
-                        model(im)
-                    t1 = time.time()
-                    for x in range(50):
-                        out = model(im)
-                    t2 = time.time()
-                    print(f"Batch size: {bs} Took: {(t2-t1) / 50 * 1000:.2f}ms, FLOPs: {flops:.2f} GFLOPs, batch size: {im.shape[0]}, ")
-            return 0 #flops
-        except Exception as e:
-            print(f"Failed to calculate flops: {e}")
+        # try:
+        import torch
+        from copy import deepcopy
+        import thop
+        import time
+        torch.backends.cudnn.enable = True
+        torch.backends.cudnn.benchmark = True
+        flops = 0
+        with torch.inference_mode():
+            model = model.eval()
+            model = model.cuda()
+            #model = torch.compile(model)
+            p = next(model.parameters())
+            for bs in batch_sizes:
+                im = torch.empty((bs, p.shape[1], *imgsz), device=p.device)  # input image in BCHW format
+                flops = thop.profile(deepcopy(model), inputs=[im], verbose=False)[0] / 1e9 * 2  # imgsz GFLOPs
+                
+                x_ = im
+                y_ = []
+                fls = []
+                for m in model.model:
+                    if m.f != -1:  # if not from previous layer
+                        x_ = y_[m.f] if isinstance(m.f, int) else [x_ if j == -1 else y_[j] for j in m.f]  # from earlier layers
+                    fl = thop.profile(deepcopy(m), inputs=[x_], verbose=False)[0] / 1e9 * 2  
+                    x_ = m(x_)
+                    y_.append(x_ if m.i in model.save else None)  # save output
+                    fls.append(fl)
+                
+                for _ in range(100):
+                    model(im)
+                    
+                diffs = [0] * len(model.model)
+                for _ in range(100):
+                    x = im
+                    y = []
+                    for i, m in enumerate(model.model):
+                        if m.f != -1:  # if not from previous layer
+                            x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
+                        #torch.cuda.synchronize()
+                        t1 = time.time()    
+                        x = m(x)  # run
+                        #torch.cuda.synchronize()
+                        t2 = time.time()
+                        diffs[i] += t2 - t1
+                        y.append(x if m.i in model.save else None) 
+                
+                for i in range(len(model.model)):
+                    print(f"{i}: {diffs[i]/100 * 1000:.2f}ms, FLOPS: {fls[i]}")
+                print(f"Sum: {sum(diffs)/100 * 1000:.2f}ms, FLOPS: {sum(fls)}")
+                    
+                t1 = time.time()
+                for _ in range(100):
+                    out = model(im)
+                t2 = time.time()
+                print(f"Batch size: {bs} Took: {(t2-t1) / 100 * 1000:.2f}ms, FLOPs: {flops:.2f} GFLOPs, batch size: {im.shape[0]}, ")
+        return flops
+        # except Exception as e:
+        #     print(f"Failed to calculate flops: {e}")
 
     def get_flops(self):
         return {
