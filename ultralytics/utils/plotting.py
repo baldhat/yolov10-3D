@@ -8,6 +8,7 @@ from typing import Tuple, Dict, Any, Optional, List
 from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 import os
+from matplotlib.patches import Circle, Polygon
 
 import cv2
 import matplotlib.pyplot as plt
@@ -1365,82 +1366,94 @@ class KITTIVisualizer():
             preds = {key: None for key in targets.keys()}
 
         plt.clf()
-        fig, ax = plt.subplots(math.ceil(self.max_imgs ** 0.5), math.ceil(self.max_imgs ** 0.5),
-                               figsize=(24, 12), gridspec_kw={'wspace': 0, 'hspace': 0}, constrained_layout=True)
+
+        def get_rotated_rectangle_points(center, size, angle_degrees):
+            cx, cy = center
+            w, h = size
+            angle = np.deg2rad(angle_degrees)
+
+            # Rectangle corners before rotation (centered at origin)
+            rect = np.array([
+                [-w/2, -h/2],
+                [ w/2, -h/2],
+                [ w/2,  h/2],
+                [-w/2,  h/2]
+            ])
+
+            # Rotation matrix
+            R = np.array([
+                [np.cos(angle), -np.sin(angle)],
+                [np.sin(angle),  np.cos(angle)]
+            ])
+
+            # Rotate and translate
+            rotated_rect = rect @ R.T + [cx, cy]
+            return rotated_rect
+
+        fig, ax = plt.subplots(math.ceil(9 ** 0.5), math.ceil(9 ** 0.5),
+                            figsize=(24, 12), gridspec_kw={'wspace': 0, 'hspace': 0}, constrained_layout=True)
         ax = ax.ravel()
 
         for i, ((img_id, result), (_, target)) in enumerate(zip(preds.items(), targets.items())):
             if i >= self.max_imgs:
                 break
-            MAX_DIST = 60
-            SCALE = 10
-
-            # Create BEV Space
-            R = (MAX_DIST * SCALE)
-            space = np.zeros((R * 2, R * 2, 3), dtype=np.uint8)
+            R = 100
+            ax[i].set_xlim(-R, R)
+            ax[i].set_ylim(0, R)
+            ax[i].set_aspect(1.0)
+            ax[i].set_xticks([])
+            ax[i].set_yticks([])
+            ax[i].set_facecolor('black')
 
             for theta in np.linspace(0, np.pi, 7):
-                space = cv2.line(space, pt1=(int(R - R * np.cos(theta)), int(R - R * np.sin(theta))), pt2=(R, R),
-                                 color=(255, 255, 255), thickness=2, lineType=cv2.LINE_AA)
+                xs, ys = [R * np.cos(theta), 0], [R * np.sin(theta), 0]
+                ax[i].plot(xs, ys, linewidth=2, color=(1, 1, 1), zorder=1)
 
             for radius in np.linspace(0, R, 5):
                 if radius == 0:
                     continue
+                circle = Circle((0, 0), radius, edgecolor=(1, 1, 1), linewidth=2, fill=False, zorder=1)
+                ax[i].add_artist(circle)
 
-                space = cv2.circle(space, center=(R, R), radius=int(radius), color=(255, 255, 255), thickness=2,
-                                   lineType=cv2.LINE_AA)
-            space = space[:R, :, :]
-
-            for object in target:
+            for obj_ in target:
                 if dataset.pred_rot_mat:
-                    egoc_rot_matrix = np.array(object[1:10]).reshape(3, 3)
-                    dimensions = np.array([object[16], object[15]]) * SCALE
-                    translation = np.array((object[17], object[19])) * SCALE
-                    translation[1] *= -1
-                    translation += R
+                    egoc_rot_matrix = np.array(obj_[1:10]).reshape(3, 3)
+                    dimensions = np.array([obj_[16], obj_[15]])
+                    translation = np.array((obj_[17], obj_[19]))
                     if hasattr(dataset, "get_c2g"):
                         c2g_trans = dataset.get_c2g(dataset.img_file2img_id[batch["im_file"][i].split(os.path.sep)[-1]])
-                        ry = dataset.egoc_rot_matrix2rot_y(c2g_trans, egoc_rot_matrix)
+                        ry = -dataset.egoc_rot_matrix2rot_y(c2g_trans, egoc_rot_matrix)
                     else:
                         ry = Rotation.from_matrix(egoc_rot_matrix).as_euler("xyz")[1]
                 else:
-                    dimensions = np.array([object[8], object[7]]) * SCALE
-                    translation = np.array((object[9], object[11])) * SCALE
-                    translation[1] *= -1
-                    translation += R
-                    ry = object[12]
+                    dimensions = np.array([obj_[8], obj_[7]])
+                    translation = np.array((obj_[9], obj_[11]))
+                    ry = -obj_[12]
 
-                bev = np.concatenate((translation, dimensions, np.expand_dims(ry, 0)))
-                box = cv2.boxPoints((bev[:2], bev[2:4], bev[4] * 180 / np.pi)).astype(np.int32)
-                space = cv2.drawContours(space, [box], -1, (0, 255, 0), thickness=-1, lineType=cv2.LINE_AA)
+                corners = get_rotated_rectangle_points(translation, dimensions, ry * 180 / np.pi)
+                ax[i].add_artist(Polygon(corners, closed=True, fill=True, edgecolor='g', facecolor="g", zorder=3))
 
             if result is not None:
-                for object in result:
+                for obj_ in result:
                     if dataset.pred_rot_mat:
-                        egoc_rot_matrix = np.array(object[1:10]).reshape(3, 3)
-                        dimensions = np.array([object[16], object[15]]) * SCALE
-                        translation = np.array((object[17], object[19])) * SCALE
-                        translation[1] *= -1
-                        translation += R
+                        egoc_rot_matrix = np.array(obj_[1:10]).reshape(3, 3)
+                        dimensions = np.array([obj_[16], obj_[15]])
+                        translation = np.array((obj_[17], obj_[19]))
                         if hasattr(dataset, "get_c2g"):
                             c2g_trans = dataset.get_c2g(dataset.img_file2img_id[batch["im_file"][i].split(os.path.sep)[-1]])
-                            ry = dataset.egoc_rot_matrix2rot_y(c2g_trans, egoc_rot_matrix)
+                            ry = -dataset.egoc_rot_matrix2rot_y(c2g_trans, egoc_rot_matrix)
                         else:
                             ry = Rotation.from_matrix(egoc_rot_matrix).as_euler("xyz")[1]
                     else:
-                        dimensions = np.array([object[8], object[7]]) * SCALE
-                        translation = np.array((object[9], object[11])) * SCALE
-                        translation[1] *= -1
-                        translation += R
-                        ry = object[12]
-                    bev = np.concatenate((translation, dimensions, np.expand_dims(ry, 0)))
-                    box = cv2.boxPoints((bev[:2], bev[2:4], bev[4] * 180 / np.pi)).astype(np.int32)
-                    space = cv2.drawContours(space, [box], -1, (255, 0, 0), thickness=-1, lineType=cv2.LINE_AA)
+                        dimensions = np.array([obj_[8], obj_[7]])
+                        translation = np.array((obj_[9], obj_[11]))
+                        ry = -obj_[12]
+                    corners = get_rotated_rectangle_points(translation, dimensions, ry * 180 / np.pi)
+                    ax[i].add_artist(Polygon(corners, closed=True, fill=True, edgecolor='r', facecolor="r", zorder=3))
+            else:
+                print("No preds")
 
-            ax[i].imshow(space)
-            ax[i].axis("off")
-
-        plt.savefig(fname, dpi=300, bbox_inches="tight")
+        plt.savefig(fname, bbox_inches="tight", format="svg")
 
     def plot_3d_obj(self, img: np.ndarray, obj: VisObject3D, camera_matrix: np.ndarray, thickness: int = 1, gt: bool = False,
                  bbox2d=True):
