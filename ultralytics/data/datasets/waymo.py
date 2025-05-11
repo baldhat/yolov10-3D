@@ -35,8 +35,8 @@ class WaymoDataset(data.Dataset):
         with open(filepath, 'r') as f:
             raw_split = json.load(f)
         if args.overfit:
-            raw_split["images"] = [image for image in raw_split["images"] if image["id"] < 50]
-            raw_split["annotations"] = [anns for anns in raw_split["annotations"] if anns["image_id"] < 50]
+            raw_split["images"] = [image for image in raw_split["images"] if image["id"] < 7500]
+            raw_split["annotations"] = [anns for anns in raw_split["annotations"] if anns["image_id"] < 7500]
 
         self.imgs = {img['id']: img for img in sorted(raw_split['images'], key=lambda img: img['id'])}
         self.idx_to_img_id = {idx: img_id for idx, img_id in enumerate(self.imgs)}
