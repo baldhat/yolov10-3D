@@ -25,7 +25,7 @@ class Rope3Dataset(data.Dataset):
         self.mode = mode
         self.class_name = ['Car', 'Pedestrian', 'Cyclist', 'Big_Vehicle']
         self.writelist = ['Car', 'Pedestrian', 'Cyclist', 'Big_Vehicle']
-        self.resolution = np.array([960, 540])  # W * H
+        self.resolution = np.array([960, 544])  # W * H
         self.max_objs = 150
         self.use_camera_dis = False
         self.load_depth_maps = False
@@ -34,8 +34,8 @@ class Rope3Dataset(data.Dataset):
         print("Loading Rope3D Dataset...")
         raw_split = json.load(open(filepath, 'r'))
         if args.overfit:
-            raw_split["images"] = [image for image in raw_split["images"] if image["id"] < 50]
-            raw_split["annotations"] = [anns for anns in raw_split["annotations"] if anns["image_id"] < 50]
+            raw_split["images"] = [image for image in raw_split["images"] if image["id"] < 500]
+            raw_split["annotations"] = [anns for anns in raw_split["annotations"] if anns["image_id"] < 500]
 
         self.imgs = {img['id']: img for img in sorted(raw_split['images'], key=lambda img: img['id'])}
         self.idx_to_img_id = {idx: img_id for idx, img_id in enumerate(self.imgs)}
