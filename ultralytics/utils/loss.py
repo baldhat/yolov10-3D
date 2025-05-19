@@ -943,7 +943,7 @@ class DDDetectionLoss:
         loss[2:6] = self.compute_box3d_loss(targets_3d, pred_3d, anchor_points, stride_tensor,
                                             fg_mask, target_scores_sum, loss_weight)
 
-        if self.hyp.distillation and embeddings is not None:
+        if self.hyp.distillation and embeddings is not None and embeddings[0] is not None:
             embeddings = torch.cat([emb.view(emb.shape[0], emb.shape[1], -1) for emb in embeddings], dim=2)
             if self.hyp.distillation_teacher in ["yolo", "self"] :
                 forwards = (anchor_points, stride_tensor, self.no, self.nc, calibs, mean_sizes, self.assigner)
