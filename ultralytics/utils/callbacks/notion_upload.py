@@ -1,5 +1,5 @@
 import os
-from notion_client import Client
+#from notion_client import Client
 import pandas as pd
 import yaml
 import numpy as np
