@@ -1,5 +1,8 @@
 import os
-#from notion_client import Client
+try:
+    from notion_client import Client
+except:
+    pass
 import pandas as pd
 import yaml
 import numpy as np
