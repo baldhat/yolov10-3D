@@ -487,6 +487,29 @@ class Rope3Dataset(data.Dataset):
                 #metric3d = float(lines[15].split(" ")[3].strip()) # 0.5 hard
         return metric3d
     
+    @staticmethod
+    def rot_y2egoc_rot_matrix(c2g_trans: np.ndarray, rot_y: float) -> np.ndarray:
+        """Rope3D provides a single angle per object only and the ground equation. 
+        From the ground equation we can compute c2g_trans. 
+        We can then use c2g_trans and the single angle to convert to egocentric rotation.
+        See: https://github.com/liyingying0113/rope3d-dataset-tools/blob/main/show_tools/show_2d3d_box.py
+
+        Args:
+            c2g_trans (np.ndarray): 3 x 3. Rotation matrix to map between ground and camera
+            rot_y (float): B. Rotation of the object around the y-axis of the camera
+        Returns:
+            np.ndarray: 3 x 3. Egocentric rotation matrix of the object.             
+        """
+        theta = np.asarray([np.cos(rot_y), 0, -np.sin(rot_y)]).reshape(3, 1)
+        theta0 = (c2g_trans[:3, :3] @ theta)[:, 0]
+        yaw_world_res = np.arctan2(theta0[1], theta0[0])
+        g2c_trans = np.linalg.inv(c2g_trans)
+        ground_r = np.asarray([[np.cos(yaw_world_res), -np.sin(yaw_world_res), 0],
+                               [np.sin(yaw_world_res), np.cos(yaw_world_res), 0], [0, 0, 1]])
+        egocentric = g2c_trans @ ground_r
+        return egocentric
+
+    
     def egoc_rot_matrix2rot_y(self, c2g_trans: np.ndarray, egoc_rot_matrix: np.ndarray) -> torch.Tensor:
         """
         Rope3D provides a single angle per object only and the ground equation.
