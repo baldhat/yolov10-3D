@@ -42,6 +42,7 @@ class WaymoDataset(data.Dataset):
         self.idx_to_img_id = {idx: img_id for idx, img_id in enumerate(self.imgs)}
 
         self.cls2eval_id = {"unknown": 0, "Car": 1, "Pedestrian": 2, "Sign": 3, "Cyclist": 4}
+        self.eval_id2cls = {0: "unknown", 1: "Car", 2: "Pedestrian", 3: "Sign", 4: "Cyclist"}
         self.cls2train_id = {"Car": 0, "Pedestrian": 1, "Cyclist": 2}
         self.data_id2cls = {0: "unknown", 1: "Car", 2: "Pedestrian", 3: "Cyclist"}
         self.train_id2cls = {0: "Car", 1: "Pedestrian", 2: "Cyclist"}
@@ -339,7 +340,7 @@ class WaymoDataset(data.Dataset):
         _center3d = center_3d.copy()
 
         # process 2d bbox & get 2d center
-        bbox_2d = self.recompute_bbox_2d(r_center_3d, object_, object_.ry, calib)
+        bbox_2d = self.recompute_bbox_2d(r_center_3d, object_.dims, object_.ry, calib)
         # add affine transformation for 2d boxes.
         bbox_2d[:2] = affine_transform(bbox_2d[:2], trans)
         bbox_2d[2:] = affine_transform(bbox_2d[2:], trans)
@@ -385,8 +386,9 @@ class WaymoDataset(data.Dataset):
         valid = True
         return valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res
 
-    def recompute_bbox_2d(self, center3d, object_, roty, calib):
-        kpts_3d = get_object_keypoints(center3d, object_.dims, roty).squeeze(0).squeeze(0)
+    # dims: h,w,l
+    def recompute_bbox_2d(self, center3d, dims, roty, calib):
+        kpts_3d = get_object_keypoints(center3d, dims, roty).squeeze(0).squeeze(0)
         kpts_2d = calib.rect_to_img(kpts_3d.numpy())[0]
 
         x0y0 = np.min(kpts_2d, axis=0)
