@@ -206,15 +206,23 @@ args = Args()
 
 val_files = Path("/storage/group/deepscenario/rope3d/ImageSets/val.txt")
 
-base_name = "yolov10-3Dx_rope3d_alloff_1"
-ours_name = "yolov10-3Dx_rope3d_1"
+import sys
+if len(sys.argv) >= 2:
+    print(sys.argv)
+    base_path = Path(sys.argv[1])
+    ours_path = Path(sys.argv[2])
+    ours_name = str(ours_path).split("/")[-1]
+    ours_name = str(base_path).split("/")[-1]
+else:
+    base_name = "yolov10-3D_rope3d_baselineNoMixup_60_n_17"
+    ours_name = "yolov10-3D_rope3d_ours_n_60_2"
+    base_path = Path("/storage/group/deepscenario/for_jonathan/" + base_name)
+    ours_path = Path("/storage/group/deepscenario/for_jonathan/" + ours_name)
 
-output_path = Path("/storage/user/mijo/mijo/qualitative") / ours_name
+output_path = Path("/storage/group/deepscenario/jonathan_for_johannes/") / ours_name
 if not os.path.exists(output_path):
     os.mkdir(output_path)
 
-base_path = Path("/home/stud/mijo/experiments/results/" + base_name)
-ours_path = Path("/home/stud/mijo/experiments/results/" + ours_name)
 gt_path = Path("/storage/group/deepscenario/rope3d/val/label_2/")
 
 dataset = Rope3Dataset("/storage/group/deepscenario/rope3d/val_omni.json", "val", args)
@@ -244,8 +252,9 @@ for fn in open(val_files, "r").readlines():
     improvement_counter = 0
     # check missing detections
     if len(base_false_positives) > len(our_false_positives):
-        print("False positive")
-        improvement_counter += (len(base_false_positives) - len(our_false_positives))
+        pass
+        #print("False positive")
+        #improvement_counter += (len(base_false_positives) - len(our_false_positives))
     
     # calculate position and rotation errors
     base_pos_errors, base_rot_errors = calculate_errors(base_gts, base_dets)
@@ -259,8 +268,8 @@ for fn in open(val_files, "r").readlines():
             if not equals(base_gt, our_gt):
                 continue
             
-            if base_pos_errors[i] - our_pos_errors[j] > 5 and base_pos_errors[i] - our_pos_errors[j] < 20:
-                print(f"Better Location! Base: {base_dets[i].location}, Ours: {our_dets[j].location}")
+            if base_pos_errors[i] - our_pos_errors[j] > 2 and base_pos_errors[i] - our_pos_errors[j] < 10:
+                #print(f"Better Location! Base: {base_dets[i].location}, Ours: {our_dets[j].location}")
                 improvement_counter += 1
                 
             if np.abs(base_rot_errors[i] - our_rot_errors[j]) > 1:
