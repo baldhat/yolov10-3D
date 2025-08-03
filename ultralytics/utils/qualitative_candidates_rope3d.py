@@ -17,7 +17,7 @@ from ultralytics.data.datasets.rope3d import Rope3Dataset
 from scipy.optimize import linear_sum_assignment
 
 plotter = KITTIVisualizer()
-classes = ["car", "pedestrian", "cyclist", "big_vehicle"]
+classes = ["car", "big_vehicle", "van", "truck", "bus"]
 
 class Detection3d:
     def __init__(self, line):
@@ -33,7 +33,8 @@ class Detection3d:
 def load_labels(filename):
     with open(filename, "r") as f:
         lines = f.readlines()
-        return [Object3d(it, idx=i) for i, it in enumerate(lines)]
+        objs = [Object3d(it, idx=i) for i, it in enumerate(lines)]
+        return [obj_ for obj_ in objs if obj_.cls_type.lower() in classes]
     
 def load_dets(filename):
     with open(filename, "r") as f:
@@ -268,7 +269,7 @@ for fn in open(val_files, "r").readlines():
             if not equals(base_gt, our_gt):
                 continue
             
-            if base_pos_errors[i] - our_pos_errors[j] > 2 and base_pos_errors[i] - our_pos_errors[j] < 10:
+            if base_pos_errors[i] - our_pos_errors[j] > 2 and base_pos_errors[i] - our_pos_errors[j] < 12:
                 #print(f"Better Location! Base: {base_dets[i].location}, Ours: {our_dets[j].location}")
                 improvement_counter += 1
                 
