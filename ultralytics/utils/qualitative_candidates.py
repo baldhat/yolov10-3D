@@ -184,15 +184,23 @@ def plot_all(img, gts, our_dets, base_dets, calib, out_path):
 
 val_files = Path("/storage/group/deepscenario/KITTI/ImageSets/val.txt")
 
-base_name = "yolov10-3Dx_all_off_4"
-ours_name = "yolov10-3Dx_2"
+import sys
+if len(sys.argv) >= 2:
+    print(sys.argv)
+    base_path = Path(sys.argv[1])
+    ours_path = Path(sys.argv[2])
+    ours_name = str(ours_path).split("/")[-1]
+    ours_name = str(base_path).split("/")[-1]
+else:
+    base_name = "yolov10-3D_rope3d_baselineNoMixup_60_n_17"
+    ours_name = "yolov10-3D_rope3d_ours_n_60_2"
+    base_path = Path("/storage/group/deepscenario/for_jonathan/" + base_name)
+    ours_path = Path("/storage/group/deepscenario/for_jonathan/" + ours_name)
 
-output_path = Path("/storage/user/mijo/mijo/qualitative") / ours_name
+output_path = Path("/storage/group/deepscenario/jonathan_for_johannes/") / ours_name
 if not os.path.exists(output_path):
     os.mkdir(output_path)
 
-base_path = Path("/home/stud/mijo/experiments/results/" + base_name)
-ours_path = Path("/home/stud/mijo/experiments/results/" + ours_name)
 gt_path = Path("/storage/group/deepscenario/KITTI/training/label_2/")
 
 counter = 0
@@ -220,8 +228,9 @@ for fn in open(val_files, "r").readlines():
     improvement_counter = 0
     # check missing detections
     if len(base_false_positives) > len(our_false_positives):
-        print("False positive")
-        improvement_counter += (len(base_false_positives) - len(our_false_positives))
+        pass
+        #print("False positive")
+        #improvement_counter += (len(base_false_positives) - len(our_false_positives))
     
     # calculate position and rotation errors
     base_pos_errors, base_rot_errors = calculate_errors(base_gts, base_dets)
@@ -235,19 +244,21 @@ for fn in open(val_files, "r").readlines():
             if not equals(base_gt, our_gt):
                 continue
             
-            if base_pos_errors[i] - our_pos_errors[j] > 5:
+            diff = abs(base_pos_errors[i] - our_pos_errors[j])
+            if diff > 1.5 and diff < 15:
                 print(f"Better Location! Base: {base_dets[i].location}, Ours: {our_dets[j].location}")
-                improvement_counter += math.ceil(base_pos_errors[i] - our_pos_errors[j] - 5)
+                improvement_counter += 1 #math.ceil(base_pos_errors[i] - our_pos_errors[j] - 5)
                 
             if np.abs(base_rot_errors[i] - our_rot_errors[j]) > 1:
                 #print(f"Better Rotation! Base: {base_dets[i].ry}, Ours: {our_dets[j].ry}")
                 #plot = True
                 pass
         if not found:
-            print("We detected more objects")
-            improvement_counter += 1
+            pass
+            #print("We detected more objects")
+            #improvement_counter += 1
                 
-    if improvement_counter > 0:
+    if improvement_counter > 3:
         print(filename)
         img_name = filename.replace("txt", "png")
         img = load_image(gt_path / ".." / "image_2" / img_name).astype(np.float32) / 255.0
