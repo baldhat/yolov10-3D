@@ -1175,15 +1175,23 @@ class SupervisionLoss:
         self.model = model
 
         self.teacher_model = teacher_model
+        self.teacher_weights = self.get_teacher_weights()
         self.T = self.args.distillation_temp
         self.weight = self.args.distillation_weight
         self.fgdm_supervision_weight = self.args.fgdm_supervision_weight
         self.criterion = self.args.distillation_loss
         self.no_mixup = self.args.distillation_no_mixup
+        self.num = None
         if self.criterion == "cos":
             self.loss = nn.CosineEmbeddingLoss()
         elif self.criterion == "mse":
             self.loss = nn.MSELoss()
+            
+    def get_teacher_weights(self):
+        assert(len(self.teacher_model.model.model[-1].dep) == 2)
+        w1 = self.teacher_model.model.model[-1].dep[0][1].conv.weight[..., 0, 0].detach()
+        w2 = self.teacher_model.model.model[-1].dep[1][1].conv.weight[..., 0, 0].detach()
+        return torch.stack((w1, w2), dim=0)
 
     def distill_from_yolo(self, imgs, pred_embeddings, src_img, mask_gt, gts, forwards, mixed_mask, pred_fg_mask, pred_target_gt_idx):
         with torch.inference_mode():
@@ -1197,23 +1205,29 @@ class SupervisionLoss:
 
         mask_gt0 = mask_gt.bool() & (src_img.unsqueeze(-1) == 0)
         mask_gt1 = mask_gt.bool() & (src_img.unsqueeze(-1) == 1)
-        teacher_fg_mask0, teacher_target_gt_idx0 = self.get_teacher_assignments(teacher_pred0, gts, mask_gt0, *forwards)
-        teacher_fg_mask1, teacher_target_gt_idx1 = self.get_teacher_assignments(teacher_pred1, gts, mask_gt1, *forwards)
+        teacher_fg_mask0, teacher_target_gt_idx0, teacher_dep_0, target_dep_0 = self.get_teacher_assignments(teacher_pred0, gts, mask_gt0, *forwards)
+        teacher_fg_mask1, teacher_target_gt_idx1, teacher_dep_1, target_dep_1 = self.get_teacher_assignments(teacher_pred1, gts, mask_gt1, *forwards)
 
         loss = torch.zeros((pred_embeddings.shape[0]), device=imgs.device)
         count = 0
 
         for i in range(imgs.shape[0]):
-            teacher_fg_mask0_, teacher_target_gt_idx0_ = teacher_fg_mask0[i], teacher_target_gt_idx0[i]
+            teacher_fg_mask0_, teacher_target_gt_idx0_, teacher_dep0_, target_dep0_ = teacher_fg_mask0[i], teacher_target_gt_idx0[i], teacher_dep_0[i], target_dep_0[i]
 
             pred_fg_mask_, pred_target_gt_idx_ = pred_fg_mask[i], pred_target_gt_idx[i]
             teacher_fg_embeddings0_ = teacher_embeddings0[i].transpose(-2,-1)[teacher_fg_mask0_]
             teacher_fg_target_gt_idx0_ = teacher_target_gt_idx0_[teacher_fg_mask0_]
+            teacher_fg_dep0_ = teacher_dep0_[teacher_fg_mask0_]
+            target_fg_dep0_ = target_dep0_[teacher_fg_mask0_]
+            source_head0 = (self.indices[teacher_fg_mask0_] >= self.num[0]).int()
 
             if mixed_mask[i]:
-                teacher_fg_mask1_, teacher_target_gt_idx1_ = teacher_fg_mask1[i], teacher_target_gt_idx1[i]
+                teacher_fg_mask1_, teacher_target_gt_idx1_, teacher_dep1_, target_dep1_ = teacher_fg_mask1[i], teacher_target_gt_idx1[i], teacher_dep_1[i], target_dep_1[i]
                 teacher_fg_embeddings1_ = teacher_embeddings1[i].transpose(-2, -1)[teacher_fg_mask1_]
                 teacher_fg_target_gt_idx1_ = teacher_target_gt_idx1_[teacher_fg_mask1_]
+                teacher_fg_dep1_ = teacher_dep1_[teacher_fg_mask1_]
+                target_fg_dep1_ = target_dep1_[teacher_fg_mask1_]
+                source_head1 = (self.indices[teacher_fg_mask1_] >= self.num[0]).int()
 
             pred_fg_embeddings0_ = pred_embeddings[i].transpose(-2, -1)[pred_fg_mask_]
             pred_fg_target_gt_idx0_ = pred_target_gt_idx_[pred_fg_mask_]
@@ -1221,24 +1235,27 @@ class SupervisionLoss:
             pairs = []
             k = 0
             for pred_embedding, pred_gt_idx in zip(pred_fg_embeddings0_, pred_fg_target_gt_idx0_):
-                for teacher_embedding0, teacher_gt_idx in zip(teacher_fg_embeddings0_, teacher_fg_target_gt_idx0_):
+                for teacher_embedding0, teacher_gt_idx, teacher_dep0, target_dep0, source_head0_ in zip(teacher_fg_embeddings0_, teacher_fg_target_gt_idx0_, teacher_fg_dep0_, target_fg_dep0_, source_head0):
                     if pred_gt_idx == teacher_gt_idx:
-                        pairs.append((pred_embedding, teacher_embedding0))
+                        pairs.append((pred_embedding, teacher_embedding0, teacher_dep0, target_dep0, source_head0_))
                         k += 1
                 if mixed_mask[i]:
-                    for teacher_embedding1, teacher_gt_idx in zip(teacher_fg_embeddings1_, teacher_fg_target_gt_idx1_):
+                    for teacher_embedding1, teacher_gt_idx, teacher_dep1, target_dep1, source_head1_ in zip(teacher_fg_embeddings1_, teacher_fg_target_gt_idx1_, teacher_fg_dep1_, target_fg_dep1_, source_head1):
                         if pred_gt_idx == teacher_gt_idx:
-                            pairs.append((pred_embedding, teacher_embedding1))
+                            pairs.append((pred_embedding, teacher_embedding1, teacher_dep1, target_dep1, source_head1_))
                             k += 1
             if k > 0:
                 pred_embs = torch.stack([p[0] for p in pairs], dim=0)
                 teach_embs = torch.stack([p[1] for p in pairs], dim=0)
-                loss[i] = self.get_loss(pred_embs, teach_embs)
+                teach_dep = torch.stack([p[2] for p in pairs], dim=0)
+                target_dep = torch.stack([p[3] for p in pairs], dim=0)
+                source_head = torch.stack([p[4] for p in pairs], dim=0)
+                loss[i] = self.get_loss(pred_embs, teach_embs, teach_dep, target_dep, source_head)
             count += k
 
         return loss.sum() / count
 
-    def get_loss(self, pred_emb, teach_emb):
+    def get_loss(self, pred_emb, teach_emb, teach_dep, target_dep, source_head):
         if self.criterion == "soft":
             soft_targets = nn.functional.softmax(teach_emb / self.T, dim=-1)
             soft_prob = nn.functional.log_softmax(pred_emb / self.T, dim=-1)
@@ -1252,6 +1269,13 @@ class SupervisionLoss:
         elif self.criterion == "cos":
             loss = self.loss(pred_emb, teach_emb,
                                         target=torch.ones(teach_emb.size(0)).to(teach_emb.device))
+        elif self.criterion == "ours":
+            weights = self.teacher_weights[source_head]
+            teach_weight_weight = torch.abs(weights).sum(dim=1) / torch.abs(weights).sum(dim=1).sum(dim=1, keepdim=True)
+            # teach_weight_weight = torch.abs(weights).sum(dim=2) / torch.abs(weights).sum(dim=2).sum(dim=1, keepdim=True)
+            
+            teach_err_weight = target_dep / torch.maximum(torch.abs(target_dep - teach_dep), torch.tensor(0.001))
+            loss = (nn.functional.l1_loss(pred_emb, teach_emb, reduction="none")* teach_weight_weight).sum(dim=-1) * teach_err_weight 
         else:
             loss = torch.zeros(1, requires_grad=True)
         return loss.sum()  * self.weight
@@ -1364,6 +1388,9 @@ class SupervisionLoss:
             pred = res_dict["one2one"][1]
             pred_shape = pred[0].shape
             preds = torch.cat([xi.view(pred_shape[0], pred_shape[1], -1) for xi in pred], 2)
+            if self.num is None:
+                self.num = [x.shape[-1] * x.shape[-2] for x in res_dict["o2o_embs"]] 
+                self.indices = torch.arange(9600, device=preds.device)
             return preds, torch.cat([x.reshape(x.shape[0], x.shape[1], -1) for x in res_dict["o2o_embs"]], dim=2)
         elif isinstance(self.teacher_model, YOLOv10_3DDetectionModel):
             self.teacher_model.model[-1].dense = True # Set the detection head to dense
@@ -1453,8 +1480,10 @@ class SupervisionLoss:
             calibs,
             mean_sizes
         )
+        targets_depth = targets[6]
+        pred_depth = pred_3d[..., -2]
         #debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor)
-        return fg_mask, target_gt_idx
+        return fg_mask, target_gt_idx, pred_depth, targets_depth[..., 0]
 
 class ForegroundDepthMapLoss(nn.Module):
 
