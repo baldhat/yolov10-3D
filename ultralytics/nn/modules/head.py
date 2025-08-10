@@ -836,9 +836,9 @@ class v10Detect3d(nn.Module):
     
     def forward(self, x):
         if not self.training and not self.dense:
-            one2one, o2o_embs = self.inference_forward_feat([xi.detach() for xi in x], self.o2o_heads)
+            # one2one, o2o_embs = self.inference_forward_feat([xi.detach() for xi in x], self.o2o_heads)
             # self.get_head_ranks()
-            # one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
+            one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
         else:
             one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
 
