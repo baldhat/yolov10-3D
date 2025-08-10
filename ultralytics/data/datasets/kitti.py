@@ -54,8 +54,8 @@ class KITTIDataset(data.Dataset):
         self.idx_list = [x.strip() for x in open(split_dir).readlines()]
         if args.overfit:
             self.idx_list = self.idx_list[:64]
-        if len(self.idx_list) > 7517:
-            self.idx_list = self.idx_list[:7517]
+        if len(self.idx_list) > 7518:
+            self.idx_list = self.idx_list[:7518]
 
         # path configuration
         self.data_dir = os.path.join(root_dir, 'testing' if self.mode == 'test' else 'training')
