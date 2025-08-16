@@ -138,6 +138,8 @@ distillation_weight: 0.1
 distillation_loss: "ours"
 distillation_no_mixup: True
 use_pred_center: False
+feature_weighting: True
+relative_error_weighting: True
 
 loss_scale_max_depth: 65
 loss_scale_min_depth: 10

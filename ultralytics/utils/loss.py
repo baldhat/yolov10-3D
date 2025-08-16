@@ -1181,6 +1181,8 @@ class SupervisionLoss:
         self.fgdm_supervision_weight = self.args.fgdm_supervision_weight
         self.criterion = self.args.distillation_loss
         self.no_mixup = self.args.distillation_no_mixup
+        self.feature_weighting = self.args.feature_weighting
+        self.relative_error_weighting = self.args.relative_error_weighting
         self.num = None
         if self.criterion == "cos":
             self.loss = nn.CosineEmbeddingLoss()
@@ -1271,10 +1273,16 @@ class SupervisionLoss:
                                         target=torch.ones(teach_emb.size(0)).to(teach_emb.device))
         elif self.criterion == "ours":
             weights = self.teacher_weights[source_head]
-            teach_weight_weight = torch.abs(weights).sum(dim=1) / torch.abs(weights).sum(dim=1).sum(dim=1, keepdim=True)
+            if self.feature_weighting:
+                teach_weight_weight = torch.abs(weights).sum(dim=1) / torch.abs(weights).sum(dim=1).sum(dim=1, keepdim=True)
+            else:
+                teach_weight_weight = torch.ones_like(torch.abs(weights).sum(dim=1) / torch.abs(weights).sum(dim=1).sum(dim=1, keepdim=True), device=weights.device)
             # teach_weight_weight = torch.abs(weights).sum(dim=2) / torch.abs(weights).sum(dim=2).sum(dim=1, keepdim=True)
             
-            teach_err_weight = target_dep / torch.maximum(torch.abs(target_dep - teach_dep), torch.tensor(0.001))
+            if self.relative_error_weighting:
+                teach_err_weight = target_dep / torch.maximum(torch.abs(target_dep - teach_dep), torch.tensor(0.001))
+            else:
+                teach_err_weight = torch.ones_like( target_dep / torch.maximum(torch.abs(target_dep - teach_dep), torch.tensor(0.001)), device=weights.device)
             loss = (nn.functional.l1_loss(pred_emb, teach_emb, reduction="none")* teach_weight_weight).sum(dim=-1) * teach_err_weight 
         else:
             loss = torch.zeros(1, requires_grad=True)
