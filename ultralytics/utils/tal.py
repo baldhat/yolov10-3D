@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 from matplotlib import pyplot as plt
 from ultralytics.utils.keypoint_utils import get_3d_keypoints
+from mgiou import MGIoU3D
 
 from .checks import check_version
 from .metrics import bbox_iou, probiou
@@ -381,6 +382,8 @@ class TaskAlignedAssigner3d(nn.Module):
         self.use_3d = use_3d
         self.use_2d = use_2d
         self.kps_dist_metric = kps_dist_metric
+        if self.kps_dist_metric:
+            self.similarity_metric = MGIoU3D(fast_mode=True)
         self.constrain_anchors = constrain_anchors
 
         self.mean_overlap = []
@@ -468,6 +471,9 @@ class TaskAlignedAssigner3d(nn.Module):
         elif self.kps_dist_metric == "l2":
             dist = nn.functional.mse_loss(pd_kps, gt_kps, reduction='none').sum(dim=(-1, -2)) / 24
             return 1 / torch.exp(0.5 * dist)
+        elif self.kps_dist_metric == "mgiou":
+            similarity = self.similarity_metric(gt_kps, pd_kps)
+            return similarity
 
     def get_pos_mask(self, pd_scores, pd_bboxes, pd_keypoints, gt_labels, gt_bboxes, gt_keypoints, anc_points, mask_gt):
         """Get in_gts mask, (b, max_num_obj, h*w)."""

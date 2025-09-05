@@ -25,7 +25,7 @@ exist_ok: False # (bool) whether to overwrite existing experiment
 pretrained: True # (bool | str) whether to use a pretrained model (bool) or a model to load weights from (str)
 optimizer: AdamW # (str) optimizer to use, choices=[SGD, Adam, Adamax, AdamW, NAdam, RAdam, RMSProp, auto]
 verbose: True # (bool) whether to print verbose output
-seed: 1 # (int) random seed for reproducibility
+seed: 2 # (int) random seed for reproducibility
 deterministic: True # (bool) whether to enable deterministic mode
 single_cls: False # (bool) train multi-class data as single-class
 rect: False # (bool) rectangular training if mode='train' or rectangular validation if mode='val'
@@ -118,7 +118,7 @@ tal_beta: 1.0 # 2D assignment score exponent
 tal_gamma: 1.0 # 3D assignment score exponent
 tal_3d: True
 tal_2d: True
-kps_dist_metric: l1
+kps_dist_metric: mgiou
 constrain_anchors: True
 # Training
 htl: False
