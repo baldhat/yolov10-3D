@@ -1280,7 +1280,7 @@ class SupervisionLoss:
             # teach_weight_weight = torch.abs(weights).sum(dim=2) / torch.abs(weights).sum(dim=2).sum(dim=1, keepdim=True)
             
             if self.distillation_relative_error_weighting:
-                teach_err_weight = target_dep / torch.maximum(torch.abs(target_dep - teach_dep), torch.tensor(0.001))
+                teach_err_weight = torch.ones_like(target_dep, device=weights.device) / torch.maximum(torch.abs(target_dep - teach_dep), torch.tensor(0.001))
             else:
                 teach_err_weight = torch.ones_like( target_dep / torch.maximum(torch.abs(target_dep - teach_dep), torch.tensor(0.001)), device=weights.device)
             loss = (nn.functional.l1_loss(pred_emb, teach_emb, reduction="none")* teach_weight_weight).sum(dim=-1) * teach_err_weight 

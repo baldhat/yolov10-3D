@@ -134,7 +134,7 @@ gradient_balancer_strategy: #"depVSrestWdist"
 distillation: True
 distillation_teacher: "yolo"
 distillation_temp: 2
-distillation_weight: 0.1
+distillation_weight: 1
 distillation_loss: "ours"
 distillation_no_mixup: True
 use_pred_center: False
