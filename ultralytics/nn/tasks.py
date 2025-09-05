@@ -112,7 +112,7 @@ class BaseModel(nn.Module):
             return self._predict_augment(x)
         return self._predict_once(x, profile, visualize, embed)
 
-    def _predict_once(self, x, profile=False, visualize=False, embed=None):
+    def _predict_once(self, x, profile=False, visualize=False, embed=None, return_features=[20]):
         """
         Perform a forward pass through the network.
 
@@ -125,7 +125,7 @@ class BaseModel(nn.Module):
         Returns:
             (torch.Tensor): The last output of the model.
         """
-        y, dt, embeddings = [], [], []  # outputs
+        y, dt, embeddings, features = [], [], [], None  # outputs
         for m in self.model:
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
@@ -139,6 +139,11 @@ class BaseModel(nn.Module):
                 embeddings.append(nn.functional.adaptive_avg_pool2d(x, (1, 1)).squeeze(-1).squeeze(-1))  # flatten
                 if m.i == max(embed):
                     return torch.unbind(torch.cat(embeddings, 1), dim=0)
+            if return_features and m.i in return_features:
+                features = x
+        if return_features and not isinstance(x, tuple):
+            x["features"] = features
+                
         return x
 
     def _predict_augment(self, x):

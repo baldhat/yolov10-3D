@@ -912,12 +912,13 @@ class DetectLoss3d:
 
 
     def __call__(self, preds, batch):
+        features = preds["features"]
         one2one, o2o_embs = preds["one2one"], preds["o2o_embs"]
-        loss_one2one = self.one2one(one2one, batch, embeddings=o2o_embs)
+        loss_one2one = self.one2one(one2one, batch, embeddings=features)
 
         if preds.get("one2many", None):
             one2many, o2m_embs = preds["one2many"], preds["o2m_embs"]
-            loss_one2many = self.one2many(one2many, batch, embeddings=o2m_embs)
+            loss_one2many = self.one2many(one2many, batch, embeddings=features)
             if self.model.args.fgdm_loss:
                 gt_depth_maps = batch["depth_map"].to(preds["depth_maps"][0].device)
                 depth_logits = preds["depth_maps"][0]
@@ -1063,13 +1064,10 @@ class DDDetectionLoss:
                                             fg_mask, target_scores_sum, loss_weight)
 
         if self.hyp.distillation and embeddings is not None and embeddings[0] is not None:
-            embeddings = torch.cat([emb.view(emb.shape[0], emb.shape[1], -1) for emb in embeddings], dim=2)
+            #embeddings = torch.cat([emb.view(emb.shape[0], emb.shape[1], -1) for emb in embeddings], dim=2)
             if self.hyp.distillation_teacher in ["yolo", "self"] :
                 forwards = (anchor_points, stride_tensor, self.no, self.nc, calibs, mean_sizes, self.assigner)
-                loss[6] = self.supervisor.distill_from_yolo(batch["non_mix_imgs"].detach(), embeddings,
-                                                            gt_src_img.squeeze(-1).long(), mask_gt,
-                                                            gts, forwards, batch["mixed"].bool(),
-                                                            fg_mask, target_gt_idx)
+                loss[6] = self.supervisor.distill_backbone(batch["img"].detach(), embeddings)
             else:
                 loss[6] = self.supervisor.distill_from_dino(
                     batch["non_mix_imgs"].detach(), gt_center_3d, pred_3d[..., :2], embeddings, fg_mask.bool(),
@@ -1168,8 +1166,24 @@ def compute_heading_loss(input, target_cls, target_reg, loss_weight):
 
     return cls_loss + reg_loss
 
-class SupervisionLoss:
+class TeacherProjector(nn.Module):
+    def __init__(self, c_teacher, c_student, bottleneck=None):
+        super().__init__()
+        layers = []
+        if bottleneck:
+            layers.append(nn.Conv2d(c_teacher, bottleneck, kernel_size=1, bias=False))
+            layers.append(nn.ReLU(inplace=True))
+            layers.append(nn.Conv2d(bottleneck, c_student, kernel_size=1, bias=False))
+        else:
+            layers.append(nn.Conv2d(c_teacher, c_student, kernel_size=1, bias=False))
+        self.proj = nn.Sequential(*layers)
+
+    def forward(self, ft):
+        return self.proj(ft)
+class SupervisionLoss(nn.Module):
+    
     def __init__(self, model, teacher_model):
+        super().__init__()
         self.device = next(model.parameters()).device  # get model device
         self.args = model.args
         self.model = model
@@ -1180,10 +1194,20 @@ class SupervisionLoss:
         self.fgdm_supervision_weight = self.args.fgdm_supervision_weight
         self.criterion = self.args.distillation_loss
         self.no_mixup = self.args.distillation_no_mixup
+        self.projector = None
         if self.criterion == "cos":
             self.loss = nn.CosineEmbeddingLoss()
         elif self.criterion == "mse":
             self.loss = nn.MSELoss()
+            
+    def distill_backbone(self, imgs, pred_embeddings):
+        _, features = self.forward_teacher(imgs)
+        if not self.projector:
+            self.projector = TeacherProjector(features.shape[1], pred_embeddings.shape[1]).to(features.device)
+        bs = features.shape[0]
+        projected_features = self.projector(features.detach())
+        return self.weight * self.loss(pred_embeddings.reshape(bs, -1), projected_features.reshape(bs, -1),
+                                        target=torch.ones(bs, device=projected_features.device))
 
     def distill_from_yolo(self, imgs, pred_embeddings, src_img, mask_gt, gts, forwards, mixed_mask, pred_fg_mask, pred_target_gt_idx):
         with torch.inference_mode():
@@ -1364,7 +1388,7 @@ class SupervisionLoss:
             pred = res_dict["one2one"][1]
             pred_shape = pred[0].shape
             preds = torch.cat([xi.view(pred_shape[0], pred_shape[1], -1) for xi in pred], 2)
-            return preds, torch.cat([x.reshape(x.shape[0], x.shape[1], -1) for x in res_dict["o2o_embs"]], dim=2)
+            return preds, res_dict["features"]
         elif isinstance(self.teacher_model, YOLOv10_3DDetectionModel):
             self.teacher_model.model[-1].dense = True # Set the detection head to dense
             res_dict = self.teacher_model(imgs)
@@ -1374,7 +1398,7 @@ class SupervisionLoss:
                 pred = pred[1]
             pred_shape = pred[0].shape
             preds = torch.cat([xi.view(pred_shape[0], pred_shape[1], -1) for xi in pred], 2)
-            return preds, torch.cat([x.reshape(x.shape[0], x.shape[1], -1) for x in res_dict["o2o_embs"]], dim=2)
+            return preds, res_dict["features"]
         else:
             return self.teacher_model(imgs)
 
