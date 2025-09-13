@@ -132,7 +132,7 @@ gradient_balancer: #"cfa"
 gradient_balancer_strategy: #"depVSrestWdist"
 # Distillation
 distillation: True
-distillation_teacher: "yolo"
+distillation_teacher: "self"
 distillation_temp: 2
 distillation_weight: 100
 distillation_loss: "soft"

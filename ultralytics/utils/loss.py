@@ -7,6 +7,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import transforms
+
+from ultralytics.utils.ema_model import EMA
 from torchvision.transforms.functional import InterpolationMode
 
 from ultralytics.utils.metrics import OKS_SIGMA
@@ -1174,6 +1176,7 @@ class SupervisionLoss:
         self.args = model.args
         self.model = model
 
+        self.ema_model_init = False
         self.teacher_model = teacher_model
         self.T = self.args.distillation_temp
         self.weight = self.args.distillation_weight
@@ -1186,6 +1189,15 @@ class SupervisionLoss:
             self.loss = nn.MSELoss()
 
     def distill_from_yolo(self, imgs, pred_embeddings, src_img, mask_gt, gts, forwards, mixed_mask, pred_fg_mask, pred_target_gt_idx):
+        if self.args.distillation_teacher == "self":
+            if not self.ema_model_init:
+                self.teacher_model = EMA(self.model, 0.999, device=self.device)
+                self.teacher_model.set(self.model)
+                self.teacher_model.ema_model.eval()
+                self.ema_model_init = True
+            else:
+                self.teacher_model.update(self.model)
+        
         with torch.inference_mode():
             teacher_pred0, teacher_embeddings0 = self.forward_teacher(imgs[:, 0])
             teacher_embeddings1 = torch.zeros_like(teacher_embeddings0)
@@ -1365,10 +1377,10 @@ class SupervisionLoss:
             pred_shape = pred[0].shape
             preds = torch.cat([xi.view(pred_shape[0], pred_shape[1], -1) for xi in pred], 2)
             return preds, torch.cat([x.reshape(x.shape[0], x.shape[1], -1) for x in res_dict["o2o_embs"]], dim=2)
-        elif isinstance(self.teacher_model, YOLOv10_3DDetectionModel):
-            self.teacher_model.model[-1].dense = True # Set the detection head to dense
-            res_dict = self.teacher_model(imgs)
-            self.teacher_model.model[-1].dense = False
+        elif isinstance(self.teacher_model, EMA):
+            self.teacher_model.ema_model.model[-1].dense = True # Set the detection head to dense
+            res_dict = self.teacher_model.ema_model(imgs)
+            self.teacher_model.ema_model.model[-1].dense = False
             pred = res_dict["one2one"]
             if isinstance(pred, tuple):
                 pred = pred[1]
