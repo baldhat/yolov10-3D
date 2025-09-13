@@ -1179,7 +1179,7 @@ class TeacherProjector(nn.Module):
         self.proj = nn.Sequential(*layers)
 
     def forward(self, ft):
-        return self.proj(ft)
+        return self.proj(ft.clone())
 class SupervisionLoss(nn.Module):
     
     def __init__(self, model, teacher_model):
@@ -1201,9 +1201,10 @@ class SupervisionLoss(nn.Module):
             self.loss = nn.MSELoss()
             
     def distill_backbone(self, imgs, pred_embeddings):
-        _, features = self.forward_teacher(imgs)
-        if not self.projector:
-            self.projector = TeacherProjector(features.shape[1], pred_embeddings.shape[1]).to(features.device)
+        with torch.inference_mode():
+            _, features = self.forward_teacher(imgs)
+            if not self.projector:
+                self.projector = TeacherProjector(features.shape[1], pred_embeddings.shape[1]).to(features.device)
         bs = features.shape[0]
         projected_features = self.projector(features.detach())
         return self.weight * self.loss(pred_embeddings.reshape(bs, -1), projected_features.reshape(bs, -1),
