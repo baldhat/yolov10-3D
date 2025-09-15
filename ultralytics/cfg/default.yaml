@@ -131,7 +131,7 @@ overfit: False
 gradient_balancer: #"cfa"
 gradient_balancer_strategy: #"depVSrestWdist"
 # Distillation
-distillation: True
+distillation: False
 distillation_teacher: "yolo"
 distillation_temp: 2
 distillation_weight: 100
