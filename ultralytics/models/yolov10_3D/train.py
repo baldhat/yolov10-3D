@@ -53,12 +53,12 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
         model = YOLOv10_3DDetectionModel(cfg)
         if weights:
             model.load(weights)
-        else:
-            backbone = YOLOv10.from_pretrained("jameslahm/" + self.model.split("_")[0])
-            model_seq = deepcopy(model.model)
-            for i, module in enumerate(model_seq):
-                if not isinstance(module, v10Detect3d):
-                    model.model[i] = deepcopy(backbone.model.model[i])
+        # else:
+        #     backbone = YOLOv10.from_pretrained("jameslahm/" + self.model.split("_")[0])
+        #     model_seq = deepcopy(model.model)
+        #     for i, module in enumerate(model_seq):
+        #         if not isinstance(module, v10Detect3d):
+        #             model.model[i] = deepcopy(backbone.model.model[i])
         return model
 
     def preprocess_batch(self, batch):
