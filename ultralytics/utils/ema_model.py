@@ -39,6 +39,7 @@ class EMA:
         for ema_param, student_param in zip(self.ema_model.parameters(),
                                             student_model.parameters()):
             ema_param.copy_(student_param)
+        self.ema_model.eval()
             
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)

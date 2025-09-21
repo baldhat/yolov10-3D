@@ -1191,7 +1191,7 @@ class SupervisionLoss:
     def distill_from_yolo(self, imgs, pred_embeddings, src_img, mask_gt, gts, forwards, mixed_mask, pred_fg_mask, pred_target_gt_idx):
         if self.args.distillation_teacher == "self":
             if not self.ema_model_init:
-                self.teacher_model = EMA(self.model, 0.999, device=self.device)
+                self.teacher_model = EMA(self.model, 0.9, device=self.device)
                 self.teacher_model.set(self.model)
                 self.teacher_model.ema_model.eval()
                 self.ema_model_init = True
@@ -1378,9 +1378,9 @@ class SupervisionLoss:
             preds = torch.cat([xi.view(pred_shape[0], pred_shape[1], -1) for xi in pred], 2)
             return preds, torch.cat([x.reshape(x.shape[0], x.shape[1], -1) for x in res_dict["o2o_embs"]], dim=2)
         elif isinstance(self.teacher_model, EMA):
-            self.teacher_model.ema_model.model[-1].dense = True # Set the detection head to dense
-            res_dict = self.teacher_model.ema_model(imgs)
-            self.teacher_model.ema_model.model[-1].dense = False
+            self.model.model[-1].dense = True # Set the detection head to dense
+            res_dict = self.model(imgs)
+            self.model.model[-1].dense = False
             pred = res_dict["one2one"]
             if isinstance(pred, tuple):
                 pred = pred[1]
