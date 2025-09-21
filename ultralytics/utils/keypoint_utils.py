@@ -25,6 +25,18 @@ def get_box_corners(size3d):
     box_corners = torch.cat((corners_x.unsqueeze(-1), corners_y.unsqueeze(-1), corners_z.unsqueeze(-1)), dim=-1)
     return box_corners
 
+def get_mgiou_order(x):
+    # needed:
+    # x: -, +, +, -, -, +, +, -
+    # y: -, -, +, +, -, -, +, +
+    # z: -, -, -, -, +, +, +, +
+    
+    # is:
+    # x: +, +, -, -, +, +, -, -
+    # y: +, -, +, -, +, -, +, -
+    # z: -, -, -, -, +, +, +, +
+    return x[:, [3, 1, 0, 2, 7, 5, 4, 6], :]
+    #return x[:, [4, 6, 7, 5, 0, 2, 3, 1], :]
 
 def get_roty(center_3d, heading_bin, heading_res, calibs):
     if heading_bin.shape[-1] > 1:

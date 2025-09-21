@@ -3,7 +3,7 @@
 import torch
 import torch.nn as nn
 from matplotlib import pyplot as plt
-from ultralytics.utils.keypoint_utils import get_3d_keypoints
+from ultralytics.utils.keypoint_utils import get_3d_keypoints, get_mgiou_order
 from mgiou import MGIoU3D
 
 from .checks import check_version
@@ -472,7 +472,7 @@ class TaskAlignedAssigner3d(nn.Module):
             dist = nn.functional.mse_loss(pd_kps, gt_kps, reduction='none').sum(dim=(-1, -2)) / 24
             return 1 / torch.exp(0.5 * dist)
         elif self.kps_dist_metric == "mgiou":
-            similarity = self.similarity_metric(gt_kps, pd_kps)
+            similarity = self.similarity_metric(get_mgiou_order(gt_kps), get_mgiou_order(pd_kps))
             return similarity
 
     def get_pos_mask(self, pd_scores, pd_bboxes, pd_keypoints, gt_labels, gt_bboxes, gt_keypoints, anc_points, mask_gt):

@@ -2,6 +2,7 @@
 import math
 import warnings
 from typing import Optional
+from mgiou import MGIoU3D
 
 import torch
 import torch.nn as nn
@@ -16,6 +17,8 @@ from ultralytics.utils.tal import (RotatedTaskAlignedAssigner, TaskAlignedAssign
 
 from .metrics import bbox_iou, probiou
 from .tal import bbox2dist
+
+from ultralytics.utils.keypoint_utils import get_mgiou_order
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -948,6 +951,7 @@ class DDDetectionLoss:
         self.no = m.no
         self.device = device
 
+        self.loss_func_3d =  MGIoU3D(fast_mode=True)
         self.assigner = TaskAlignedAssigner3d(topk=tal_topk, num_classes=self.nc,
                                               alpha=model.args.tal_alpha, beta=model.args.tal_beta,
                                               gamma=model.args.tal_gamma, use_2d=model.args.tal_2d,
@@ -1027,7 +1031,7 @@ class DDDetectionLoss:
         targets, fg_mask, target_gt_idx, pred_kps, gt_kps = self.assigner(
             pred_scores.detach().sigmoid(),
             pred_bboxes.detach().type(gt_bboxes.dtype),
-            pred_3d.detach(),
+            pred_3d,
             anchor_points * stride_tensor,
             (gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin, gt_heading_res),
             mask_gt,
@@ -1059,8 +1063,7 @@ class DDDetectionLoss:
                    * self.hyp.loss2d)
         loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum * self.hyp.cls
 
-        loss[2:6] = self.compute_box3d_loss(targets_3d, pred_3d, anchor_points, stride_tensor,
-                                            fg_mask, target_scores_sum, loss_weight)
+        loss[2:6] = self.compute_box3d_loss(pred_kps, gt_kps, fg_mask, mask_gt, target_gt_idx, target_scores_sum)
 
         if self.hyp.distillation and embeddings is not None and embeddings[0] is not None:
             embeddings = torch.cat([emb.view(emb.shape[0], emb.shape[1], -1) for emb in embeddings], dim=2)
@@ -1105,41 +1108,20 @@ class DDDetectionLoss:
 
         return (size2d_loss + offset2d_loss) / num_targets
 
-    def compute_box3d_loss(self, targets_3d, pred_3d, anchor_points, stride_tensor, fg_mask, num_targets, loss_weight):
-        pred_depth = pred_3d[fg_mask][..., -2]
-        pred_depth_un = pred_3d[fg_mask][..., -1]
-        target_depth = targets_3d[-3][fg_mask].squeeze()
-        depth_loss = ((laplacian_aleatoric_uncertainty_loss_new(pred_depth, target_depth, pred_depth_un)*loss_weight).sum()
-                      / num_targets * self.hyp.depth)
+    def compute_box3d_loss(self, pred_kps, gt_kps, fg_mask, mask_gt, target_gt_idx, num_targets):
+        
+        loss_3d = torch.tensor(0.0, device=pred_kps.device)
+        for i in range(pred_kps.shape[0]):
+            if pred_kps[i][fg_mask[i]].size()[0] > 0:
+                # 0 is perfect overlap:
+                loss_3d += self.loss_func_3d(get_mgiou_order(pred_kps[i][fg_mask[i]]), get_mgiou_order(gt_kps[i][target_gt_idx[i][fg_mask[i]]]))
 
-        anchor_points = anchor_points * stride_tensor
-        pred_offset = (pred_3d[..., :2] * stride_tensor)[fg_mask]
-        target_center_3d = targets_3d[0]
-        target_offset = (target_center_3d - anchor_points)[fg_mask]
-        offset3d_loss = ((F.l1_loss(pred_offset, target_offset, reduction="none") * loss_weight.unsqueeze(-1).repeat(1, 2)).sum()
-                         / num_targets * self.hyp.offset3d)
+        if loss_3d != loss_3d:
+            print('badNAN----------------depth_loss', loss_3d)
 
-        pred_size = pred_3d[fg_mask][..., 2:5]
-        target_size = targets_3d[1][fg_mask]
-        size3d_loss = ((F.l1_loss(pred_size, target_size, reduction="none")*loss_weight.unsqueeze(-1).repeat(1, 3)).sum()
-                       / num_targets * self.hyp.size3d)
-
-        pred_heading = pred_3d[fg_mask][..., 5:29]
-        target_bin = targets_3d[-2][fg_mask]
-        target_res = targets_3d[-1][fg_mask]
-        heading_loss = (compute_heading_loss(pred_heading, target_bin, target_res, loss_weight)
-                        / num_targets * self.hyp.heading)
-
-        if depth_loss != depth_loss:
-            print('badNAN----------------depth_loss', depth_loss)
-        if offset3d_loss != offset3d_loss:
-            print('badNAN----------------offset3d_loss', offset3d_loss)
-        if size3d_loss != size3d_loss:
-            print('badNAN----------------size3d_loss', size3d_loss)
-        if heading_loss != heading_loss:
-            print('badNAN----------------heading_loss', heading_loss)
-
-        return torch.stack((depth_loss, offset3d_loss, size3d_loss, heading_loss))
+        loss_3d = loss_3d.sum() / num_targets * self.hyp.depth
+        zerro = torch.zeros_like(loss_3d, device=loss_3d.device)
+        return torch.stack((loss_3d, zerro, zerro, zerro))
 
 
 def laplacian_aleatoric_uncertainty_loss_new(input, target, log_variance):
@@ -1444,7 +1426,7 @@ class SupervisionLoss:
         targets, fg_mask, target_gt_idx, pred_kps, gt_kps = assigner(
             pred_scores.detach().sigmoid(),
             pred_bboxes.detach().type(gt_bboxes.dtype),
-            pred_3d.detach(),
+            pred_3d,
             anchor_points * stride_tensor,
             (gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin,
              gt_heading_res),

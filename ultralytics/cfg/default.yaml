@@ -107,7 +107,7 @@ box: 5 # (float) 2dbox loss gain
 # Losses
 cls: 1 # (float) cls loss gain (scale with pixels)
 loss2d: 0.02 # (float) box loss gain
-depth: 1 # (float) depth loss gain
+depth: 200 # (float) depth loss gain
 offset3d: 0.1 # (float) 3d pixel offset loss gain
 size3d: 1 # (float) 3d size loss gain
 heading: 1 # (float) 3d heading loss gain
