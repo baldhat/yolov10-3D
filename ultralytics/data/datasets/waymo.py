@@ -20,6 +20,36 @@ from ultralytics.data.datasets.kitti_utils import get_objects_from_dict, Calibra
 from ultralytics.utils.ops import xyxy2xywh, xywh2xyxy
 
 
+import cv2
+import numpy as np
+from uuid import uuid4
+
+import cv2
+import numpy as np
+from uuid import uuid4
+
+def keep_box(img: np.ndarray,_box: np.ndarray) -> str:
+    if not isinstance(_box, np.ndarray):
+        _box = np.array(_box, dtype=float)
+    _box = _box.astype(float).reshape(4)
+
+    H, W = img.shape[:2]
+
+    x_c, y_c, w, h = _box.tolist()
+
+    x1 = int(round(x_c - w / 2.0))
+    y1 = int(round(y_c - h / 2.0))
+    x2 = int(round(x_c + w / 2.0))
+    y2 = int(round(y_c + h / 2.0))
+
+    x1 = max(0, min(W - 1, x1))
+    y1 = max(0, min(H - 1, y1))
+    x2 = max(0, min(W - 1, x2))
+    y2 = max(0, min(H - 1, y2))
+
+    return int(x2-x1) > 30 or ((x2-x1)/w) > 0.15
+
+
 class WaymoDataset(data.Dataset):
     def __init__(self, filepath, mode, args):
         self.args = args
@@ -231,7 +261,7 @@ class WaymoDataset(data.Dataset):
 
             for i in range(object_num):
                 valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res \
-                    = self.load_object(objects[i], scale, trans, calib)
+                    = self.load_object(objects[i], scale, trans, calib, img=img if img is not None else img0)
                 if valid:
                     gt_boxes_2d.append(_box)
                     gt_cls.append(_cls)
@@ -260,7 +290,7 @@ class WaymoDataset(data.Dataset):
                         self.max_objs - object_num)
                 for i in range(object_num_temp):
                     valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res = (
-                        self.load_object(objects[i], scale, trans, calib))
+                        self.load_object(objects[i], scale, trans, calib, img=img1))
                     if valid:
                         gt_boxes_2d.append(_box)
                         gt_cls.append(_cls)
@@ -313,7 +343,7 @@ class WaymoDataset(data.Dataset):
         }
         return data
 
-    def load_object(self, object_, scale, trans, calib):
+    def load_object(self, object_, scale, trans, calib, img=None):
         valid = False
         _box = 0
         _cls = 0
@@ -327,8 +357,9 @@ class WaymoDataset(data.Dataset):
 
         if ((object_.cls_type not in self.writelist)
             or (object_.level_str == 'UnKnown' or (object_.pos[-1] * scale < self.min_depth_thres))
-            or (object_.cls_type == "Car" and object_.num_lidar <= 100)
-            or (object_.cls_type != 'Car' and object_.num_lidar <= 50)):
+            # or (object_.cls_type == "Car" and object_.num_lidar <= 100)
+            # or (object_.cls_type != 'Car' and object_.num_lidar <= 50)
+            ):
             return valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res
 
         # process 3d bbox & get 3d center
@@ -353,9 +384,11 @@ class WaymoDataset(data.Dataset):
 
         # generate the center of gaussian heatmap [optional: 3d center or 2d center]
         center_heatmap = center_3d.astype(np.int32)
-        if (center_heatmap[0] < 0 or center_heatmap[0] >= self.resolution[0]
-                or center_heatmap[1] < 0 or center_heatmap[1] >= self.resolution[1]):
+        if not keep_box(img, _box):
             return valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res
+        # if (center_heatmap[0] < 0 or center_heatmap[0] >= self.resolution[0]
+        #         or center_heatmap[1] < 0 or center_heatmap[1] >= self.resolution[1]):
+        #     return valid, _box, _cls, _center2d, _center3d, _size2d, _size3d, _depth, _head_bin, _head_res
 
         # encoding depth
         depth = object_.pos[-1]
@@ -443,6 +476,9 @@ class WaymoDataset(data.Dataset):
         python = os.path.join(Path.home(), "anaconda3/envs/py36_waymo_tf/bin/python")
         if not os.path.exists(python):
             python = os.path.join(Path.home(), "miniconda3/envs/py36_waymo_tf/bin/python")
+        command = f"{python} -u ultralytics/data/datasets/waymo_eval.py --iou 0.5 --pred {file_path}"
+        lines = subprocess.check_output(command, shell= True, text= True, env={})
+        print(lines)
         command = f"{python} -u ultralytics/data/datasets/waymo_eval.py --iou 0.7 --pred {file_path}"
         lines = subprocess.check_output(command, shell= True, text= True, env={})
 

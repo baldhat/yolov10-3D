@@ -22,6 +22,15 @@ import matplotlib.pyplot as plt
 import cv2
 
 
+def limit_losses(loss_tensor, max_loss_value):
+    new_loss_tensor = loss_tensor.clone()
+    new_loss_tensor[torch.isnan(new_loss_tensor)] = 0
+    new_loss_tensor[torch.isinf(new_loss_tensor)] = 0
+    new_loss_tensor[new_loss_tensor >
+                    max_loss_value] *= max_loss_value / new_loss_tensor[new_loss_tensor > max_loss_value].detach()
+    return new_loss_tensor
+
+
 class VarifocalLoss(nn.Module):
     """
     Varifocal loss by Zhang et al.
@@ -1121,7 +1130,7 @@ class DDDetectionLoss:
 
         pred_size = pred_3d[fg_mask][..., 2:5]
         target_size = targets_3d[1][fg_mask]
-        size3d_loss = ((F.l1_loss(pred_size, target_size, reduction="none")*loss_weight.unsqueeze(-1).repeat(1, 3)).sum()
+        size3d_loss = ((limit_losses(F.l1_loss(pred_size, target_size, reduction="none"), 40)*loss_weight.unsqueeze(-1).repeat(1, 3)).sum()
                        / num_targets * self.hyp.size3d)
 
         pred_heading = pred_3d[fg_mask][..., 5:29]
