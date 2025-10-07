@@ -355,6 +355,7 @@ class BaseTrainer:
             loss_weightor = htl.Hierarchical_Task_Learning()
 
         Run.get_flops_(self.model)
+        self.save_model()
 
         while True:
             self.epoch = epoch
