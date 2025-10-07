@@ -8,7 +8,7 @@ use_predecessors: False
 detach_predecessors: False
 deform: False
 common_head: False
-num_scales: 3
+num_scales: 2
 half_channels: False
 fgdm_predictor: False
 kernel_size_1: 3
