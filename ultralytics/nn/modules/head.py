@@ -744,30 +744,29 @@ class v10Detect3d(nn.Module):
             topk_indices[b, :, 0], topk_indices[b, :, 1] = self.unravel_index(topk_ind, cls_scores_max[b].shape)
         return topk_indices
     
-    def inference_forward_feat(self, x, heads):
-        y = []
-        dep_features = [None, None]
-        batch_sz = x[0].shape[0]
-        if not hasattr(self, "is_padded") or self.is_padded:
-            heads[1][0][0].conv.padding = (0,)
-            heads[1][1][0].conv.padding = (0,)
-            self.is_padded = False
+    # def inference_forward_feat(self, x, heads):
+    #     y = []
+    #     dep_features = [None, None]
+    #     batch_sz = x[0].shape[0]
+    #     if not hasattr(self, "is_padded") or self.is_padded:
+    #         heads[1][0][0].conv.padding = (0,)
+    #         heads[1][1][0].conv.padding = (0,)
+    #         self.is_padded = False
         
-        for i in range(self.nl):
-            out = heads[0][i](x[i])
+    #     for i in range(self.nl):
+    #         out = heads[0][i](x[i])
             
-            candidate_indices = self.select_candidates(out, batch_sz)
-            inputs = self.extract_patches(x[i], candidate_indices)
-            head_out, _ = self.single_head_forward(heads[1][i], inputs.repeat(1, 7, 1, 1))
+    #         candidate_indices = self.select_candidates(out, batch_sz)
+    #         inputs = self.extract_patches(x[i], candidate_indices)
+    #         head_out, _ = self.single_head_forward(heads[1][i], inputs.repeat(1, 7, 1, 1))
             
-            head_output = torch.zeros((x[i].shape[0], self.no-self.nc, x[i].shape[2], x[i].shape[3]), device=x[i].device)
-            head_out = head_out[:, self.bh_indices, 0, 0].view(x[i].shape[0], self.max_det, self.no-self.nc).transpose(1, 2)
-            for b in range(x[i].shape[0]):
-                head_output[b, :, candidate_indices[b, :, 0], candidate_indices[b, :, 1]] = head_out[b].float()
-            y.append(torch.cat([out, head_output], dim=1))
+    #         head_output = torch.zeros((x[i].shape[0], self.no-self.nc, x[i].shape[2], x[i].shape[3]), device=x[i].device)
+    #         head_out = head_out[:, self.bh_indices, 0, 0].view(x[i].shape[0], self.max_det, self.no-self.nc).transpose(1, 2)
+    #         for b in range(x[i].shape[0]):
+    #             head_output[b, :, candidate_indices[b, :, 0], candidate_indices[b, :, 1]] = head_out[b].float()
+    #         y.append(torch.cat([out, head_output], dim=1))
         
-        return y, dep_features
-    '''
+    #     return y, dep_features
     
     
     def inference_forward_feat(self, x, heads):
@@ -775,6 +774,13 @@ class v10Detect3d(nn.Module):
         head_features = []
         batch_sz = x[0].shape[0]
         head_names = list(self.output_channels.keys())
+        
+        if not hasattr(self, "is_padded") or self.is_padded:
+            heads[1][0][0].conv.padding = (0,)
+            heads[1][1][0].conv.padding = (0,)
+            heads[1][2][0].conv.padding = (0,)
+            self.is_padded = False
+        
         for i in range(self.nl):
             outputs = {}
             head_feats = {}
@@ -784,10 +790,6 @@ class v10Detect3d(nn.Module):
 
             inputs = self.extract_patches(x[i], candidate_indices)
             for j, module in enumerate(heads[1:]):
-                if not hasattr(self, "is_padded") or self.is_padded:
-                    for layer in module[i]:
-                        if isinstance(layer, Conv):
-                            layer.conv.padding = (0,)
                 out_, feats = self.single_head_forward(module[i], inputs)
 
                 output_shape = (x[i].shape[0], out_.shape[1], x[i].shape[2], x[i].shape[3])
@@ -799,13 +801,18 @@ class v10Detect3d(nn.Module):
             y.append(torch.cat(list(outputs.values()), dim=1))
         self.is_padded = False
         return y, head_features
-        '''
 
     def forward_feat(self, x, heads):
         y = []
         embs = [None] * self.nl
         head_names = list(self.output_channels.keys())
         for i in range(self.nl):
+            if not hasattr(self, "is_padded") or not self.is_padded:
+                heads[1][0][0].conv.padding = (1,)
+                heads[1][1][0].conv.padding = (1,)
+                heads[1][2][0].conv.padding = (1,)
+                self.is_padded = True
+            
             outputs = {}
             if self.common_head:
                 x[i] = self.common[i](x[i])
@@ -830,9 +837,9 @@ class v10Detect3d(nn.Module):
     
     def forward(self, x):
         if not self.training and not self.dense:
-            # one2one, o2o_embs = self.inference_forward_feat([xi.detach() for xi in x], self.o2o_heads)
+            one2one, o2o_embs = self.inference_forward_feat([xi.detach() for xi in x], self.o2o_heads)
             # self.get_head_ranks()
-            one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
+            # one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
         else:
             one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
 
