@@ -355,6 +355,7 @@ class BaseTrainer:
             loss_weightor = htl.Hierarchical_Task_Learning()
 
         Run.get_flops_(self.model)
+        self.save_model()
 
         while True:
             self.epoch = epoch
@@ -529,13 +530,13 @@ class BaseTrainer:
         import pandas as pd  # scope for faster startup
 
         metrics = {**self.metrics, **{"fitness": self.fitness}}
-        results = {k.strip(): v for k, v in pd.read_csv(self.csv).to_dict(orient="list").items()}
+        results = {k.strip(): v for k, v in pd.read_csv(self.csv).to_dict(orient="list").items()} if os.path.exists(self.csv) else None
         ckpt = {
-            "epoch": self.epoch,
-            "best_fitness": self.best_fitness,
+            "epoch": self.epoch if hasattr(self, "epoch") else None,
+            "best_fitness": self.best_fitness if hasattr(self, "best_fitness") else None,
             "model": deepcopy(de_parallel(self.model)),
             "ema": deepcopy(self.ema.ema).half(),
-            "updates": self.ema.updates,
+            "updates": self.ema.updates if hasattr(self.ema, "updates") else None,
             "optimizer": self.optimizer.state_dict(),
             "train_args": vars(self.args),  # save as dict
             "train_metrics": metrics,
