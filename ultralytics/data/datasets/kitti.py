@@ -5,7 +5,9 @@ import cv2
 import torch
 import pathlib
 from ultralytics.data.datasets.decode_helper import  *
-from ultralytics.data.datasets.kitti_eval import eval_from_scrach
+# from ultralytics.data.datasets.kitti_eval import eval_from_scrach
+import subprocess
+from pathlib import Path
 
 import torch.utils.data as data
 from PIL import Image
@@ -470,11 +472,22 @@ class KITTIDataset(data.Dataset):
 
     def get_stats(self, results, save_dir):
         self.save_results(results, output_dir=save_dir)
-        result = eval_from_scrach(
-            self.label_dir,
-            os.path.join(save_dir, 'preds'),
-            ap_mode=40)
-        return result["3d@0.70"][1]
+        # python = os.path.join(Path.home(), "anaconda3/envs/kitti_eval/bin/python")
+        # if not os.path.exists(python):
+        #     python = os.path.join(Path.home(), "miniconda3/envs/kitti_eval/bin/python")
+        command = f"ultralytics/data/datasets/evaluate_object_3d_offline_ap40 {self.label_dir} {os.path.join(save_dir, 'preds')}"
+        print("Running command: " + command)
+        lines = subprocess.check_output(command, shell= True, text= True, env={})
+        print("Result: " + lines)
+        result = 0
+        for line in lines.split("\n"):
+            if line.startswith("car_detection_3d"):
+                result = float(line.split(" ")[3])
+        # result = eval_from_scrach(
+        #     self.label_dir,
+        #     os.path.join(save_dir, 'preds'),
+        #     ap_mode=40)
+        return result # result["3d@0.70"][1]
 
     def save_results(self, results, output_dir='./outputs'):
         output_dir = os.path.join(output_dir, 'preds')
