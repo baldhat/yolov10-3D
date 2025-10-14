@@ -54,7 +54,8 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
         if weights:
             model.load(weights)
         else:
-            backbone = YOLOv10.from_pretrained("jameslahm/" + self.model.split("_")[0])
+            import pathlib
+            backbone = YOLOv10(model="/storage/group/deepscenario/for_jonathan/yolov10x_oid_weights.pt")
             model_seq = deepcopy(model.model)
             for i, module in enumerate(model_seq):
                 if not isinstance(module, v10Detect3d):
