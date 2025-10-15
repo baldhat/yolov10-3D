@@ -10,8 +10,8 @@ data: # (str, optional) path to data file, i.e. coco128.yaml
 epochs: 400 # (int) number of epochs to train for
 time: # (float, optional) number of hours to train for, overrides epochs if supplied
 patience: 150 # (int) epochs to wait for no observable improvement for early stopping of training
-batch: 32 # (int) number of images per batch (-1 for AutoBatch)
-imgsz: [960, 640] # (int | list) input images size as int for train and val modes, or list[w,h] for predict and export modes
+batch: 8 # (int) number of images per batch (-1 for AutoBatch)
+imgsz: [960,640] # (int | list) input images size as int for train and val modes, or list[w,h] for predict and export modes
 save: True # (bool) save train checkpoints and predict results
 save_period: -1 # (int) Save checkpoint every x epochs (disabled if < 1)
 val_period: 1 # (int) Validation every x epochs
@@ -70,7 +70,7 @@ embed: # (list[int], optional) return feature vectors/embeddings from given laye
 use_o2m_depth: False
 use_dino_depth: False
 dino_path: /home/stud/mijo/experiments/results/dino_base_64_lr3e-6_noMix/dino/best.pt
-distillation_path: /home/stud/mijo/experiments/results/yolov10-3Db_cfa_dep_4/weights/best.pt
+distillation_path: /usr/wiss/mejo/storage-deepscenario/for_jonathan/yolov10-3D_waymo_ours_x_lr.0025_dalw2-0.35/weights/best.pt
 
 # Visualize settings ---------------------------------------------------------------------------------------------------
 show: False # (bool) show predicted images and videos if environment allows
@@ -95,7 +95,7 @@ workspace: 4 # (int) TensorRT: workspace size (GB)
 nms: False # (bool) CoreML: add NMS
 
 # Hyperparameters ------------------------------------------------------------------------------------------------------
-lr0: 0.001 # (float) initial learning rate (i.e. SGD=1E-2, Adam=1E-3)
+lr0: 0.0025 # (float) initial learning rate (i.e. SGD=1E-2, Adam=1E-3)
 lrf: 0.01 # (float) final learning rate (lr0 * lrf)
 momentum: 0.937 # (float) SGD momentum/Adam beta1
 weight_decay: 0.0005 # (float) optimizer weight decay 5e-4
@@ -131,7 +131,7 @@ overfit: False
 gradient_balancer: #"cfa"
 gradient_balancer_strategy: #"depVSrestWdist"
 # Distillation
-distillation: False
+distillation: False #True
 distillation_teacher: "yolo"
 distillation_temp: 2
 distillation_weight: 100
@@ -141,8 +141,8 @@ use_pred_center: False
 
 loss_scale_max_depth: 65
 loss_scale_min_depth: 10
-loss_scale_max_weight: 0.5
-loss_scale_min_weight: 1.5
+loss_scale_max_weight: 2.0
+loss_scale_min_weight: 0.375
 
 load_depth_maps: False
 

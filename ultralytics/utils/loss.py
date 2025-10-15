@@ -864,7 +864,7 @@ def debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor):
 
         ax[i].imshow(space)
         ax[i].axis("off")
-    plt.savefig("/home/stud/mijo/bev.png")
+    # plt.savefig("/home/stud/mijo/bev.png")
     print()
 
 def project_to_image(kps, calib):
@@ -1082,7 +1082,8 @@ class DDDetectionLoss:
     def plot_assignments(self, batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt):
         #debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor)
         #debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt)
-        debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor)
+        # debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor)
+        pass
 
     def compute_loss_weights(self, current_loss):
         weights = torch.ones(6, device=self.device)
