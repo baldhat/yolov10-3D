@@ -498,6 +498,7 @@ class KITTIDataset(data.Dataset):
 
     def save_results(self, results, output_dir='./outputs'):
         output_dir = os.path.join(output_dir, 'preds')
+
         os.makedirs(output_dir, exist_ok=True)
         for img_file in results.keys():
             out_path = os.path.join(output_dir, img_file)
