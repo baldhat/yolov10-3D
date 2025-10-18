@@ -30,6 +30,9 @@ class KITTIDataset(data.Dataset):
         self.load_depth_maps = args.load_depth_maps
         self.use_camera_dis = args.cam_dis
         self.writelist = ['Car' ,'Pedestrian' ,'Cyclist']
+        
+        self.save_counter = 0
+        self.last_result = 0
 
         '''    
         ['Car': np.array([3.88311640418,1.62856739989,1.52563191462]),
@@ -472,25 +475,34 @@ class KITTIDataset(data.Dataset):
 
     def get_stats(self, results, save_dir):
         self.save_results(results, output_dir=save_dir)
+        self.save_counter += 1
+        self.save_results(results, output_dir=str(save_dir), epoch=self.save_counter)
         # python = os.path.join(Path.home(), "anaconda3/envs/kitti_eval/bin/python")
         # if not os.path.exists(python):
         #     python = os.path.join(Path.home(), "miniconda3/envs/kitti_eval/bin/python")
-        command = f"ultralytics/data/datasets/evaluate_object_3d_offline_ap40 {self.label_dir} {os.path.join(save_dir, 'preds')}"
-        print("Running command: " + command)
-        lines = subprocess.check_output(command, shell= True, text= True, env={})
-        print("Result: " + lines)
-        result = 0
-        for line in lines.split("\n"):
-            if line.startswith("car_detection_3d"):
-                result = float(line.split(" ")[3])
-        # result = eval_from_scrach(
-        #     self.label_dir,
-        #     os.path.join(save_dir, 'preds'),
-        #     ap_mode=40)
-        return result # result["3d@0.70"][1]
+        if self.save_counter % 20 == 0:
+            command = f"ultralytics/data/datasets/evaluate_object_3d_offline_ap40 {self.label_dir} {os.path.join(save_dir, 'preds')}"
+            print("Running command: " + command)
+            lines = subprocess.check_output(command, shell= True, text= True, env={})
+            print("Result: " + lines)
+            result = 0
+            for line in lines.split("\n"):
+                if line.startswith("car_detection_3d"):
+                    result = float(line.split(" ")[3])
+            self.last_result = result
+            # result = eval_from_scrach(
+            #     self.label_dir,
+            #     os.path.join(save_dir, 'preds'),
+            #     ap_mode=40)
+            return result # result["3d@0.70"][1]
+        else:
+            return self.last_result
 
-    def save_results(self, results, output_dir='./outputs'):
-        output_dir = os.path.join(output_dir, 'preds')
+    def save_results(self, results, output_dir='./outputs', epoch=None):
+        output_dir = str(os.path.join(output_dir, 'preds'))
+        if epoch is not None:
+            output_dir += str(epoch) 
+        
         os.makedirs(output_dir, exist_ok=True)
         for img_file in results.keys():
             out_path = os.path.join(output_dir, img_file)

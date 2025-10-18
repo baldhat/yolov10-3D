@@ -1334,3 +1334,10 @@ def eval_from_scrach(gt_dir, det_dir, eval_cls_list=None, ap_mode=40):
     print('\n')
     return Car_res
 
+
+if __name__=='__main__':
+    gt_dir ='/storage/group/deepscenario/KITTI/training/label_2'
+    pred_paths = [path for path in os.listdir(sys.argv[1]) if path.startswith("pred")]
+    for pred_path in pred_paths:
+        print("preds:", pred_path)
+        eval_from_scrach(gt_dir, os.path.join(sys.argv[1], pred_path))
