@@ -5,7 +5,7 @@ import cv2
 import torch
 import pathlib
 from ultralytics.data.datasets.decode_helper import  *
-from ultralytics.data.datasets.kitti_eval import eval_from_scrach
+# from ultralytics.data.datasets.kitti_eval import eval_from_scrach
 
 import torch.utils.data as data
 from PIL import Image
