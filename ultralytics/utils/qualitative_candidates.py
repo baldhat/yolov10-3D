@@ -131,8 +131,9 @@ def plot_bev(gts, base_dets, our_dets, filename, fov=60):
     fig, ax = plt.subplots(1, 1,
                         figsize=(24, 12), gridspec_kw={'wspace': 0, 'hspace': 0}, constrained_layout=True)
 
-    R = 60
-    border = 6
+    num_lines = 11
+    R = 50
+    border = 3
     ax.set_xlim(-R - border, R + border)
     ax.set_ylim(-border, R + border)
     ax.set_aspect(1.0)
@@ -145,10 +146,11 @@ def plot_bev(gts, base_dets, our_dets, filename, fov=60):
     #     xs, ys = [R * np.cos(theta), 0], [R * np.sin(theta), 0]
     #     ax.plot(xs, ys, linewidth=2, color=(1, 1, 1), zorder=1)
 
-    for radius, c_color in zip(np.linspace(R, 0, 7), np.linspace(0.8, 0.35, 7)):
+    for radius, c_color in zip(np.linspace(R, 0, num_lines), np.linspace(0.8, 0.35, num_lines)):
         x = np.sin(np.deg2rad(fov / 2)) * (radius - 1.5)
         y = np.cos(np.deg2rad(fov / 2)) * (radius - 1.5)
-        ax.text(x + 1.3, y - 1.2, str(int(radius)) + "m", rotation=-(5 + fov/2), fontsize=20, color=(0.15, 0.15, 1))
+        if radius % 10 == 0:
+            ax.text(x + 1.3, y - 1.2, str(int(radius)) + "m", rotation=-(5 + fov/2), fontsize=25, color=(0.15, 0.15, 1))
         if radius == 0:
             continue
         circle = Circle((0, 0), radius, color=(c_color, c_color, c_color), linewidth=2, fill=True, zorder=1)
@@ -189,10 +191,10 @@ def plot_bev(gts, base_dets, our_dets, filename, fov=60):
         art = ax.add_artist(Polygon(corners, closed=True, fill=False, edgecolor=our_color, facecolor=our_color, zorder=3, linewidth=5))
         if j == 0:
             art.set_label("Ours")
-    
-    ax.legend()
 
     plt.savefig(filename, bbox_inches="tight", format="svg")
+    fig.clear()
+    plt.close()
     print(filename)
 
 def plot_all(img, gts, our_dets, base_dets, calib, out_path):
