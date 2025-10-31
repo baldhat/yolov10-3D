@@ -1,0 +1,58 @@
+# Parameters
+nc: 3 # number of classes
+scales: # model compound scaling constants, i.e. 'model=yolov8n.yaml' will call yolov8.yaml with scale 'n'
+  # [depth, width, max_channels]
+  x: [1.00, 1.25, 512]
+dsconv: False
+use_predecessors: False
+detach_predecessors: False
+deform: False
+common_head: False
+num_scales: 2
+half_channels: False
+fgdm_predictor: False
+kernel_size_1: 3
+kernel_size_2: 1
+channels:
+  cls_c: 128
+  o2d_c: 64
+  s2d_c: 64
+  o3d_c: 64
+  s3d_c: 64
+  hd_c: 64
+  dep_c: 64
+  dep_un_c: 64
+# YOLOv8.0n backbone
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, Conv, [64, 3, 2]] # 0-conv1
+  - [-1, 1, Conv, [128, 3, 2]] # 1-bn1
+  - [-1, 1, Conv, [128, 3, 2]] # 2-relu
+  - [-1, 1, Conv, [128, 3, 2]] # 3-maxpool
+  - [-1, 1, Conv, [128, 3, 2]] # 4-layer1/4
+  - [-1, 1, Conv, [128, 3, 2]] # 5-layer2/8
+  - [-1, 1, Conv, [128, 3, 2]] # 6-layer3/16
+  - [-1, 1, Conv, [128, 3, 2]] # 7-layer4/32
+  - [5, 1, Conv, [128, 3, 2]] # 8/8
+  - [6, 1, Conv, [128, 3, 2]] # 9/16
+  - [7, 1, Conv, [128, 3, 2]] # 10/32
+
+# YOLOv8.0n head
+head:
+  - [10, 1, nn.Upsample, [None, 2, "nearest"]]
+  - [[-1, 9], 1, Concat, [1]] # cat backbone P4
+  - [-1, 3, C2fCIB, [512, True]] # 13
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
+  - [[-1, 8], 1, Concat, [1]] # cat backbone P3
+  - [-1, 3, C2f, [256]] # 16 (P3/8-small)
+
+  - [-1, 1, Conv, [256, 3, 2]]
+  - [[-1, 13], 1, Concat, [1]] # cat head P4
+  - [-1, 3, C2fCIB, [512, True]] # 19 (P4/16-medium)
+
+  - [-1, 1, SCDown, [512, 3, 2]]
+  - [[-1, 10], 1, Concat, [1]] # cat head P5
+  - [-1, 3, C2fCIB, [1024, True]] # 22 (P5/32-large)
+
+  - [[16, 19, 22], 1, v10Detect3d, [nc]] # Detect(P3, P4, P5)

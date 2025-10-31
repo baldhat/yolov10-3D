@@ -7,8 +7,11 @@ from copy import copy
 from ultralytics.data.datasets.kitti import KITTIDataset
 from ultralytics.data.datasets.waymo import WaymoDataset
 from ultralytics.utils.plotting import plot_labels_3D, KITTIVisualizer, plot_images, plot_training_depth_dist
+from torchvision.models import resnet50, ResNet50_Weights
 
 from ...data.datasets.omni3d import Omni3Dataset
+
+import torch
 
 
 class YOLOv10_3DDetectionTrainer(DetectionTrainer):
@@ -55,10 +58,40 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
             model.load(weights)
         else:
             backbone = YOLOv10.from_pretrained("jameslahm/" + self.model.split("_")[0])
-            model_seq = deepcopy(model.model)
-            for i, module in enumerate(model_seq):
-                if not isinstance(module, v10Detect3d):
-                    model.model[i] = deepcopy(backbone.model.model[i])
+            backbone.model.model[12].f = [-1, 9]
+            backbone.model.model[15].f = [-1, 8]
+            b = resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
+
+            t1 = torch.nn.Sequential(
+                torch.nn.Conv2d(512, 320, 1), 
+                torch.nn.BatchNorm2d(320),
+                torch.nn.ReLU()
+            )
+            t2 = torch.nn.Sequential(
+                torch.nn.Conv2d(1024, 640, 1), 
+                torch.nn.BatchNorm2d(640),
+                torch.nn.ReLU()
+            )
+            t3 = torch.nn.Sequential(
+                torch.nn.Conv2d(2048, 640, 1), 
+                torch.nn.BatchNorm2d(640),
+                torch.nn.ReLU()
+            )
+
+            for i, module in enumerate([b.conv1, b.bn1, b.relu, b.maxpool, b.layer1, b.layer2, b.layer3,b.layer4, t1, t2, t3]):
+                module.i = i
+                module.f = -1
+            t1.f = 5
+            t2.f = 6
+            t3.f = 7
+            model.model = torch.nn.Sequential(b.conv1, b.bn1, b.relu, b.maxpool, b.layer1, b.layer2, b.layer3,b.layer4, t1, t2, t3, *backbone.model.model[11:-1], model.model[-1])
+            model.model[-1].stride = model.model[-1].stride[:2]
+            return model 
+
+            # model_seq = deepcopy(model.model)
+            # for i, module in enumerate(model_seq):
+            #     if not isinstance(module, v10Detect3d):
+            #         model.model[i] = deepcopy(backbone.model.model[i])
         return model
 
     def preprocess_batch(self, batch):
