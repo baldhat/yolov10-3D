@@ -339,7 +339,7 @@ for frame_id in range(np.max(np.array(frame_id_gts))):
             # print("We detected more objects")
             improvement_counter += 1
                 
-    if improvement_counter > 1:
+    if improvement_counter > 0:
         img_name = f"{frame_id:06d}.png"
         img = np.array(load_image(frame_id)).astype(np.float32)[:,:,::-1] / 255.0
         out_path = output_path / img_name

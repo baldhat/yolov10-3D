@@ -17,10 +17,15 @@ from scipy.optimize import linear_sum_assignment
 
 plotter = KITTIVisualizer()
 
-map = plt.colormaps.get_cmap("Set1")
-gt_color = map(2)
-our_color = map(1)
-base_color = map(0)
+def to_color(a):
+    return np.array([int(a[i:i+2], 16) for i in range(0, len(a), 2)]) / 255
+
+
+gt_color = to_color("52B69A") # Green
+our_color = to_color("FFCA3A") # Yellow
+base_color = to_color("FF595E") # Red
+fov_color = to_color("805D9340") # Purple
+text_color = to_color("000000")
 
 class Detection3d:
     def __init__(self, line):
@@ -228,10 +233,11 @@ if __name__=='__main__':
         ours_name = str(ours_path).split("/")[-1]
         ours_name = str(base_path).split("/")[-1]
     else:
-        base_name = "yolov10-3D_rope3d_baselineNoMixup_60_n_17"
-        ours_name = "yolov10-3D_rope3d_ours_n_60_2"
+        #base_name = "yolov10-3D_kitti_baseline_x_117"
+        base_name = "MonoLSS_predictions_600_epochs_kitti_val"
+        ours_name = "val"
         base_path = Path("/storage/group/deepscenario/for_jonathan/" + base_name)
-        ours_path = Path("/storage/group/deepscenario/for_jonathan/" + ours_name)
+        ours_path = Path("/home/stud/mijo/dev/yolov10-3D/runs/detect/" + ours_name)
 
     output_path = Path("/storage/group/deepscenario/jonathan_for_johannes/") / ours_name
     if not os.path.exists(output_path):
@@ -249,7 +255,10 @@ if __name__=='__main__':
         filename = fn.strip() + ".txt"
         plot = False
         # load dets and gts
-        base_dets = load_dets(base_path / "preds" / filename)
+        if os.path.exists(base_path / filename):
+            base_dets = load_dets(base_path / filename)
+        else:
+            base_dets = load_dets(base_path / "preds" / filename)
         our_dets = load_dets(ours_path / "preds" / filename)
         gts = load_labels(gt_path / filename)
         
@@ -267,8 +276,11 @@ if __name__=='__main__':
         # check missing detections
         if len(base_false_positives) > len(our_false_positives):
             pass
-            #print("False positive")
+            #print(len(base_false_positives), len(our_false_positives))
             #improvement_counter += (len(base_false_positives) - len(our_false_positives))
+
+        if len(base_dets) > len(our_dets):
+            continue
         
         # calculate position and rotation errors
         base_pos_errors, base_rot_errors = calculate_errors(base_gts, base_dets)
@@ -282,9 +294,9 @@ if __name__=='__main__':
                 if not equals(base_gt, our_gt):
                     continue
                 
-                diff = abs(base_pos_errors[i] - our_pos_errors[j])
-                if diff > 1.5 and diff < 15:
-                    print(f"Better Location! Base: {base_dets[i].location}, Ours: {our_dets[j].location}")
+                diff = base_pos_errors[i] - our_pos_errors[j]
+                if diff > 2.0 and diff < 15:
+                    #print(f"Better Location! Base: {base_dets[i].location}, Ours: {our_dets[j].location}")
                     improvement_counter += 1 #math.ceil(base_pos_errors[i] - our_pos_errors[j] - 5)
                     
                 if np.abs(base_rot_errors[i] - our_rot_errors[j]) > 1:
@@ -294,15 +306,16 @@ if __name__=='__main__':
             if not found:
                 pass
                 #print("We detected more objects")
-                #improvement_counter += 1
+                improvement_counter += 1
                     
-        if improvement_counter > 3 or test_plot:
+        if improvement_counter > 1 or test_plot:
             print(filename)
             img_name = filename.replace("txt", "png")
             img = load_image(gt_path / ".." / "image_2" / img_name).astype(np.float32) / 255.0
             calib = load_calib(gt_path / ".." / "calib" / filename)
             out_path = output_path / img_name
             plot_all(img, gts, our_dets, base_dets, calib, str(out_path))
+            print()
             counter += 1
             scores[filename] = improvement_counter
             
