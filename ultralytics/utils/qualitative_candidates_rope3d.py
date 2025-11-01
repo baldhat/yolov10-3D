@@ -7,7 +7,7 @@ import math
 import operator
 
 import matplotlib.pyplot as plt
-from matplotlib.patches import Circle, Polygon
+from matplotlib.patches import Circle, Polygon, Wedge
 
 from ultralytics.data.datasets.kitti_utils import Object3d, Calibration
 from ultralytics.utils.metrics import box_iou
@@ -18,6 +18,16 @@ from scipy.optimize import linear_sum_assignment
 
 plotter = KITTIVisualizer()
 classes = ["car", "big_vehicle", "van", "truck", "bus"]
+
+def to_color(a):
+    return np.array([int(a[i:i+2], 16) for i in range(0, len(a), 2)]) / 255
+
+
+gt_color = to_color("52B69A") # Green
+our_color = to_color("FFCA3A") # Yellow
+base_color = to_color("FF595E") # Red
+fov_color = to_color("805D9340") # Purple
+text_color = to_color("000000")
 
 class Detection3d:
     def __init__(self, line):
@@ -99,7 +109,7 @@ def plot_dets(img, dets, calib, c2g, color):
                                         dimensions, bbox2d, cls),
                             calib.P2, bbox2d=False, gt=True)
 
-def plot_bev(gts, base_dets, filename):
+def plot_bev(gts, base_dets, our_dets, filename, fov=60):
     plt.clf()
 
     def get_rotated_rectangle_points(center, size, angle_degrees):
@@ -128,41 +138,59 @@ def plot_bev(gts, base_dets, filename):
     fig, ax = plt.subplots(1, 1,
                         figsize=(24, 12), gridspec_kw={'wspace': 0, 'hspace': 0}, constrained_layout=True)
 
-    R = 120
-    ax.set_xlim(-R, R)
-    ax.set_ylim(0, R)
+    num_lines = 11
+    R = 100
+    border = 3
+    ax.set_xlim(-R - border, R + border)
+    ax.set_ylim(-border, R + border)
     ax.set_aspect(1.0)
     ax.set_xticks([])
     ax.set_yticks([])
-    ax.set_facecolor('black')
+    ax.set_facecolor((0.9, 0.9, 0.9))
 
-    for theta in np.linspace(0, np.pi, 7):
-        xs, ys = [R * np.cos(theta), 0], [R * np.sin(theta), 0]
-        ax.plot(xs, ys, linewidth=2, color=(1, 1, 1), zorder=1)
-
-    for radius in np.linspace(0, R, 5):
+    for radius, c_color in zip(np.linspace(R, 0, num_lines), np.linspace(0.8, 0.35, num_lines)):
+        x = np.sin(np.deg2rad(fov / 2)) * (radius - 1.5)
+        y = np.cos(np.deg2rad(fov / 2)) * (radius - 1.5)
+        if radius % 10 == 0:
+            ax.text(x + 1.3, y - 1.2, str(int(radius)) + "m", rotation=-(5 + fov/2), fontsize=25, color=text_color)
         if radius == 0:
             continue
-        circle = Circle((0, 0), radius, edgecolor=(1, 1, 1), linewidth=2, fill=False, zorder=1)
+        circle = Circle((0, 0), radius, color=(c_color, c_color, c_color), linewidth=2, fill=True, zorder=1)
         ax.add_artist(circle)
+        
+        
+    wedge = Wedge((0, 0), R, -fov/2 + 90, fov/2 + 90, color=fov_color)
+    ax.add_artist(wedge)
 
-    for object in gts:
+    for j, object in enumerate(gts):            
         dimensions = np.array([object.l, object.w])
         translation = object.pos[[0, 2]]
         ry = -object.ry
 
         corners = get_rotated_rectangle_points(translation, dimensions, ry * 180 / np.pi)
-        ax.add_artist(Polygon(corners, closed=True, fill=True, edgecolor='g', facecolor="g", zorder=3))
+        ax.add_artist(Polygon(corners, closed=True, fill=False, edgecolor=gt_color, facecolor=gt_color, zorder=3, linewidth=5))
         
-    for object in base_dets:
+        
+    for j, object in enumerate(base_dets):
         dimensions = object.dimensions[::-1][:2]
         translation = object.location[[0, 2]]
         ry = -object.ry
 
         corners = get_rotated_rectangle_points(translation, dimensions, ry * 180 / np.pi)
-        ax.add_artist(Polygon(corners, closed=True, fill=True, edgecolor='r', facecolor="r", zorder=3))
+        ax.add_artist(Polygon(corners, closed=True, fill=False, edgecolor=base_color, facecolor=base_color, zorder=3, linewidth=5))
+
+        
+    for j, object in enumerate(our_dets):
+        dimensions = object.dimensions[::-1][:2]
+        translation = object.location[[0, 2]]
+        ry = -object.ry
+
+        corners = get_rotated_rectangle_points(translation, dimensions, ry * 180 / np.pi)
+        ax.add_artist(Polygon(corners, closed=True, fill=False, edgecolor=our_color, facecolor=our_color, zorder=3, linewidth=5))
 
     plt.savefig(filename, bbox_inches="tight", format="svg")
+    fig.clear()
+    plt.close()
     print(filename)
 
 def plot_all(img, gts, our_dets, base_dets, calib, c2g, out_path):
@@ -182,8 +210,7 @@ def plot_all(img, gts, our_dets, base_dets, calib, c2g, out_path):
     cv.imwrite(base_name, (base_img*255.0).astype(np.uint8))
     print(base_name)
     
-    plot_bev(gts, base_dets, out_path.replace(".jpg", "_base_bev.svg"))
-    plot_bev(gts, our_dets, out_path.replace(".jpg", "_ours_bev.svg"))
+    plot_bev(gts, base_dets, our_dets, out_path.replace(".jpg", "_bev.svg"), np.rad2deg(2*np.arctan2(base_img.shape[1], 2*calib.fu)))
     
     
 class Args:
@@ -215,8 +242,8 @@ if len(sys.argv) >= 2:
     ours_name = str(ours_path).split("/")[-1]
     ours_name = str(base_path).split("/")[-1]
 else:
-    base_name = "yolov10-3D_rope3d_baselineNoMixup_60_n_17"
-    ours_name = "yolov10-3D_rope3d_ours_n_60_2"
+    base_name = "yolov10-3D_rope3d_baselineNoMixup_60_x_4"
+    ours_name = "yolov10-3D_rope3d_ours_x_60_1"
     base_path = Path("/storage/group/deepscenario/for_jonathan/" + base_name)
     ours_path = Path("/storage/group/deepscenario/for_jonathan/" + ours_name)
 
@@ -249,6 +276,10 @@ for fn in open(val_files, "r").readlines():
     # associate dets to gts
     base_gts, base_dets, base_false_positives = associate(gts, base_dets_)
     our_gts, our_dets, our_false_positives = associate(gts, our_dets_)
+
+
+    if len(base_dets) > len(our_dets):
+        continue
     
     improvement_counter = 0
     # check missing detections
@@ -269,7 +300,9 @@ for fn in open(val_files, "r").readlines():
             if not equals(base_gt, our_gt):
                 continue
             
-            if base_pos_errors[i] - our_pos_errors[j] > 2 and base_pos_errors[i] - our_pos_errors[j] < 12:
+
+            diff = base_pos_errors[i] - our_pos_errors[j]
+            if diff > 1 and diff < 15:
                 #print(f"Better Location! Base: {base_dets[i].location}, Ours: {our_dets[j].location}")
                 improvement_counter += 1
                 
@@ -278,7 +311,7 @@ for fn in open(val_files, "r").readlines():
                 #plot = True
                 pass
         if not found:
-            print("We detected more objects")
+            #print("We detected more objects")
             improvement_counter += 1
                 
     if improvement_counter > 3:
@@ -290,6 +323,7 @@ for fn in open(val_files, "r").readlines():
         c2g = dataset.get_c2g(id)
         out_path = output_path / img_name
         plot_all(img, gts, our_dets, base_dets, calib, c2g, str(out_path))
+        print()
         counter += 1
         scores[filename] = improvement_counter
         
