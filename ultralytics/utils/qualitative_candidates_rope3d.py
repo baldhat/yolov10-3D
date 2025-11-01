@@ -200,13 +200,13 @@ def plot_all(img, gts, our_dets, base_dets, calib, c2g, out_path):
         
     plot_labels(our_img, gts, calib, c2g, color="g")
     plot_dets(our_img, our_dets, calib, c2g, color="r")
-    our_name = out_path.replace(".jpg", "_ours.jpg")
+    our_name = out_path.replace(".jpg", "_ours.png")
     cv.imwrite(our_name, (our_img*255.0).astype(np.uint8))
     print(our_name)
     
     plot_labels(base_img, gts, calib, c2g, color="g")
     plot_dets(base_img, base_dets, calib, c2g, color="r")
-    base_name = out_path.replace(".jpg", "_base.jpg")
+    base_name = out_path.replace(".jpg", "_base.png")
     cv.imwrite(base_name, (base_img*255.0).astype(np.uint8))
     print(base_name)
     
