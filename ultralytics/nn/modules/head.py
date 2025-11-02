@@ -778,8 +778,8 @@ class v10Detect3d(nn.Module):
             with record_function("select_candidates"):
                 candidate_indices = self.select_candidates(out, batch_sz)
             with record_function("extract_patches"):
-                inputs = self.extract_patches(x[i], candidate_indices)
-            with record_function("single_head_forward"):
+                inputs = self.extract_patches(x[i], candidate_i
+            with record_function("single_head_forward"):ndices)
                 head_out, _ = self.single_head_forward(heads[1][i], inputs.repeat(1, 7, 1, 1))
             
             with record_function("distribute_output"):
@@ -816,7 +816,7 @@ class v10Detect3d(nn.Module):
                 # one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
             else:
                 one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
-
+        with record_function("result_decoding"):
             if not self.training:
                 one2one = self.inference(one2one)
                 if not self.export:
