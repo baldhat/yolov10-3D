@@ -772,22 +772,24 @@ class v10Detect3d(nn.Module):
             self.is_padded = False
         
         for i in range(self.nl):
-            out = heads[0][i](x[i])
-            
-
+            with record_function("single_head_forward"):
+                out = heads[0][i](x[i])
             with record_function("select_candidates"):
                 candidate_indices = self.select_candidates(out, batch_sz)
             with record_function("extract_patches"):
-                inputs = self.extract_patches(x[i], candidate_i
-            with record_function("single_head_forward"):ndices)
+                inputs = self.extract_patches(x[i], candidate_indices)
+            with record_function("single_head_forward"):
                 head_out, _ = self.single_head_forward(heads[1][i], inputs.repeat(1, 7, 1, 1))
             
             with record_function("distribute_output"):
-                head_output = torch.zeros((x[i].shape[0], self.no-self.nc, x[i].shape[2], x[i].shape[3]), device=x[i].device)
-                head_out = head_out[:, self.bh_indices, 0, 0].view(x[i].shape[0], self.max_det, self.no-self.nc).transpose(1, 2)
-                for b in range(x[i].shape[0]):
-                    head_output[b, :, candidate_indices[b, :, 0], candidate_indices[b, :, 1]] = head_out[b].float()
-            y.append(torch.cat([out, head_output], dim=1))
+                with record_function("output_allocation"):
+                    head_output = torch.zeros((x[i].shape[0], self.no-self.nc, x[i].shape[2], x[i].shape[3]), device=x[i].device)
+                with record_function("output_dist"):
+                    head_out = head_out[:, self.bh_indices, 0, 0].view(x[i].shape[0], self.max_det, self.no-self.nc).transpose(1, 2)
+                    for b in range(x[i].shape[0]):
+                        head_output[b, :, candidate_indices[b, :, 0], candidate_indices[b, :, 1]] = head_out[b].float()
+                    res = torch.cat([out, head_output], dim=1)
+            y.append(res)
         
         return y, dep_features
 
