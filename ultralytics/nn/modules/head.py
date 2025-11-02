@@ -9,6 +9,8 @@ from torch.nn.init import constant_, xavier_uniform_
 
 import torchvision
 
+from torch.profiler import record_function
+
 from ultralytics.utils.tal import TORCH_1_10, dist2bbox, dist2rbox, make_anchors
 from .block import DFL, Proto, ContrastiveHead, BNContrastiveHead
 from .conv import Conv
@@ -772,50 +774,22 @@ class v10Detect3d(nn.Module):
         for i in range(self.nl):
             out = heads[0][i](x[i])
             
-            candidate_indices = self.select_candidates(out, batch_sz)
-            inputs = self.extract_patches(x[i], candidate_indices)
-            head_out, _ = self.single_head_forward(heads[1][i], inputs.repeat(1, 7, 1, 1))
+
+            with record_function("select_candidates"):
+                candidate_indices = self.select_candidates(out, batch_sz)
+            with record_function("extract_patches"):
+                inputs = self.extract_patches(x[i], candidate_indices)
+            with record_function("single_head_forward"):
+                head_out, _ = self.single_head_forward(heads[1][i], inputs.repeat(1, 7, 1, 1))
             
-            head_output = torch.zeros((x[i].shape[0], self.no-self.nc, x[i].shape[2], x[i].shape[3]), device=x[i].device)
-            head_out = head_out[:, self.bh_indices, 0, 0].view(x[i].shape[0], self.max_det, self.no-self.nc).transpose(1, 2)
-            for b in range(x[i].shape[0]):
-                head_output[b, :, candidate_indices[b, :, 0], candidate_indices[b, :, 1]] = head_out[b].float()
+            with record_function("distribute_output"):
+                head_output = torch.zeros((x[i].shape[0], self.no-self.nc, x[i].shape[2], x[i].shape[3]), device=x[i].device)
+                head_out = head_out[:, self.bh_indices, 0, 0].view(x[i].shape[0], self.max_det, self.no-self.nc).transpose(1, 2)
+                for b in range(x[i].shape[0]):
+                    head_output[b, :, candidate_indices[b, :, 0], candidate_indices[b, :, 1]] = head_out[b].float()
             y.append(torch.cat([out, head_output], dim=1))
         
         return y, dep_features
-    '''
-    
-    
-    def inference_forward_feat(self, x, heads):
-        y = []
-        head_features = []
-        batch_sz = x[0].shape[0]
-        head_names = list(self.output_channels.keys())
-        for i in range(self.nl):
-            outputs = {}
-            head_feats = {}
-            outputs[head_names[0]], head_feats[head_names[0]] = self.single_head_forward(heads[0][i], x[i])
-
-            candidate_indices = self.select_candidates(outputs[head_names[0]], batch_sz)
-
-            inputs = self.extract_patches(x[i], candidate_indices)
-            for j, module in enumerate(heads[1:]):
-                if not hasattr(self, "is_padded") or self.is_padded:
-                    for layer in module[i]:
-                        if isinstance(layer, Conv):
-                            layer.conv.padding = (0,)
-                out_, feats = self.single_head_forward(module[i], inputs)
-
-                output_shape = (x[i].shape[0], out_.shape[1], x[i].shape[2], x[i].shape[3])
-                head_output = torch.zeros(output_shape, device=x[i].device)
-                out = out_[:, :, 0, 0].view(output_shape[0], self.max_det, output_shape[1]).transpose(1, 2)
-                head_output[:, :, candidate_indices[:, :, 0], candidate_indices[:, :, 1]] = out.unsqueeze(-2).float()
-                outputs[head_names[j+1]] = head_output
-                
-            y.append(torch.cat(list(outputs.values()), dim=1))
-        self.is_padded = False
-        return y, head_features
-        '''
 
     def forward_feat(self, x, heads):
         y = []
@@ -835,26 +809,27 @@ class v10Detect3d(nn.Module):
         return y, embs
     
     def forward(self, x):
-        if not self.training and not self.dense:
-            one2one, o2o_embs = self.inference_forward_feat([xi.detach() for xi in x], self.o2o_heads)
-            # self.get_head_ranks()
-            # one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
-        else:
-            one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
-
-        if not self.training:
-            one2one = self.inference(one2one)
-            if not self.export:
-                return {"one2one": one2one, "o2o_embs": o2o_embs}
+        with record_function("head_forward"):
+            if not self.training and not self.dense:
+                one2one, o2o_embs = self.inference_forward_feat([xi.detach() for xi in x], self.o2o_heads)
+                # self.get_head_ranks()
+                # one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
             else:
-                # assert(self.max_det != -1)
-                # predsO = one2one.transpose(-1, -2)
-                # regO, scoresO, labelsO = ops.v10_3Dpostprocess(predsO, self.max_det, self.nc)
-                # return torch.cat((regO, scoresO.unsqueeze(-1), labelsO.unsqueeze(-1)), dim=-1)
-                return one2one
-        else:
-            one2many, o2m_embs, depth_maps = self._forward(x)
-            return {"one2many": one2many, "one2one": one2one, "o2m_embs": o2m_embs, "o2o_embs": o2o_embs, "depth_maps": depth_maps}
+                one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
+
+            if not self.training:
+                one2one = self.inference(one2one)
+                if not self.export:
+                    return {"one2one": one2one, "o2o_embs": o2o_embs}
+                else:
+                    # assert(self.max_det != -1)
+                    # predsO = one2one.transpose(-1, -2)
+                    # regO, scoresO, labelsO = ops.v10_3Dpostprocess(predsO, self.max_det, self.nc)
+                    # return torch.cat((regO, scoresO.unsqueeze(-1), labelsO.unsqueeze(-1)), dim=-1)
+                    return one2one
+            else:
+                one2many, o2m_embs, depth_maps = self._forward(x)
+                return {"one2many": one2many, "one2one": one2one, "o2m_embs": o2m_embs, "o2o_embs": o2o_embs, "depth_maps": depth_maps}
 
     def single_head_forward(self, head, features):
         assert len(head) == 3

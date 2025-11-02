@@ -5,7 +5,7 @@ import cv2
 import torch
 import pathlib
 from ultralytics.data.datasets.decode_helper import  *
-# from ultralytics.data.datasets.kitti_eval import eval_from_scrach
+from ultralytics.data.datasets.kitti_eval import eval_from_scrach
 import subprocess
 from pathlib import Path
 
@@ -487,23 +487,23 @@ class KITTIDataset(data.Dataset):
         # python = os.path.join(Path.home(), "anaconda3/envs/kitti_eval/bin/python")
         # if not os.path.exists(python):
         #     python = os.path.join(Path.home(), "miniconda3/envs/kitti_eval/bin/python")
-        if self.save_counter % 20 == 0:
-            command = f"ultralytics/data/datasets/evaluate_object_3d_offline_ap40 {self.label_dir} {os.path.join(save_dir, 'preds')}"
-            print("Running command: " + command)
-            lines = subprocess.check_output(command, shell= True, text= True, env={})
-            print("Result: " + lines)
-            result = 0
-            for line in lines.split("\n"):
-                if line.startswith("car_detection_3d"):
-                    result = float(line.split(" ")[3])
-            self.last_result = result
-            # result = eval_from_scrach(
-            #     self.label_dir,
-            #     os.path.join(save_dir, 'preds'),
-            #     ap_mode=40)
-            return result # result["3d@0.70"][1]
-        else:
-            return self.last_result
+        # if self.save_counter % 20 == 0:
+        #     command = f"ultralytics/data/datasets/evaluate_object_3d_offline_ap40 {self.label_dir} {os.path.join(save_dir, 'preds')}"
+        #     print("Running command: " + command)
+        #     lines = subprocess.check_output(command, shell= True, text= True, env={})
+        #     print("Result: " + lines)
+        #     result = 0
+        #     for line in lines.split("\n"):
+        #         if line.startswith("car_detection_3d"):
+        #             result = float(line.split(" ")[3])
+        #     self.last_result = result
+        result = eval_from_scrach(
+            self.label_dir,
+            os.path.join(save_dir, 'preds'),
+            ap_mode=40)
+        return result # result["3d@0.70"][1]
+        # else:
+        #     return self.last_result
 
     def save_results(self, results, output_dir='./outputs', epoch=None):
         output_dir = str(os.path.join(output_dir, 'preds'))
