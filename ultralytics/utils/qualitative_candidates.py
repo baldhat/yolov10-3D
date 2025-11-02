@@ -239,7 +239,7 @@ if __name__=='__main__':
         base_path = Path("/storage/group/deepscenario/for_jonathan/" + base_name)
         ours_path = Path("/home/stud/mijo/dev/yolov10-3D/runs/detect/" + ours_name)
 
-    output_path = Path("/storage/group/deepscenario/jonathan_for_johannes/") / ours_name
+    output_path = Path("/storage/group/deepscenario/jonathan_for_johannes/") / str(ours_name + "_" + base_name)
     if not os.path.exists(output_path):
         os.mkdir(output_path)
 
@@ -289,13 +289,20 @@ if __name__=='__main__':
         # print where the base errors are significantly larger than our errors
         for j, our_gt in enumerate(our_gts):
             found = False
+            doPlot = False
             for i, base_gt in enumerate(base_gts):
                 found = True
                 if not equals(base_gt, our_gt):
                     continue
                 
+
                 diff = base_pos_errors[i] - our_pos_errors[j]
-                if diff > 2.0 and diff < 15:
+
+                if our_gt.cls_type == "Cyclist":
+                    if diff < -1.0:
+                        improvement_counter += 1
+                        doPlot = True
+                elif diff > 2.0 and diff < 15:
                     #print(f"Better Location! Base: {base_dets[i].location}, Ours: {our_dets[j].location}")
                     improvement_counter += 1 #math.ceil(base_pos_errors[i] - our_pos_errors[j] - 5)
                     
@@ -308,7 +315,7 @@ if __name__=='__main__':
                 #print("We detected more objects")
                 improvement_counter += 1
                     
-        if improvement_counter > 1 or test_plot:
+        if (improvement_counter > 0 or test_plot) and doPlot:
             print(filename)
             img_name = filename.replace("txt", "png")
             img = load_image(gt_path / ".." / "image_2" / img_name).astype(np.float32) / 255.0

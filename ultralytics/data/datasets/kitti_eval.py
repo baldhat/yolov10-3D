@@ -1275,7 +1275,10 @@ def eval_from_scrach(gt_dir, det_dir, eval_cls_list=None, ap_mode=40):
     all_gt, all_det = [], []
     all_f = sorted(os.listdir(det_dir))
     for i, f in enumerate(tqdm(all_f)):
-        gt_f = np.loadtxt(os.path.join(gt_dir, f), dtype=str).reshape(-1, 15)
+        gt_path = os.path.join(gt_dir, f)
+        if not os.path.exists(gt_path):
+            continue
+        gt_f = np.loadtxt(gt_path, dtype=str).reshape(-1, 15)
         det_f = np.loadtxt(os.path.join(det_dir, f), dtype=str).reshape(-1, 16)
 
         gt = {}
@@ -1338,6 +1341,11 @@ def eval_from_scrach(gt_dir, det_dir, eval_cls_list=None, ap_mode=40):
 if __name__=='__main__':
     gt_dir ='/storage/group/deepscenario/KITTI/training/label_2'
     pred_paths = [path for path in os.listdir(sys.argv[1]) if path.startswith("pred")]
-    for pred_path in pred_paths:
+    results = {}
+    for pred_path in sorted(pred_paths):
         print("preds:", pred_path)
-        eval_from_scrach(gt_dir, os.path.join(sys.argv[1], pred_path))
+        result = eval_from_scrach(gt_dir, os.path.join(sys.argv[1], pred_path))
+        results[pred_path] = result["3d@0.70"][1]
+        print(result["3d@0.70"][1])
+    for k, v in results.items():
+        print(k, ":", v)

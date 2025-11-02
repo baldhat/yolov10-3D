@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import transforms
 from torchvision.transforms.functional import InterpolationMode
+from matplotlib.patches import Circle, Polygon, Wedge
 
 from ultralytics.utils.metrics import OKS_SIGMA
 from ultralytics.utils.ops import crop_mask, xywh2xyxy, xyxy2xywh
@@ -784,6 +785,8 @@ def debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps, gt_kps, 
     color_gt_none_bot, color_gt_bot = ((0, 255, 0), (0, 0, 255))
     fig, axes = plt.subplots(2, 2, figsize=(18, 12), gridspec_kw={'wspace': 0, 'hspace': 0},
                              constrained_layout=True)
+    
+    #with 3, np.ravel(axes)[3] as i, ax:
     for i, ax in enumerate(np.ravel(axes)):
         img = batch["img"][i].detach().cpu().numpy().transpose(1, 2, 0).copy()
         img = np.clip((img) * 255, 0, 255).astype(np.uint8)
@@ -809,6 +812,123 @@ def debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps, gt_kps, 
     plt.savefig("/home/stud/mijo/tmp/assignedTargets3d.png")
     print()
 
+
+def assigned_targets2d_comparison(batch, targets_2d, fg_mask, fg_mask2D, pred_bboxes, stride_tensor):
+    target_center_2d, target_size_2d = targets_2d
+    target_bboxes = torch.cat(
+        (target_center_2d - target_size_2d / 2, target_center_2d + target_size_2d / 2), dim=-1)
+
+    def to_color(a):
+        return np.array([int(a[i:i+2], 16) for i in range(0, len(a), 2)]) / 1
+
+    our_color = to_color("FFCA3A") # Yellow
+    base_color = to_color("FF595E") # Red
+
+    mean = 0
+    std = 1
+   
+    for i in range(16):
+        plt.clf()
+        fig, axes = plt.subplots(1, 1, figsize=(36/2, 12/2), gridspec_kw={'wspace': 0, 'hspace': 0},
+                             constrained_layout=True)
+        ax = axes
+        img = batch["img"][i].detach().cpu().numpy().transpose(1, 2, 0).copy()
+        img = np.clip((img * std + mean) * 255, 0, 255).astype(np.uint8)
+
+        pred_boxes = pred_bboxes[i][fg_mask[i]].cpu()
+        for j, box in enumerate(pred_boxes):
+            c = our_color
+            p1, p2 = box.split((2, 2), dim=0)
+            cv2.rectangle(img, p1.int().numpy(), p2.int().numpy(), c)  # gt
+            #cv2.circle(img, (p1 + (p2 - p1) / 2).int().numpy(), 4, (0, 255, 255), -1)
+
+        pred_boxes = pred_bboxes[i][fg_mask2D[i]].cpu()
+        for j, box in enumerate(pred_boxes):
+            c = base_color
+            p1, p2 = box.split((2, 2), dim=0)
+            cv2.rectangle(img, p1.int().numpy(), p2.int().numpy(), c)  # gt
+            #cv2.circle(img, (p1 + (p2 - p1) / 2).int().numpy(), 4, (0, 255, 255), -1)
+
+        ax.imshow(img)
+        ax.axis("off")
+        plt.savefig(f"/home/stud/mijo/tmp/target_comparison_2D_{i:02d}.png")
+        plt.close()
+    print()
+
+
+def assigned_bev_comparison(pred_kps, gt_kps, fg_mask, fg_mask2D, mask_gt, stride_tensor, fovs):
+    max_imgs = 16
+    
+    def to_color(a):
+        return np.array([int(a[i:i+2], 16) for i in range(0, len(a), 2)]) / 255
+
+    gt_color = to_color("52B69A") # Green
+    our_color = to_color("FFCA3A") # Yellow
+    base_color = to_color("FF595E") # Red
+    fov_color = to_color("805D9340") # Purple
+    text_color = to_color("000000")
+
+
+    for i, anchors in enumerate(pred_kps):
+        if i >= max_imgs:
+            break
+        plt.clf()
+        fig, ax = plt.subplots(1, 1, figsize=(36/2, 18/2), gridspec_kw={'wspace': 0, 'hspace': 0}, constrained_layout=True)
+        
+        num_lines = 11
+        R = 50
+        border = 3
+        ax.set_xlim(-R - border, R + border)
+        ax.set_ylim(-border, R + border)
+        ax.set_aspect(1.0)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_facecolor((0.9, 0.9, 0.9))
+
+        for radius, c_color in zip(np.linspace(R, 0, num_lines), np.linspace(0.8, 0.35, num_lines)):
+            x = np.sin(np.deg2rad(fovs[i] / 2)) * (radius - 1.5)
+            y = np.cos(np.deg2rad(fovs[i] / 2)) * (radius - 1.5)
+            if radius % 10 == 0:
+                ax.text(x + 1.3, y - 1.2, str(int(radius)) + "m", rotation=-(5 + fovs[i]/2), fontsize=25, color=text_color)
+            if radius == 0:
+                continue
+            circle = Circle((0, 0), radius, color=(c_color, c_color, c_color), linewidth=2, fill=True, zorder=1)
+            ax.add_artist(circle)
+            
+            
+        wedge = Wedge((0, 0), R, -fovs[i]/2 + 90, fovs[i]/2 + 90, color=fov_color)
+        ax.add_artist(wedge)
+        
+        for assigned in anchors[fg_mask2D[i]].cpu().numpy():
+            bottom_corners = assigned[:4]
+            x = bottom_corners[:, 0]
+            y = bottom_corners[:, 2]
+            pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1)[
+                [0, 1, 3, 2]]
+            ax.add_artist(Polygon(pts, closed=True, fill=False, edgecolor=base_color, facecolor=base_color, zorder=3, linewidth=5))
+
+        for assigned in anchors[fg_mask[i]].cpu().numpy():
+            bottom_corners = assigned[:4]
+            x = bottom_corners[:, 0]
+            y = bottom_corners[:, 2]
+            pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1)[
+                [0, 1, 3, 2]]
+            ax.add_artist(Polygon(pts, closed=True, fill=False, edgecolor=our_color, facecolor=our_color, zorder=3, linewidth=5))
+        
+        
+        for gt in gt_kps[i][mask_gt[i].bool().squeeze(-1)].cpu().numpy():
+            bottom_corners = gt[:4]
+            x = bottom_corners[:, 0]
+            y = bottom_corners[:, 2]
+            pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1)[
+                [0, 1, 3, 2]]
+            ax.add_artist(Polygon(pts, closed=True, fill=False, edgecolor=gt_color, facecolor=gt_color, zorder=3, linewidth=5))
+
+        ax.axis("off")
+        plt.savefig(f"/home/stud/mijo/tmp/comparison_bev_{i:02d}.svg")
+        plt.close()
+    print()
+
 def debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor):
     max_imgs = 16
     fig, ax = plt.subplots(math.ceil(max_imgs ** 0.5), math.ceil(max_imgs ** 0.5),
@@ -816,6 +936,7 @@ def debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor):
     ax = ax.ravel()
     color = {8: (255, 255, 0), 16: (0, 255, 255), 32: (255, 0, 255)}
 
+    #with 3, pred_kps[3] as i, anchors:
     for i, anchors in enumerate(pred_kps):
         if i >= max_imgs:
             break
@@ -953,6 +1074,11 @@ class DDDetectionLoss:
                                               gamma=model.args.tal_gamma, use_2d=model.args.tal_2d,
                                               use_3d=model.args.tal_3d, kps_dist_metric=model.args.kps_dist_metric,
                                               constrain_anchors=model.args.constrain_anchors)
+        self.assigner2D = TaskAlignedAssigner3d(topk=tal_topk, num_classes=self.nc,
+                                              alpha=model.args.tal_alpha, beta=model.args.tal_beta,
+                                              gamma=model.args.tal_gamma, use_2d=True,
+                                              use_3d=False, kps_dist_metric=model.args.kps_dist_metric,
+                                              constrain_anchors=model.args.constrain_anchors)
         if self.hyp.distillation:
             self.supervisor = SupervisionLoss(model, teacher_model)
 
@@ -1047,7 +1173,32 @@ class DDDetectionLoss:
         targets_2d = targets[2:4]
         targets_3d = targets[4:9] # center, size, depth, head_bin, head_res
 
-        #self.plot_assignments(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt)
+        if hasattr(self, "assigner2D") and self.assigner.topk == 1:
+            targets2D, fg_mask2D, target_gt_idx2D, pred_kps2D, gt_kps2D = self.assigner2D(
+                pred_scores.detach().sigmoid(),
+                pred_bboxes.detach().type(gt_bboxes.dtype),
+                pred_3d.detach(),
+                anchor_points * stride_tensor,
+                (gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin, gt_heading_res),
+                mask_gt,
+                stride_tensor,
+                calibs,
+                mean_sizes
+            )
+            try:
+                (_, target_scores2D, target_center_2d2D, target_size_2d2D, target_center_3d2D,
+                target_size_3d2D, target_depth2D, target_heading_bin2D, target_heading_res2D) = targets2D
+            except Exception as e:
+                print(e)
+                return loss.sum() * batch_size, loss
+
+            target_scores_sum2D = max(target_scores2D.sum(), 1)
+
+            targets_2d2D = targets2D[2:4]
+            targets_3d2D = targets2D[4:9] # center, size, depth, head_bin, head_res
+            self.plot_assignment_comparison(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt,
+                                            fg_mask2D, targets_3d2D,  pred_kps2D, gt_kps2D, [np.rad2deg(2*np.arctan2(1280, 2* calib.cpu().numpy()[2])) for calib in calibs])
+            #self.plot_assignments(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt)
         
         depths = targets_3d[-3][fg_mask].squeeze()
         in_min, in_max = self.hyp.loss_scale_min_depth, self.hyp.loss_scale_max_depth, 
@@ -1083,6 +1234,13 @@ class DDDetectionLoss:
         debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor)
         debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt)
         debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor)
+
+    def plot_assignment_comparison(self, batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt,
+            fg_mask2D, targets_3d2D,  pred_kps2D, gt_kps2D, fovs
+    ):
+        assigned_targets2d_comparison(batch, targets_2d, fg_mask, fg_mask2D, pred_bboxes, stride_tensor)
+        assigned_bev_comparison(pred_kps, gt_kps, fg_mask, fg_mask2D, mask_gt, stride_tensor, fovs)
+        
 
     def compute_loss_weights(self, current_loss):
         weights = torch.ones(6, device=self.device)
