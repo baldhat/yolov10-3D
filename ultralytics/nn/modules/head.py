@@ -803,21 +803,22 @@ class v10Detect3d(nn.Module):
             if self.common_head:
                 x[i] = self.common[i](x[i])
             for j, module in enumerate(heads):
-                if self.use_predecessors and len(self.predecessors[head_names[j]]) > 0:
-                    inputs = [x[i]]
-                    predecessors = [outputs[key] if key != "dep"
-                                                else outputs[key] / self.dep_norm
-                                   for key in self.predecessors[head_names[j]]]
-                    inputs.extend([predecessor.detach() for predecessor in predecessors])
-                    if head_names[j] == "dep":
-                        outputs[head_names[j]], embs[i] = self.single_head_forward(module[i], (torch.cat(inputs, dim=1)))
+                with record_function("single_head_forward"):
+                    if self.use_predecessors and len(self.predecessors[head_names[j]]) > 0:
+                        inputs = [x[i]]
+                        predecessors = [outputs[key] if key != "dep"
+                                                    else outputs[key] / self.dep_norm
+                                    for key in self.predecessors[head_names[j]]]
+                        inputs.extend([predecessor.detach() for predecessor in predecessors])
+                        if head_names[j] == "dep":
+                            outputs[head_names[j]], embs[i] = self.single_head_forward(module[i], (torch.cat(inputs, dim=1)))
+                        else:
+                            outputs[head_names[j]] = module[i](torch.cat(inputs, dim=1))
                     else:
-                        outputs[head_names[j]] = module[i](torch.cat(inputs, dim=1))
-                else:
-                    if head_names[j] == "dep":
-                        outputs[head_names[j]], embs[i] = self.single_head_forward(module[i], x[i])
-                    else:
-                        outputs[head_names[j]] = module[i](x[i])
+                        if head_names[j] == "dep":
+                            outputs[head_names[j]], embs[i] = self.single_head_forward(module[i], x[i])
+                        else:
+                            outputs[head_names[j]] = module[i](x[i])
             y.append(torch.cat(list(outputs.values()), dim=1))
         return y, embs
     
