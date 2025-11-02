@@ -990,7 +990,7 @@ class v10Detect3d(nn.Module):
 
     def get_head_ranks(self):
         head_names = list(self.output_channels.keys())
-        scales = [8, 16, 32]
+        scales = [8, 16]
         ranks = np.zeros((2, 3, 8), dtype=np.float32)
         svalues = np.zeros((2, 3, 8, 128))
         weight_distri = np.zeros((2, 3, 8, 2)) # center, others
