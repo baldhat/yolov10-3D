@@ -120,16 +120,17 @@ class Run:
             torch.backends.cudnn.benchmark = True
             with torch.inference_mode():
                 model = model.eval()
-                model = model.cuda()
+                # model = model.cuda()
                 #model = torch.compile(model)
                 p = next(model.parameters())
                 for bs in batch_sizes:
+                    print(p.device)
                     im = torch.empty((bs, p.shape[1], *imgsz), device=p.device)  # input image in BCHW format
                     flops = thop.profile(deepcopy(model), inputs=[im], verbose=False)[0] / 1e9 * 2  # imgsz GFLOPs
                     for x in range(100):
                         model(im)
                     from torch.profiler import profile, ProfilerActivity, record_function
-                    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+                    with profile(activities=[ProfilerActivity.CPU]) as prof: #, ProfilerActivity.CUDA
                         t1 = time.time()
                         for x in range(100):
                             with record_function("inference"):
