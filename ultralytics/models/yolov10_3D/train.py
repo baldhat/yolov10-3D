@@ -7,7 +7,7 @@ from copy import copy
 from ultralytics.data.datasets.kitti import KITTIDataset
 from ultralytics.data.datasets.waymo import WaymoDataset
 from ultralytics.utils.plotting import plot_labels_3D, KITTIVisualizer, plot_images, plot_training_depth_dist
-from torchvision.models import EfficientNet_V2_L_Weights, efficientnet_v2_l
+from torchvision.models.convnext import ConvNeXt_Large_Weights, ConvNeXt, CNBlockConfig
 
 from ...data.datasets.omni3d import Omni3Dataset
 
@@ -60,29 +60,43 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
             backbone = YOLOv10.from_pretrained("jameslahm/" + self.model.split("_")[0])
             backbone.model.model[12].f = [-1, 9]
             backbone.model.model[15].f = [-1, 8]
-            b = efficientnet_v2_l(weights=EfficientNet_V2_L_Weights.IMAGENET1K_V1)
 
-            u1 = torch.nn.Sequential(*b.features[4:6])
-            u2 = torch.nn.Sequential(*b.features[6:8])
+            weights = ConvNeXt_Large_Weights.verify(ConvNeXt_Large_Weights.IMAGENET1K_V1)
+            block_setting = [
+                CNBlockConfig(192, 384, 3),
+                CNBlockConfig(384, 768, 3),
+                CNBlockConfig(768, 1536, 27),
+                CNBlockConfig(1536, None, 3),
+            ]
+            stochastic_depth_prob = 0.5
+            b = ConvNeXt(block_setting, stochastic_depth_prob=stochastic_depth_prob)
+
+            if weights is not None:
+                b.load_state_dict(weights.get_state_dict(progress=True))
+
+            u1 = torch.nn.Sequential(*b.features[0:2])
+            u2 = torch.nn.Sequential(*b.features[2:4])
+            u3 = torch.nn.Sequential(*b.features[4:6])
+            u4 = torch.nn.Sequential(*b.features[6:8])
 
             # 128gf
             t1 = torch.nn.Sequential(
-                torch.nn.Conv2d(96, 320, 1), 
+                torch.nn.Conv2d(384, 320, 1), 
                 torch.nn.BatchNorm2d(320),
                 torch.nn.ReLU()
             )
             t2 = torch.nn.Sequential(
-                torch.nn.Conv2d(224, 640, 1), 
+                torch.nn.Conv2d(768, 640, 1), 
                 torch.nn.BatchNorm2d(640),
                 torch.nn.ReLU()
             )
             t3 = torch.nn.Sequential(
-                torch.nn.Conv2d(640, 640, 1), 
+                torch.nn.Conv2d(1536, 640, 1), 
                 torch.nn.BatchNorm2d(640),
                 torch.nn.ReLU()
             )
 
-            modules = [torch.nn.Identity(), torch.nn.Identity(), *b.features[:4], u1, u2, t1, t2, t3]
+            modules = [torch.nn.Identity(), torch.nn.Identity(), torch.nn.Identity(), torch.nn.Identity(), u1, u2, u3, u4, t1, t2, t3]
 
             for i, module in enumerate(modules):
                 module.i = i
