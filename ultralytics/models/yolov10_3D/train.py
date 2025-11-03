@@ -7,7 +7,7 @@ from copy import copy
 from ultralytics.data.datasets.kitti import KITTIDataset
 from ultralytics.data.datasets.waymo import WaymoDataset
 from ultralytics.utils.plotting import plot_labels_3D, KITTIVisualizer, plot_images, plot_training_depth_dist
-from torchvision.models import resnet50, ResNet50_Weights
+from torchvision.models import resnet50, resnet152, ResNet50_Weights, ResNet152_Weights
 
 from ...data.datasets.omni3d import Omni3Dataset
 
@@ -60,7 +60,7 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
             backbone = YOLOv10.from_pretrained("jameslahm/" + self.model.split("_")[0])
             backbone.model.model[12].f = [-1, 9]
             backbone.model.model[15].f = [-1, 8]
-            b = resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
+            b = resnet152(weights=ResNet152_Weights.IMAGENET1K_V2)
 
             t1 = torch.nn.Sequential(
                 torch.nn.Conv2d(512, 320, 1), 
