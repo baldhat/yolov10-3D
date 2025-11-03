@@ -12,6 +12,7 @@ import torchvision
 from torch.profiler import record_function
 
 from ultralytics.utils.tal import TORCH_1_10, dist2bbox, dist2rbox, make_anchors
+from ultralytics.nn.modules.sparse_conv.sparse_conv2d_layer import SparseConv2d
 from .block import DFL, Proto, ContrastiveHead, BNContrastiveHead
 from .conv import Conv
 from .transformer import MLP, DeformableTransformerDecoder, DeformableTransformerDecoderLayer
@@ -634,7 +635,7 @@ class v10Detect3d(nn.Module):
             nn.Sequential(
                 v10Detect3d.build_conv(x*7, 64*7, self.kernel_size_1, self.dsconv, groups=7, deform=self.deform),
                 v10Detect3d.build_conv(64*7, 64*7 // 2 if self.half_channels else 64*7, self.kernel_size_2, groups=7, dsconv=self.dsconv),
-                nn.Conv2d(64*7 // 2 if self.half_channels else 64*7, 24*7, 1, groups=7)
+                SparseConv2d(64*7 // 2 if self.half_channels else 64*7, 24*7, 1, groups=7)
             ) for x in ch
         )
         self.bh_indices = [0, 1,                # o2d
@@ -668,14 +669,14 @@ class v10Detect3d(nn.Module):
     def build_head(self, in_channels, mid_channels, output_channels):
         return nn.ModuleList(nn.Sequential(v10Detect3d.build_conv(x, mid_channels, self.kernel_size_1, self.dsconv,  deform=self.deform),
                                            v10Detect3d.build_conv(mid_channels, mid_channels // 2 if self.half_channels else mid_channels, self.kernel_size_2, self.dsconv),
-                                           nn.Conv2d(mid_channels // 2 if self.half_channels else mid_channels, output_channels, 1)
+                                           SparseConv2d(mid_channels // 2 if self.half_channels else mid_channels, output_channels, 1)
                                            )
                              for x in in_channels
         )
 
     def build_small_head(self, in_channels, mid_channels, output_channels):
         return nn.ModuleList(nn.Sequential(v10Detect3d.build_conv(x, mid_channels, self.kernel_size_1, self.dsconv),
-                                           nn.Conv2d(mid_channels, output_channels, 1)
+                                           SparseConv2d(mid_channels, output_channels, 1)
                                            )
                              for x in in_channels
          )
@@ -683,9 +684,9 @@ class v10Detect3d(nn.Module):
     @staticmethod
     def build_conv(in_channels, out_channels, kernel_size, dsconv, deform=False, groups=1):
         if dsconv:
-            return nn.Sequential(Conv(in_channels, in_channels, kernel_size, g=in_channels, deform=deform), Conv(in_channels, out_channels, 1))
+            return nn.Sequential(SparseConv2d(in_channels, in_channels, kernel_size, g=in_channels, deform=deform), SparseConv2d(in_channels, out_channels, 1))
         else:
-            return Conv(in_channels, out_channels, kernel_size, g=groups,  deform=deform)
+            return SparseConv2d(in_channels, out_channels, kernel_size, groups=groups)
 
     def mod(self, a, b):
         out = a - a // b * b
@@ -767,8 +768,8 @@ class v10Detect3d(nn.Module):
         dep_features = [None, None]
         batch_sz = x[0].shape[0]
         if not hasattr(self, "is_padded") or self.is_padded:
-            heads[1][0][0].conv.padding = (0,)
-            heads[1][1][0].conv.padding = (0,)
+            heads[1][0][0].padding = (0,0)
+            heads[1][1][0].padding = (0,0)
             self.is_padded = False
         
         for i in range(self.nl):
@@ -776,19 +777,13 @@ class v10Detect3d(nn.Module):
                 out = heads[0][i](x[i])
             with record_function("select_candidates"):
                 candidate_indices = self.select_candidates(out, batch_sz)
-            with record_function("extract_patches"):
-                inputs = self.extract_patches(x[i], candidate_indices)
+            with record_function("allocate_input"):
+                data = x[i].repeat(1, 7, 1, 1) 
             with record_function("single_head_forward"):
-                head_out, _ = self.single_head_forward(heads[1][i], inputs.repeat(1, 7, 1, 1))
+                head_out, _ = self.single_head_forward(heads[1][i], data, candidate_indices)
             
             with record_function("distribute_output"):
-                with record_function("output_allocation"):
-                    head_output = torch.zeros((x[i].shape[0], self.no-self.nc, x[i].shape[2], x[i].shape[3]), device=x[i].device)
-                with record_function("output_dist"):
-                    head_out = head_out[:, self.bh_indices, 0, 0].view(x[i].shape[0], self.max_det, self.no-self.nc).transpose(1, 2)
-                    for b in range(x[i].shape[0]):
-                        head_output[b, :, candidate_indices[b, :, 0], candidate_indices[b, :, 1]] = head_out[b].float()
-                    res = torch.cat([out, head_output], dim=1)
+                res = torch.cat([out, head_out[:, self.bh_indices]], dim=1)
             y.append(res)
         
         return y, dep_features
@@ -798,8 +793,8 @@ class v10Detect3d(nn.Module):
         embs = [None] * self.nl
         head_names = list(self.output_channels.keys())
         if not hasattr(self, "is_padded") or not self.is_padded:
-            heads[1][0][0].conv.padding = (1,)
-            heads[1][1][0].conv.padding = (1,)
+            heads[1][0][0].conv.padding = (1,1)
+            heads[1][1][0].conv.padding = (1,1)
             self.is_padded = True
         
         for i in range(self.nl):
@@ -833,11 +828,11 @@ class v10Detect3d(nn.Module):
                 one2many, o2m_embs, depth_maps = self._forward(x)
                 return {"one2many": one2many, "one2one": one2one, "o2m_embs": o2m_embs, "o2o_embs": o2o_embs, "depth_maps": depth_maps}
 
-    def single_head_forward(self, head, features):
+    def single_head_forward(self, head, features, indices=None):
         assert len(head) == 3
-        embeddings = head[0](features)
-        output = head[1](embeddings)
-        return head[2](output), embeddings[:, 5*64:6*64]
+        embeddings = head[0](features, indices)
+        output = head[1](embeddings, indices)
+        return head[2](output, indices), embeddings[:, 5*64:6*64]
 
 
     def sum_predecessor_chs(self, predecessors):
