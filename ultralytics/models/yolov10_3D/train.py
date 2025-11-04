@@ -7,7 +7,7 @@ from copy import copy
 from ultralytics.data.datasets.kitti import KITTIDataset
 from ultralytics.data.datasets.waymo import WaymoDataset
 from ultralytics.utils.plotting import plot_labels_3D, KITTIVisualizer, plot_images, plot_training_depth_dist
-from torchvision.models import EfficientNet_V2_L_Weights, efficientnet_v2_l
+from torchvision.models import EfficientNet_V2_L_Weights, efficientnet_v2_l,  EfficientNet_V2_M_Weights, efficientnet_v2_m,  EfficientNet_V2_S_Weights, efficientnet_v2_s
 
 from ...data.datasets.omni3d import Omni3Dataset
 
@@ -61,6 +61,8 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
             backbone.model.model[12].f = [-1, 9]
             backbone.model.model[15].f = [-1, 8]
             b = efficientnet_v2_l(weights=EfficientNet_V2_L_Weights.IMAGENET1K_V1)
+            #b = efficientnet_v2_m(weights=EfficientNet_V2_M_Weights.IMAGENET1K_V1)
+            # b = efficientnet_v2_s(weights=EfficientNet_V2_S_Weights.IMAGENET1K_V1)
 
             u1 = torch.nn.Sequential(*b.features[4:6])
             u2 = torch.nn.Sequential(*b.features[6:8])
@@ -92,7 +94,7 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
             t3.f = 7
             model.model = torch.nn.Sequential(*modules, *backbone.model.model[11:-1], model.model[-1])
             model.model[-1].stride = model.model[-1].stride[:2]
-            return model 
+            return model
 
             # model_seq = deepcopy(model.model)
             # for i, module in enumerate(model_seq):
