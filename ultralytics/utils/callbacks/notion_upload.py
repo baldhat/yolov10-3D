@@ -10,6 +10,8 @@ import numbers
 import sys
 from pathlib import Path
 import matplotlib.pyplot as plt
+import torch
+from torch.utils.flop_counter import FlopCounterMode
 
 
 class Run:
@@ -110,6 +112,25 @@ class Run:
         }
 
     @staticmethod
+    def _get_flops(model, inp, with_backward=False):
+    
+        istrain = model.training
+        model.eval()
+        
+        inp = inp if isinstance(inp, torch.Tensor) else torch.randn(inp)
+
+        flop_counter = FlopCounterMode(mods=model, display=True, depth=None)
+        with flop_counter:
+            if with_backward:
+                model(inp).sum().backward()
+            else:
+                model(inp)
+        total_flops =  flop_counter.get_total_flops() / 1000000000
+        if istrain:
+            model.train()
+        return total_flops
+
+    @staticmethod
     def get_flops_(model, imgsz=[1280, 384], batch_sizes=[1,1,1]):
         import torch
         from copy import deepcopy
@@ -124,10 +145,11 @@ class Run:
             p = next(model.parameters())
             for bs in batch_sizes:
                 im = torch.empty((bs, p.shape[1], *imgsz), device=p.device)  # input image in BCHW format
-                flops = thop.profile(deepcopy(model), inputs=[im], verbose=False)[0] / 1e9 * 2  # imgsz GFLOPs
+                #flops = thop.profile(deepcopy(model), inputs=[im], report_missing=True)[0] / 1e9 * 2  # imgsz GFLOPs
+                flops = Run._get_flops(model, im)
                 for x in range(500):
                     model(im)
-                t1 = time.time()16.82
+                t1 = time.time()
                 for x in range(500):
                     out = model(im)
                 t2 = time.time()
