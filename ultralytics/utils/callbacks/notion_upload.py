@@ -7,9 +7,11 @@ import pandas as pd
 import yaml
 import numpy as np
 import numbers
+import torch
 import sys
 from pathlib import Path
 import matplotlib.pyplot as plt
+from torch.utils.flop_counter import FlopCounterMode
 
 
 class Run:
@@ -108,6 +110,25 @@ class Run:
         return {
             "number": float(np.max(self.results["metrics/3D"]))
         }
+    
+    @staticmethod
+    def _get_flops(model, inp, with_backward=False):
+    
+        istrain = model.training
+        model.eval()
+        
+        inp = inp if isinstance(inp, torch.Tensor) else torch.randn(inp)
+
+        flop_counter = FlopCounterMode(mods=model, display=False, depth=None)
+        with flop_counter:
+            if with_backward:
+                model(inp).sum().backward()
+            else:
+                model(inp)
+        total_flops =  flop_counter.get_total_flops() / 1000000000
+        if istrain:
+            model.train()
+        return total_flops
 
     @staticmethod
     def get_flops_(model, imgsz=[1280, 384], batch_sizes=[1,1,1]):
@@ -124,7 +145,8 @@ class Run:
             p = next(model.parameters())
             for bs in batch_sizes:
                 im = torch.empty((bs, p.shape[1], *imgsz), device=p.device)  # input image in BCHW format
-                flops = thop.profile(deepcopy(model), inputs=[im], verbose=False)[0] / 1e9 * 2  # imgsz GFLOPs
+                #flops = thop.profile(deepcopy(model), inputs=[im], report_missing=True)[0] / 1e9 * 2  # imgsz GFLOPs
+                flops = Run._get_flops(model, im)
                 for x in range(500):
                     model(im)
                 t1 = time.time()
@@ -132,17 +154,17 @@ class Run:
                     out = model(im)
                 t2 = time.time()
                 print(f"Batch size: {bs} Took: {(t2-t1) / 500 * 1000:.2f}ms, FLOPs: {flops:.2f} GFLOPs, batch size: {im.shape[0]}, ")
-                # from torch.profiler import profile, ProfilerActivity, record_function
-                # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                #             record_shapes=True,
-                #             profile_memory=True,
-                #             with_stack=True) as prof:
-                #     t1 = time.time()
-                #     with record_function("inference"):
-                #         out = model(im)
-                #     t2 = time.time()
-                # print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=50))
-                # prof.export_chrome_trace("/home/stud/mijo/trace.json")
+                from torch.profiler import profile, ProfilerActivity, record_function
+                with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                            record_shapes=True,
+                            profile_memory=True,
+                            with_stack=True) as prof:
+                    t1 = time.time()
+                    with record_function("inference"):
+                        out = model(im)
+                    t2 = time.time()
+                print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=50))
+                prof.export_chrome_trace("/home/stud/mijo/trace.json")
         return 0 #flops
 
     def get_flops(self):
