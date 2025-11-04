@@ -867,6 +867,8 @@ class v10Detect3d(nn.Module):
         return sum([self.output_channels[predecessor] for predecessor in predecessors]) if len(predecessors) > 0 else 0
 
     def decode(self, cls, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un):
+        self.strides = self.strides.to(pred_s2d.device)
+        self.anchors = self.anchors.to(pred_s2d.device)
         s2d = pred_s2d * self.strides
         o2d = (pred_o2d + self.anchors) * self.strides
         xy1 = o2d - s2d / 2
