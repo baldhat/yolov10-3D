@@ -146,22 +146,26 @@ def plot_bev(gts, base_dets, our_dets, filename, fov=60):
     ax.set_aspect(1.0)
     ax.set_xticks([])
     ax.set_yticks([])
-    ax.set_facecolor((0.9, 0.9, 0.9))
-
-    for radius, c_color in zip(np.linspace(R, 0, num_lines), np.linspace(0.8, 0.35, num_lines)):
+    ax.set_facecolor((1, 1, 1))
+    
+    for radius, c_color in zip(np.linspace(R, 0, num_lines), np.linspace(0.95, 0.5, num_lines)):
         x = np.sin(np.deg2rad(fov / 2)) * (radius - 1.5)
         y = np.cos(np.deg2rad(fov / 2)) * (radius - 1.5)
         if radius % 10 == 0:
-            ax.text(x + 1.3, y - 1.2, str(int(radius)) + "m", rotation=-(5 + fov/2), fontsize=25, color=text_color)
+            ax.text(x + 1.3, y - 1.2, str(int(radius)) + "m", rotation=-(5 + fov/2), fontsize=25, color=(0.15, 0.15, 1))
         if radius == 0:
             continue
-        circle = Circle((0, 0), radius, color=(c_color, c_color, c_color), linewidth=2, fill=True, zorder=1)
+        #circle = Circle((0, 0), radius, color=(0, 0, 0), linewidth=3, fill=False, zorder=1)
+        circle = Circle((0, 0), radius, color=(c_color, c_color, c_color), linewidth=3, fill=True, zorder=1)
         ax.add_artist(circle)
         
         
-    wedge = Wedge((0, 0), R, -fov/2 + 90, fov/2 + 90, color=fov_color)
+    lightblue = (0, 252/255.0, 239/255.0)
+    wedge = Wedge((0, 0), R, -fov/2 + 90, fov/2 + 90, 
+                  color=fov_color,  
+                  #linewidth=3, 
+                  fill=True)
     ax.add_artist(wedge)
-
     for j, object in enumerate(gts):            
         dimensions = np.array([object.l, object.w])
         translation = object.pos[[0, 2]]
