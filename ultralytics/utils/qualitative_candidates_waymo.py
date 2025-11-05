@@ -29,6 +29,7 @@ base_color = to_color("FF595E") # Red
 fov_color = to_color("805D9340") # Purple
 text_color = to_color("000000")
 
+colors = plt.get_cmap("tab10")
 class Args:
     overfit = False
     fliplr = False
@@ -112,8 +113,9 @@ def plot_labels(img, gts: [Detection3d], calib, color):
                                         dimensions, bbox2d, cls),
                             calib.P2, bbox2d=False, gt=False)
 
-def plot_dets(img, dets, calib, color):
-    for object in dets:
+def plot_dets(img, dets, calib):
+    objects = []
+    for i, object in enumerate(dets):
         cls = object.classname
         bbox2d = object.bbox
         dimensions = object.dimensions
@@ -121,10 +123,10 @@ def plot_dets(img, dets, calib, color):
         ry = object.ry
         egoc_rot_matrix = plotter.get_egoc_rot_matrix(ry)
 
-        plotter.plot_3d_obj(img,
-                            VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
-                                        dimensions, bbox2d, cls),
-                            calib.P2, bbox2d=False, gt=True)
+        objects.append( VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
+                                        dimensions, bbox2d, cls))
+    objects = sorted(objects, key=lambda x: x.translation[2], reverse=True)
+    plotter.plot_3d_obj(img, objects,calib.P2, [colors(i % 10) for i,_ in enumerate(objects)], line_thickness=4)
 
 def plot_bev(gts, base_dets, our_dets, filename, fov=60):
     plt.clf()
@@ -223,17 +225,17 @@ def plot_all(img, gts, our_dets, base_dets, calib, out_path):
     base_img = img.copy()
     our_img = img.copy()
         
-    plot_labels(our_img, gts, calib, color="g")
-    plot_dets(our_img, our_dets, calib, color="r")
+    # plot_labels(our_img, gts, calib, color="g")
+    plot_dets(our_img, our_dets, calib)
     our_name = out_path.replace(".png", "_ours.png")
     cv.imwrite(our_name, (our_img*255.0).astype(np.uint8))
     print(our_name)
     
-    plot_labels(base_img, gts, calib, color="g")
-    plot_dets(base_img, base_dets, calib, color="r")
-    base_name = out_path.replace(".png", "_base.png")
-    cv.imwrite(base_name, (base_img*255.0).astype(np.uint8))
-    print(base_name)
+    # plot_labels(base_img, gts, calib, color="g")
+    # plot_dets(base_img, base_dets, calib, color="r")
+    # base_name = out_path.replace(".png", "_base.png")
+    # cv.imwrite(base_name, (base_img*255.0).astype(np.uint8))
+    # print(base_name)
     
     plot_bev(gts, base_dets, our_dets, out_path.replace(".png", "_bev.svg"), np.rad2deg(2*np.arctan2(base_img.shape[1], 2* calib.fu)))
     

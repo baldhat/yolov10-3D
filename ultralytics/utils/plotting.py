@@ -1406,23 +1406,105 @@ class KITTIVisualizer():
 
         plt.savefig(fname, bbox_inches="tight", format="svg")
 
-    def plot_3d_obj(self, img: np.ndarray, obj: VisObject3D, camera_matrix: np.ndarray, thickness: int = 1, gt: bool = False,
-                 bbox2d=True):
-        box_corners = project_to_image(obj.get_box_corners(), camera_matrix).astype(np.int32)
-        tip_corners = project_to_image(obj.get_tip_corners(), camera_matrix).astype(np.int32)
-        color_none_bottom, color_bottom = ((0, 1, 0), (0, 0, 1)) if gt else ((1, 0, 0), (1, 0, 0))
-        cv2.polylines(img, [box_corners[obj.box_idxs[:5]]], isClosed=False, color=color_none_bottom,
-                      thickness=thickness,
-                      lineType=cv2.LINE_AA)
-        cv2.polylines(img, [tip_corners], isClosed=True, color=color_none_bottom, thickness=thickness,
-                      lineType=cv2.LINE_AA)
-        cv2.polylines(img, [box_corners[obj.box_idxs[5:]]], isClosed=True, color=color_bottom, thickness=thickness,
-                      lineType=cv2.LINE_AA)
-        if bbox2d:
-            color_bbox = (1, 0.35, 0.35) if gt else (0.35, 0.35, 0.35)
-            bbox = np.array(obj.box2d)
-            cv2.rectangle(img, bbox[:2].astype(np.int32), bbox[2:].astype(np.int32), color_bbox, thickness=2)
+    def draw_transparent_lines(
+            self,
+        img: np.ndarray,
+        pts_list: list,
+        color: tuple,
+        thickness: int = 2,
+        line_alpha: float = 0.5,
+    ):
+        """
+        Draw one or more polylines on *img* with a custom opacity.
 
+        Parameters
+        ----------
+        img          : (H,W,3) uint8 image – will be modified in‑place
+        pts_list     : list of point‑arrays, each shaped (N,2) or (N,1,2)
+                    (the same format you would pass to cv2.polylines)
+        color        : BGR tuple, e.g. (0,255,0)
+        thickness    : line width in pixels
+        line_alpha   : opacity of the lines (0.0 … 1.0)
+        """
+        # ------------------------------------------------------------------
+        # 1️⃣ Make a clean copy that will hold ONLY the lines
+        # ------------------------------------------------------------------
+        overlay = img.copy()
+
+        # ------------------------------------------------------------------
+        # 2️⃣ Draw the lines on the overlay (no alpha yet)
+        # ------------------------------------------------------------------
+        for pts in pts_list:
+            # Ensure the shape OpenCV expects: (N,1,2) of int32
+            pts = np.asarray(pts, dtype=np.int32)
+            if pts.ndim == 2:                # (N,2) → (N,1,2)
+                pts = pts[:, np.newaxis, :]
+            cv2.polylines(
+                overlay,
+                [pts],
+                isClosed=False,
+                color=color,
+                thickness=thickness,
+                lineType=cv2.LINE_AA,
+            )
+
+        # ------------------------------------------------------------------
+        # 3️⃣ Blend the overlay back onto the original image with the chosen α
+        # ------------------------------------------------------------------
+        cv2.addWeighted(
+            overlay, line_alpha,   # foreground (the lines) with its opacity
+            img, 1.0 - line_alpha, # background (original image)
+            0,
+            img,                   # destination – overwrites the original
+        )
+
+    def plot_3d_obj(self,
+        img: np.ndarray,
+        objects,
+        camera_matrix: np.ndarray,
+        colors,   # BGR – pick any single colour you like
+        line_thickness: int = 2,
+        fill_alpha: float = 0.25      # 0 = fully transparent, 1 = solid fill
+    ) -> None:
+        
+        overlay = img.copy()
+
+        for k, obj in enumerate(objects):
+            # ----- project corners -------------------------------------------------
+            corners_2d = project_to_image(obj.get_box_corners(),
+                                        camera_matrix).astype(np.int32)
+
+
+            edges = [
+                (0, 1), (1, 2), (2, 3), (3, 0),   # bottom
+                (4, 5), (5, 6), (6, 7), (7, 4),   # top
+                (0, 4), (1, 5), (2, 6), (3, 7),   # vertical
+            ]
+            edge_pts = [np.array([corners_2d[i], corners_2d[j]]) for i, j in edges]
+
+            # 3️⃣ Draw the semi‑transparent edges
+            self.draw_transparent_lines(
+                img,
+                edge_pts,
+                color=colors[k],
+                thickness=line_thickness,
+                line_alpha=0.8,
+            )
+
+            # ----- fill faces on the *overlay* (not on img) ------------------------
+            faces = [[0, 1, 5, 4],   # front
+                    [2, 3, 7, 6],   # back
+                    [0, 3, 7, 4],   # left
+                    [1, 2, 6, 5],   # right
+                    [0, 1, 2, 3],   # bottom
+                    [4, 5, 6, 7]]   # top
+
+            for i, f in enumerate(faces):
+                pts = corners_2d[f].reshape((-1, 1, 2))
+                cv2.fillPoly(overlay, [pts], colors[k])
+
+        # 2️⃣ Blend the *whole* overlay back onto the original image just once
+        cv2.addWeighted(overlay, fill_alpha, img, 1 - fill_alpha, 0, img)
 
 
     @staticmethod
