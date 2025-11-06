@@ -60,46 +60,46 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
             backbone = YOLOv10.from_pretrained("jameslahm/" + self.model.split("_")[0])
             backbone.model.model[12].f = [-1, 9]
             backbone.model.model[15].f = [-1, 8]
-            b = efficientnet_v2_l(weights=EfficientNet_V2_L_Weights.IMAGENET1K_V1) # MODEL_SIZE L
-            # b = efficientnet_v2_m(weights=EfficientNet_V2_M_Weights.IMAGENET1K_V1) # MODEL_SIZE M
+            # b = efficientnet_v2_l(weights=EfficientNet_V2_L_Weights.IMAGENET1K_V1) # MODEL_SIZE L
+            b = efficientnet_v2_m(weights=EfficientNet_V2_M_Weights.IMAGENET1K_V1) # MODEL_SIZE M
             # b = efficientnet_v2_s(weights=EfficientNet_V2_S_Weights.IMAGENET1K_V1) # MODEL_SIZE S
 
             u1 = torch.nn.Sequential(*b.features[4:6])
             u2 = torch.nn.Sequential(*b.features[6:8])
 
             # MODEL_SIZE L
-            t1 = torch.nn.Sequential(
-                torch.nn.Conv2d(96, 320, 1), 
-                torch.nn.BatchNorm2d(320),
-                torch.nn.ReLU()
-            )
-            t2 = torch.nn.Sequential(
-                torch.nn.Conv2d(224, 640, 1), 
-                torch.nn.BatchNorm2d(640),
-                torch.nn.ReLU()
-            )
-            t3 = torch.nn.Sequential(
-                torch.nn.Conv2d(640, 640, 1), 
-                torch.nn.BatchNorm2d(640),
-                torch.nn.ReLU()
-            )
-            
-            # MODEL_SIZE M
             # t1 = torch.nn.Sequential(
-            #     torch.nn.Conv2d(88, 320, 1), 
+            #     torch.nn.Conv2d(96, 320, 1), 
             #     torch.nn.BatchNorm2d(320),
             #     torch.nn.ReLU()
             # )
             # t2 = torch.nn.Sequential(
-            #     torch.nn.Conv2d(176, 640, 1), 
+            #     torch.nn.Conv2d(224, 640, 1), 
             #     torch.nn.BatchNorm2d(640),
             #     torch.nn.ReLU()
             # )
             # t3 = torch.nn.Sequential(
-            #     torch.nn.Conv2d(512, 640, 1), 
+            #     torch.nn.Conv2d(640, 640, 1), 
             #     torch.nn.BatchNorm2d(640),
             #     torch.nn.ReLU()
             # )
+            
+            # MODEL_SIZE M
+            t1 = torch.nn.Sequential(
+                torch.nn.Conv2d(80, 320, 1), 
+                torch.nn.BatchNorm2d(320),
+                torch.nn.ReLU()
+            )
+            t2 = torch.nn.Sequential(
+                torch.nn.Conv2d(176, 640, 1), 
+                torch.nn.BatchNorm2d(640),
+                torch.nn.ReLU()
+            )
+            t3 = torch.nn.Sequential(
+                torch.nn.Conv2d(512, 640, 1), 
+                torch.nn.BatchNorm2d(640),
+                torch.nn.ReLU()
+            )
 
             # # MODEL_SIZE S
             # t1 = torch.nn.Sequential(
