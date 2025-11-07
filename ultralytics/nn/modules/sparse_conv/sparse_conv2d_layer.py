@@ -85,7 +85,7 @@ class SparseConv2d(nn.Module):
     # ------------------------------------------------------------------
     # Forward pass – now with a fallback to regular conv2d
     # ------------------------------------------------------------------
-    def forward(self, input: torch.Tensor, indices: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(self, input: torch.Tensor, indices: torch.Tensor = torch.empty(0)) -> torch.Tensor:
         """
         Parameters
         ----------
