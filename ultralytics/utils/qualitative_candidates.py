@@ -9,10 +9,12 @@ import operator
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle, Polygon, Wedge
 
-from ultralytics.data.datasets.kitti_utils import Object3d, Calibration
+from ultralytics.data.datasets.kitti_utils import Object3d, Calibration, affine_transform
 from ultralytics.utils.metrics import box_iou
 from ultralytics.utils.plotting import KITTIVisualizer, VisObject3D
 from scipy.spatial.transform import Rotation
+
+from ultralytics.utils.ops import  xyxy2xywh, xywh2xyxy
 from scipy.optimize import linear_sum_assignment
 
 plotter = KITTIVisualizer()
@@ -51,10 +53,44 @@ def load_dets(filename):
         return [Detection3d(it) for it in lines]
     
 def filter_(dets):
-    return [det for det in dets if det.score > 0.1 and det.classname in ["Car", "Pedestrian", "Cyclist"]]
+    return [det for det in dets if det.score > 0.1 and det.classname in ["Car", "Pedestrian", "Cyclist", "Van"]]
 
-def filter_gts(dets):
-    return [det for det in dets if det.class_type in ["Car", "Pedestrian", "Cyclist"]]
+
+def center_inside_image(obj, calib):
+    # process 2d bbox & get 2d center
+    bbox_2d = obj.box2d.copy()
+
+    bbox_2d_ = np.copy(bbox_2d)
+    bbox_2d_[:2] = bbox_2d[:2]
+    bbox_2d_[2:] = bbox_2d[2:]
+    bbox_2d_ = xyxy2xywh(bbox_2d_)
+
+    # process 3d bbox & get 3d center
+    center_3d = obj.pos + [0, -obj.h / 2, 0]  # real 3D center in 3D space
+    r_center_3d = center_3d.reshape(-1, 3)  # shape adjustment (N, 3)
+    center_3d, _ = calib.rect_to_img(r_center_3d)  # project 3D center to image plane
+    center_3d = center_3d[0]  # shape adjustment
+
+    # generate the center of gaussian heatmap [optional: 3d center or 2d center]
+    center_heatmap = center_3d.astype(np.int32)
+    if center_heatmap[0] < 0 or center_heatmap[0] >= 1280: return False
+    if center_heatmap[1] < 0 or center_heatmap[1] >= 384: return False
+    return True
+
+
+def filter_gts(dets: [Object3d], calib):
+    out = []
+    for gt in dets:
+        if gt.level_str == 'UnKnown' or np.linalg.norm(gt.pos) > 60:
+            continue
+        if gt.trucation > 0.5 or gt.occlusion > 2:
+            continue
+        if gt.cls_type not in ["Car", "Pedestrian", "Cyclist", "Van"]:
+            continue
+        if not center_inside_image(gt, calib):
+            continue
+        out.append(gt)
+    return out
 
 def associate(gts: [Object3d], dets: [Detection3d]):
     if len(dets) == 0:
@@ -267,6 +303,12 @@ if __name__=='__main__':
             base_dets = load_dets(base_path / "preds" / filename)
         our_dets = load_dets(ours_path / "preds" / filename)
         gts = load_labels(gt_path / filename)
+
+        calib = load_calib(gt_path / ".." / "calib" / filename)
+        gts = filter_gts(gts, calib)
+
+        if len(gts) == 0:
+            continue
         
         # filter dets by score and class
         base_dets_ = filter_(base_dets)
@@ -314,11 +356,10 @@ if __name__=='__main__':
                 #print("We detected more objects")
                 improvement_counter += 1
                     
-        if improvement_counter > 0 or test_plot:
+        if improvement_counter >= 2 or test_plot:
             print(filename)
             img_name = filename.replace("txt", "png")
             img = load_image(gt_path / ".." / "image_2" / img_name).astype(np.float32) / 255.0
-            calib = load_calib(gt_path / ".." / "calib" / filename)
             out_path = output_path / img_name
             plot_all(img, gts, our_dets, base_dets, calib, str(out_path))
             print()
