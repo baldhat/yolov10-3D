@@ -110,7 +110,7 @@ class Run:
         }
 
     @staticmethod
-    def get_flops_(model, imgsz=[1280, 384], batch_sizes=[]):
+    def get_flops_(model, imgsz=[1280, 384], batch_sizes=[1,1,1]):
         try:
             import torch
             from copy import deepcopy
@@ -128,9 +128,11 @@ class Run:
                     flops = thop.profile(deepcopy(model), inputs=[im], verbose=False)[0] / 1e9 * 2  # imgsz GFLOPs
                     for x in range(1000):
                         model(im)
+                    torch.cuda.synchronize()
                     t1 = time.time()
                     for x in range(100):
                         out = model(im)
+                        torch.cuda.synchronize()
                     t2 = time.time()
                     print(f"Batch size: {bs} Took: {(t2-t1) / 100 * 1000:.2f}ms, FLOPs: {flops:.2f} GFLOPs, batch size: {im.shape[0]}, ")
             return 0 #flops
