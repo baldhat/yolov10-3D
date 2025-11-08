@@ -5,7 +5,7 @@ import cv2
 import torch
 import pathlib
 from ultralytics.data.datasets.decode_helper import  *
-from ultralytics.data.datasets.kitti_eval import eval_from_scrach
+# from ultralytics.data.datasets.kitti_eval import eval_from_scrach
 
 import torch.utils.data as data
 from PIL import Image
@@ -476,12 +476,12 @@ class KITTIDataset(data.Dataset):
         }
 
     def get_stats(self, results, save_dir):
-        self.save_results(results, output_dir=save_dir)
-        result = eval_from_scrach(
-            self.label_dir,
-            os.path.join(save_dir, 'preds'),
-            ap_mode=40)
-        return result["3d@0.70"][1]
+        # self.save_results(results, output_dir=save_dir)
+        # result = eval_from_scrach(
+        #     self.label_dir,
+        #     os.path.join(save_dir, 'preds'),
+        #     ap_mode=40)
+        return 0 #result["3d@0.70"][1]
 
     def save_results(self, results, output_dir='./outputs'):
         output_dir = os.path.join(output_dir, 'preds')
