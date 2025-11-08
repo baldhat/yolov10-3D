@@ -8,11 +8,11 @@ import torch.nn as nn
 from torch.nn.init import constant_, xavier_uniform_
 
 import torchvision
-
 from torch.profiler import record_function
 
 from ultralytics.utils.tal import TORCH_1_10, dist2bbox, dist2rbox, make_anchors
 from ultralytics.nn.modules.sparse_conv.sparse_conv2d_layer import SparseConv2d
+from ultralytics.nn.modules.select_candidates import *
 from .block import DFL, Proto, ContrastiveHead, BNContrastiveHead
 from .conv import Conv
 from .transformer import MLP, DeformableTransformerDecoder, DeformableTransformerDecoderLayer
