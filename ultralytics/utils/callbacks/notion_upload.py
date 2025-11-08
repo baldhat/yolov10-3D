@@ -111,40 +111,40 @@ class Run:
 
     @staticmethod
     def get_flops_(model, imgsz=[1280, 384], batch_sizes=[1,1]):
-        try:
-            import torch
-            from copy import deepcopy
-            import thop
-            import time
-            torch.backends.cudnn.enable = True
-            torch.backends.cudnn.benchmark = True
-            with torch.inference_mode():
-                model = model.eval()
-                model = model.cuda()
-                #model = torch.compile(model)
-                p = next(model.parameters())
-                for bs in batch_sizes:
-                    im = torch.empty((bs, p.shape[1], *imgsz), device=p.device)
-                    flops = thop.profile(deepcopy(model), inputs=[im], verbose=False, report_missing=True)[0] / 1e9 * 2  # imgsz GFLOPs
-                    for x in range(1000):
-                        model(im)
+        import torch
+        from copy import deepcopy
+        import thop
+        import time
+        model = model.eval()
+        model = model.cuda()
+        torch.backends.cudnn.enable = True
+        torch.backends.cudnn.benchmark = True
+        #model = torch.compile(model)
+        with torch.inference_mode():
+            p = next(model.parameters())
+            for bs in batch_sizes:
+                im = torch.empty((bs, p.shape[1], *imgsz), device=p.device)
+                #flops = thop.profile(deepcopy(model), inputs=[im], verbose=False, report_missing=True)[0] / 1e9 * 2  # imgsz GFLOPs
+                flops = 0
+                for x in range(1000):
+                    model(im)
+                    torch.cuda.synchronize()
+                t1 = time.time()
+                for x in range(100):
+                    model(im)
+                    torch.cuda.synchronize()
+                t2 = time.time()
+                print(f"Batch size: {bs} Took: {(t2-t1) / 100 * 1000:.2f}ms, FLOPs: {flops:.2f} GFLOPs, batch size: {im.shape[0]}, ")
+                from torch.profiler import profile, ProfilerActivity, record_function
+                with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
                     t1 = time.time()
-                    for x in range(100):
-                        model(im)
+                    for x in range(1):
+                        with record_function("inference"):
+                            out = model(im)
                     t2 = time.time()
-                    print(f"Batch size: {bs} Took: {(t2-t1) / 100 * 1000:.2f}ms, FLOPs: {flops:.2f} GFLOPs, batch size: {im.shape[0]}, ")
-                    from torch.profiler import profile, ProfilerActivity, record_function
-                    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
-                        t1 = time.time()
-                        for x in range(1):
-                            with record_function("inference"):
-                                out = model(im)
-                        t2 = time.time()
-                    print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=50))
-                    
-            return 0 #flops
-        except Exception as e:
-            print(f"Failed to calculate flops: {e}")
+                print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=50))
+                
+        return 0 #flops
 
     def get_flops(self):
         return {
