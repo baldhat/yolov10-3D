@@ -1065,9 +1065,8 @@ class DDDetectionLoss:
 
         if self.hyp.distillation and embeddings is not None and embeddings[0] is not None:
             #embeddings = torch.cat([emb.view(emb.shape[0], emb.shape[1], -1) for emb in embeddings], dim=2)
-            if self.hyp.distillation_teacher in ["yolo", "self"] :
-                forwards = (anchor_points, stride_tensor, self.no, self.nc, calibs, mean_sizes, self.assigner)
-                loss[6] = self.supervisor.distill_backbone(batch["img"].detach(), embeddings)
+            if self.hyp.distillation_teacher in ["yolo", "self"]:
+                loss[6] = self.supervisor.distill_mixskd(batch["img"].detach(), embeddings, batch["non_mix_imgs"].detach(), batch["mixed"].bool())
             else:
                 loss[6] = self.supervisor.distill_from_dino(
                     batch["non_mix_imgs"].detach(), gt_center_3d, pred_3d[..., :2], embeddings, fg_mask.bool(),
@@ -1166,6 +1165,44 @@ def compute_heading_loss(input, target_cls, target_reg, loss_weight):
 
     return cls_loss + reg_loss
 
+class Discriminator(nn.Module):
+    def __init__(self, dim_in=1024, dim_out=2):
+        super(Discriminator, self).__init__()
+        self.classifier = nn.Sequential(
+            nn.Linear(dim_in, 128),
+            nn.ReLU(inplace=True),
+            nn.Linear(128, dim_out),
+        )
+        
+    def forward(self, x):
+        x = self.classifier(x)
+        return x
+
+
+class DiscriminatorLoss(nn.Module):
+    def __init__(self, dim_ins, loss=nn.BCEWithLogitsLoss()):
+        super(DiscriminatorLoss, self).__init__()
+        self.classifier = []
+        for dim in dim_ins:
+            self.classifier.append(Discriminator(dim_in=dim, dim_out=2).cuda())
+        self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.loss = loss
+
+    def forward(self, features1, features2):
+        gan_loss = torch.tensor(0.).cuda()
+        if isinstance(features1, list) is False:
+            features1 = [features1]
+            features2 = [features2]
+        for i in range(len(self.classifier)):
+            inputs = torch.cat((features1[i],features2[i]),0)
+            if len(inputs.size())> 2:
+                inputs = self.avg_pool(inputs).view(inputs.size(0), -1)
+            batch_size = inputs.size(0)
+            target = torch.FloatTensor([[1, 0] for _ in range(batch_size//2)] + [[0, 1] for _ in range(batch_size//2)]).cuda()
+            outputs = self.classifier[i](inputs)
+            gan_loss += self.loss(outputs, target)
+        return gan_loss
+    
 class TeacherProjector(nn.Module):
     def __init__(self, c_teacher, c_student, bottleneck=None):
         super().__init__()
@@ -1180,6 +1217,18 @@ class TeacherProjector(nn.Module):
 
     def forward(self, ft):
         return self.proj(ft.clone())
+    
+class DistillKL(nn.Module):
+    """Distilling the Knowledge in a Neural Network"""
+    def __init__(self, T=3):
+        super(DistillKL, self).__init__()
+        self.T = T
+
+    def forward(self, y_s, y_t):
+        p_s = F.log_softmax(y_s/self.T, dim=1)
+        p_t = F.softmax(y_t/self.T, dim=1)
+        loss = F.kl_div(p_s, p_t, reduction='batchmean') * (self.T**2)
+        return loss
 class SupervisionLoss(nn.Module):
     
     def __init__(self, model, teacher_model):
@@ -1195,20 +1244,27 @@ class SupervisionLoss(nn.Module):
         self.criterion = self.args.distillation_loss
         self.no_mixup = self.args.distillation_no_mixup
         self.projector = None
+        self.discriminator = DiscriminatorLoss([128])
+        self.mse_loss = nn.MSELoss()
         if self.criterion == "cos":
             self.loss = nn.CosineEmbeddingLoss()
         elif self.criterion == "mse":
-            self.loss = nn.MSELoss()
+            self.loss = self.mse_loss
+
+    def mixup_interpolation_loss(self, mixed_features, mixed_clean_features):
+        return self.mse_loss(mixed_features, mixed_clean_features)
             
-    def distill_backbone(self, imgs, pred_embeddings):
-        with torch.inference_mode():
-            _, features = self.forward_teacher(imgs)
-            if not self.projector:
-                self.projector = TeacherProjector(features.shape[1], pred_embeddings.shape[1]).to(features.device)
-        bs = features.shape[0]
-        projected_features = self.projector(features.detach())
-        return self.weight * self.loss(pred_embeddings.reshape(bs, -1), projected_features.reshape(bs, -1),
-                                        target=torch.ones(bs, device=projected_features.device))
+    def distill_mixskd(self, imgs, pred_embeddings, src_img, mixed_mask):
+        features = torch.empty((pred_embeddings.shape[0], 2, *pred_embeddings.shape[1:]), device=imgs.device)
+        if mixed_mask.sum() > 0:
+            features[mixed_mask] = self.forward_teacher_mixed(src_img[mixed_mask].to(imgs.device))
+        features[~mixed_mask] = pred_embeddings[~mixed_mask].unsqueeze(1).repeat(1, 2, 1, 1, 1).float()
+        
+        mixed_clean_features = features[:, 0] * 0.5 + features[:, 1] * 0.5
+        mix_loss = self.mixup_interpolation_loss(pred_embeddings, mixed_clean_features)
+        discriminator_loss = self.discriminator.forward(pred_embeddings, mixed_clean_features)
+        
+        return self.weight * (mix_loss + discriminator_loss) 
 
     def distill_from_yolo(self, imgs, pred_embeddings, src_img, mask_gt, gts, forwards, mixed_mask, pred_fg_mask, pred_target_gt_idx):
         with torch.inference_mode():
@@ -1402,6 +1458,14 @@ class SupervisionLoss(nn.Module):
             return preds, res_dict["features"]
         else:
             return self.teacher_model(imgs)
+
+    def forward_teacher_mixed(self, imgs):
+        self.teacher_model.model[-1].dense = True # Set the detection head to dense
+        res_dict1 = self.teacher_model(imgs[:, 0])
+        res_dict2 = self.teacher_model(imgs[:, 1])
+        self.teacher_model.model[-1].dense = False
+        
+        return torch.cat((res_dict1["features"].unsqueeze(1), res_dict2['features'].unsqueeze(1)), dim=1).float()
 
     def plot_depth_maps(self, depth_maps, imgs):
         fig ,axes = plt.subplots(2, 2, figsize=(18, 12))
