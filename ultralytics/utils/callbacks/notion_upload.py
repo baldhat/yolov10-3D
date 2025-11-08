@@ -118,21 +118,21 @@ class Run:
         import time
         torch.backends.cudnn.enable = True
         torch.backends.cudnn.benchmark = True
+        model = model.eval()
+        model = model.cuda()
+        #model = torch.compile(model)
         with torch.inference_mode():
-            model = model.eval()
-            model = model.cuda()
-            #model = torch.compile(model)
             p = next(model.parameters())
             for bs in batch_sizes:
                 im = torch.empty((bs, p.shape[1], *imgsz), device=p.device)  # input image in BCHW format
-                flops = thop.profile(deepcopy(model), inputs=[im], report_missing=True)[0] / 1e9 * 2  # imgsz GFLOPs
-                for x in range(500):
+                flops = 0 #thop.profile(deepcopy(model), inputs=[im], report_missing=True)[0] / 1e9 * 2  # imgsz GFLOPs
+                for x in range(1000):
                     model(im)
                 t1 = time.time()
-                for x in range(500):
+                for x in range(100):
                     out = model(im)
                 t2 = time.time()
-                print(f"Batch size: {bs} Took: {(t2-t1) / 500 * 1000:.2f}ms, FLOPs: {flops:.2f} GFLOPs, batch size: {im.shape[0]}, ")
+                print(f"Batch size: {bs} Took: {(t2-t1) / 100 * 1000:.2f}ms, FLOPs: {flops:.2f} GFLOPs, batch size: {im.shape[0]}, ")
                 from torch.profiler import profile, ProfilerActivity, record_function
                 with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                             record_shapes=True,

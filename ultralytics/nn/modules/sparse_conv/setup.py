@@ -13,7 +13,7 @@ setup(
             extra_compile_args={'cxx': ['-O3'],
                                 'nvcc': ['-O3',
                                          '--expt-relaxed-constexpr',
-    "-gencode", "arch=compute_61,code=sm_61"]}  # adjust SM version to your GPU
+    "-gencode", "arch=compute_75,code=sm_75"]}  # adjust SM version to your GPU
         )
     ],
     cmdclass={'build_ext': BuildExtension}
