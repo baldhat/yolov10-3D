@@ -99,7 +99,7 @@ torch::Tensor sparse_conv2d_fast_forward(
     auto options = input.options();
     auto output = torch::empty({B, C_out, H_out, W_out}, options);
 
-    const int threads = 256;  // smaller threads to increase occupancy
+    const int threads = 128;  // smaller threads to increase occupancy
     const int blocks = (B * N * C_out + threads - 1) / threads;
 
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "sparse_conv2d_fast_kernel", ([&] {

@@ -122,22 +122,22 @@ class SparseConv2d(nn.Module):
         if not indices.is_cuda:
             raise RuntimeError("Indices tensor must be on the same CUDA device as input.")
 
-        with record_function("my_custom_kernel"):
-            out = _spc.forward(
-                input,
-                self.weight,
-                self.bias
-                if self.bias is not None
-                else torch.tensor([], device=input.device, dtype=input.dtype),
-                indices,
-                self.stride[0],
-                self.stride[1],
-                self.padding[0],
-                self.padding[1],
-                self.dilation[0],
-                self.dilation[1],
-                self.groups,
-            )
+        #with record_function("my_custom_kernel"):
+        out = _spc.forward(
+            input,
+            self.weight,
+            self.bias
+            if self.bias is not None
+            else torch.tensor([], device=input.device, dtype=input.dtype),
+            indices,
+            self.stride[0],
+            self.stride[1],
+            self.padding[0],
+            self.padding[1],
+            self.dilation[0],
+            self.dilation[1],
+            self.groups,
+        )
 
         return out
 
