@@ -138,33 +138,43 @@ class Run:
         import time
         torch.backends.cudnn.enable = True
         torch.backends.cudnn.benchmark = True
+        model = model.eval()
+        model = model.cuda()
+        #model = torch.compile(model)
         with torch.inference_mode():
-            model = model.eval()
-            model = model.cuda()
-            #model = torch.compile(model)
-            p = next(model.parameters())
+            p = next(model.parameters())                                                                                                                            
             for bs in batch_sizes:
                 im = torch.empty((bs, p.shape[1], *imgsz), device=p.device)  # input image in BCHW format
-                #flops = thop.profile(deepcopy(model), inputs=[im], report_missing=True)[0] / 1e9 * 2  # imgsz GFLOPs
-                flops = Run._get_flops(model, im)
-                for x in range(500):
+                # torch.Size([1, 64, 160, 48]) torch.Size([1, 128, 80, 24]) torch.Size([1, 256, 40, 12])
+                fs = [torch.empty((1, 64, 160, 48)).cuda(), torch.empty((1, 128, 80, 24)).cuda(), torch.empty((1, 256, 40, 12)).cuda()]
+                flops = 0 # thop.profile(model.model[-1], inputs=[im], report_missing=True)[0] / 1e9 * 2  # imgsz GFLOPs
+                for x in range(1000):
                     model(im)
+                    #model.model[-1](fs)
                 t1 = time.time()
-                for x in range(500):
+                for x in range(100):
                     out = model(im)
-                t2 = time.time()
-                print(f"Batch size: {bs} Took: {(t2-t1) / 500 * 1000:.2f}ms, FLOPs: {flops:.2f} GFLOPs, batch size: {im.shape[0]}, ")
+                    #model.model[-1](fs)
+                t2 = time.time()                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
+                print(f"Batch size: {bs} Took: {(t2-t1) / 100 * 1000:.2f}ms, FLOPs: {flops:.2f} GFLOPs, batch size: {im.shape[0]}, ")
+                for x in range(1000):
+                    # model(im)
+                    model.model[-1](fs)
+                t1 = time.time()
+                for x in range(100):
+                    # out = model(im)
+                    model.model[-1](fs)
+                t2 = time.time()                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
+                print(f"Head: {bs} Took: {(t2-t1) / 100 * 1000:.2f}ms, FLOPs: {flops:.2f} GFLOPs, batch size: {im.shape[0]}, ")
                 from torch.profiler import profile, ProfilerActivity, record_function
                 with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                             record_shapes=True,
                             profile_memory=True,
                             with_stack=True) as prof:
-                    t1 = time.time()
                     with record_function("inference"):
                         out = model(im)
-                    t2 = time.time()
                 print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=50))
-                prof.export_chrome_trace("/home/stud/mijo/trace_alloff.json")
+                prof.export_chrome_trace("/home/stud/mijo/trace_n_baseline.json")
         return 0 #flops
 
     def get_flops(self):

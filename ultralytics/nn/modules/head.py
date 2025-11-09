@@ -803,47 +803,33 @@ class v10Detect3d(nn.Module):
             if self.common_head:
                 x[i] = self.common[i](x[i])
             for j, module in enumerate(heads):
-                with record_function("single_head_forward"):
-                    if self.use_predecessors and len(self.predecessors[head_names[j]]) > 0:
-                        inputs = [x[i]]
-                        predecessors = [outputs[key] if key != "dep"
-                                                    else outputs[key] / self.dep_norm
-                                    for key in self.predecessors[head_names[j]]]
-                        inputs.extend([predecessor.detach() for predecessor in predecessors])
-                        if head_names[j] == "dep":
-                            outputs[head_names[j]], embs[i] = self.single_head_forward(module[i], (torch.cat(inputs, dim=1)))
-                        else:
-                            outputs[head_names[j]] = module[i](torch.cat(inputs, dim=1))
-                    else:
-                        if head_names[j] == "dep":
-                            outputs[head_names[j]], embs[i] = self.single_head_forward(module[i], x[i])
-                        else:
-                            outputs[head_names[j]] = module[i](x[i])
+                if head_names[j] == "dep":
+                    outputs[head_names[j]], embs[i] = self.single_head_forward(module[i], x[i])
+                else:
+                    outputs[head_names[j]] = module[i](x[i])
             y.append(torch.cat(list(outputs.values()), dim=1))
         return y, embs
     
     def forward(self, x):
-        with record_function("head_forward"):
-            if not self.training and not self.dense:
-                # one2one, o2o_embs = self.inference_forward_feat([xi.detach() for xi in x], self.o2o_heads)
-                # self.get_head_ranks()
-                one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
+        if not self.training and not self.dense:
+            # one2one, o2o_embs = self.inference_forward_feat([xi.detach() for xi in x], self.o2o_heads)
+            # self.get_head_ranks()
+            one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
+        else:
+            one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
+        if not self.training:
+            one2one = self.inference(one2one)
+            if not self.export:
+                return {"one2one": one2one, "o2o_embs": o2o_embs}
             else:
-                one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
-        with record_function("result_decoding"):
-            if not self.training:
-                one2one = self.inference(one2one)
-                if not self.export:
-                    return {"one2one": one2one, "o2o_embs": o2o_embs}
-                else:
-                    # assert(self.max_det != -1)
-                    # predsO = one2one.transpose(-1, -2)
-                    # regO, scoresO, labelsO = ops.v10_3Dpostprocess(predsO, self.max_det, self.nc)
-                    # return torch.cat((regO, scoresO.unsqueeze(-1), labelsO.unsqueeze(-1)), dim=-1)
-                    return one2one
-            else:
-                one2many, o2m_embs, depth_maps = self._forward(x)
-                return {"one2many": one2many, "one2one": one2one, "o2m_embs": o2m_embs, "o2o_embs": o2o_embs, "depth_maps": depth_maps}
+                # assert(self.max_det != -1)
+                # predsO = one2one.transpose(-1, -2)
+                # regO, scoresO, labelsO = ops.v10_3Dpostprocess(predsO, self.max_det, self.nc)
+                # return torch.cat((regO, scoresO.unsqueeze(-1), labelsO.unsqueeze(-1)), dim=-1)
+                return one2one
+        else:
+            one2many, o2m_embs, depth_maps = self._forward(x)
+            return {"one2many": one2many, "one2one": one2one, "o2m_embs": o2m_embs, "o2o_embs": o2o_embs, "depth_maps": depth_maps}
 
     def single_head_forward(self, head, features):
         assert len(head) == 3
