@@ -851,7 +851,7 @@ def assigned_targets2d_comparison(batch, targets_2d, fg_mask, fg_mask2D, pred_bb
 
         ax.imshow(img)
         ax.axis("off")
-        plt.savefig(f"/home/stud/mijo/tmp/target_comparison_2D_{i:02d}.png")
+        plt.savefig(f"/home/wiss/mejo/tmp/target_comparison_2D_{i:02d}.png")
         plt.close()
     print()
 
@@ -1198,7 +1198,9 @@ class DDDetectionLoss:
             targets_3d2D = targets2D[4:9] # center, size, depth, head_bin, head_res
             self.plot_assignment_comparison(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt,
                                             fg_mask2D, targets_3d2D,  pred_kps2D, gt_kps2D, [np.rad2deg(2*np.arctan2(1280, 2* calib.cpu().numpy()[2])) for calib in calibs])
-            #self.plot_assignments(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt)
+        #self.plot_assignments(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt)
+        
+        self.plot_features(embeddings[0][0], batch["img"][0])
         
         depths = targets_3d[-3][fg_mask].squeeze()
         in_min, in_max = self.hyp.loss_scale_min_depth, self.hyp.loss_scale_max_depth, 
@@ -1229,6 +1231,27 @@ class DDDetectionLoss:
                 ) / target_scores_sum
 
         return loss.sum() * batch_size, loss
+    
+    def plot_features(self, feats, img):
+        for i in [39]:
+            fig, ax = plt.subplots(1, 1, figsize=(18, 6), gridspec_kw={'wspace': 0, 'hspace': 0},
+                                constrained_layout=True)
+
+            x = feats[i]
+            #x[:10] = x.mean()
+            x = x - x[10:].min()
+            m = x[10:].max()
+            x[x > m] = m
+            x /= m
+            x = (-x) + 2
+            x = (x + 1).log().detach().cpu().numpy()
+            ax.imshow(x, cmap="RdBu")
+            ax.axis("off")
+            plt.savefig(f"/home/wiss/mejo/jonathan_tmp/mixed_features.png")
+            np.save("/home/wiss/mejo/jonathan_tmp/mixed_log_vals.np", x)
+            print()
+            plt.close()
+        print()
 
     def plot_assignments(self, batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt):
         debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor)
@@ -1238,8 +1261,9 @@ class DDDetectionLoss:
     def plot_assignment_comparison(self, batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt,
             fg_mask2D, targets_3d2D,  pred_kps2D, gt_kps2D, fovs
     ):
-        assigned_targets2d_comparison(batch, targets_2d, fg_mask, fg_mask2D, pred_bboxes, stride_tensor)
-        assigned_bev_comparison(pred_kps, gt_kps, fg_mask, fg_mask2D, mask_gt, stride_tensor, fovs)
+        #assigned_targets2d_comparison(batch, targets_2d, fg_mask, fg_mask2D, pred_bboxes, stride_tensor)
+        #assigned_bev_comparison(pred_kps, gt_kps, fg_mask, fg_mask2D, mask_gt, stride_tensor, fovs)
+        pass
         
 
     def compute_loss_weights(self, current_loss):
