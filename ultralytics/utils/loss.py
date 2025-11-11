@@ -1066,7 +1066,7 @@ class DDDetectionLoss:
         if self.hyp.distillation and embeddings is not None and embeddings[0] is not None:
             #embeddings = torch.cat([emb.view(emb.shape[0], emb.shape[1], -1) for emb in embeddings], dim=2)
             if self.hyp.distillation_teacher in ["yolo", "self"]:
-                loss[6] = self.supervisor.distill_mixskd(batch["img"].detach(), embeddings, batch["non_mix_imgs"].detach(), batch["mixed"].bool())
+                loss[6] = self.supervisor.distill_mixskd(batch["img"].detach(), embeddings, batch["non_mix_imgs"].detach(), batch["mixed"].bool(), pred_scores)
             else:
                 loss[6] = self.supervisor.distill_from_dino(
                     batch["non_mix_imgs"].detach(), gt_center_3d, pred_3d[..., :2], embeddings, fg_mask.bool(),
@@ -1225,10 +1225,11 @@ class DistillKL(nn.Module):
         self.T = T
 
     def forward(self, y_s, y_t):
-        p_s = F.log_softmax(y_s/self.T, dim=1)
-        p_t = F.softmax(y_t/self.T, dim=1)
+        p_s = F.log_softmax(y_s/self.T, dim=-1)
+        p_t = F.softmax(y_t/self.T, dim=-1)
         loss = F.kl_div(p_s, p_t, reduction='batchmean') * (self.T**2)
         return loss
+
 class SupervisionLoss(nn.Module):
     
     def __init__(self, model, teacher_model):
@@ -1244,7 +1245,8 @@ class SupervisionLoss(nn.Module):
         self.criterion = self.args.distillation_loss
         self.no_mixup = self.args.distillation_no_mixup
         self.projector = None
-        self.discriminator = DiscriminatorLoss([128])
+        self.discriminator = DiscriminatorLoss([512])
+        self.criterion_div = DistillKL()
         self.mse_loss = nn.MSELoss()
         if self.criterion == "cos":
             self.loss = nn.CosineEmbeddingLoss()
@@ -1254,17 +1256,22 @@ class SupervisionLoss(nn.Module):
     def mixup_interpolation_loss(self, mixed_features, mixed_clean_features):
         return self.mse_loss(mixed_features, mixed_clean_features)
             
-    def distill_mixskd(self, imgs, pred_embeddings, src_img, mixed_mask):
+    def distill_mixskd(self, imgs, pred_embeddings, src_img, mixed_mask, pred_logits):
         features = torch.empty((pred_embeddings.shape[0], 2, *pred_embeddings.shape[1:]), device=imgs.device)
+        logits = torch.empty((pred_logits.shape[0], 2, *pred_logits.shape[1:]), device=imgs.device)
         if mixed_mask.sum() > 0:
-            features[mixed_mask] = self.forward_teacher_mixed(src_img[mixed_mask].to(imgs.device))
+            features[mixed_mask], logits[mixed_mask] = self.forward_teacher_mixed(src_img[mixed_mask].to(imgs.device))
         features[~mixed_mask] = pred_embeddings[~mixed_mask].unsqueeze(1).repeat(1, 2, 1, 1, 1).float()
+        logits[~mixed_mask] = pred_logits[~mixed_mask].unsqueeze(1).repeat(1, 2, 1, 1).float()
         
         mixed_clean_features = features[:, 0] * 0.5 + features[:, 1] * 0.5
+        mixed_clean_logits = logits[:, 0] * 0.5 + logits[:, 1] * 0.5
+        
         mix_loss = self.mixup_interpolation_loss(pred_embeddings, mixed_clean_features)
         discriminator_loss = self.discriminator.forward(pred_embeddings, mixed_clean_features)
+        b_logit_loss = 0.001 * (self.criterion_div(pred_logits, mixed_clean_logits.detach()) + self.criterion_div(mixed_clean_logits, pred_logits.detach()))
         
-        return self.weight * (mix_loss + discriminator_loss) 
+        return self.weight * (mix_loss + discriminator_loss + b_logit_loss) 
 
     def distill_from_yolo(self, imgs, pred_embeddings, src_img, mask_gt, gts, forwards, mixed_mask, pred_fg_mask, pred_target_gt_idx):
         with torch.inference_mode():
@@ -1465,7 +1472,11 @@ class SupervisionLoss(nn.Module):
         res_dict2 = self.teacher_model(imgs[:, 1])
         self.teacher_model.model[-1].dense = False
         
-        return torch.cat((res_dict1["features"].unsqueeze(1), res_dict2['features'].unsqueeze(1)), dim=1).float()
+        feats = torch.cat((res_dict1["features"].unsqueeze(1), res_dict2['features'].unsqueeze(1)), dim=1).float()
+        logits1 = torch.cat([x[:, :3].reshape(x.shape[0], 3, -1) for x in res_dict1["one2many"]], dim=-1).transpose(1, 2)
+        logits2 = torch.cat([x[:, :3].reshape(x.shape[0], 3, -1) for x in res_dict2["one2many"]], dim=-1).transpose(1, 2)
+        logits = torch.cat((logits1.unsqueeze(1), logits2.unsqueeze(1)), dim=1).float()
+        return feats, logits
 
     def plot_depth_maps(self, depth_maps, imgs):
         fig ,axes = plt.subplots(2, 2, figsize=(18, 12))
