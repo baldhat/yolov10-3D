@@ -7,8 +7,11 @@ from copy import copy
 from ultralytics.data.datasets.kitti import KITTIDataset
 from ultralytics.data.datasets.waymo import WaymoDataset
 from ultralytics.utils.plotting import plot_labels_3D, KITTIVisualizer, plot_images, plot_training_depth_dist
+from torchvision.models import EfficientNet_V2_L_Weights, efficientnet_v2_l,  EfficientNet_V2_M_Weights, efficientnet_v2_m,  EfficientNet_V2_S_Weights, efficientnet_v2_s
 
 from ...data.datasets.omni3d import Omni3Dataset
+
+import torch
 
 
 class YOLOv10_3DDetectionTrainer(DetectionTrainer):
@@ -55,10 +58,82 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
             model.load(weights)
         else:
             backbone = YOLOv10.from_pretrained("jameslahm/" + self.model.split("_")[0])
-            model_seq = deepcopy(model.model)
-            for i, module in enumerate(model_seq):
-                if not isinstance(module, v10Detect3d):
-                    model.model[i] = deepcopy(backbone.model.model[i])
+            backbone.model.model[12].f = [-1, 9]
+            backbone.model.model[15].f = [-1, 8]
+            b = efficientnet_v2_l(weights=EfficientNet_V2_L_Weights.IMAGENET1K_V1) # MODEL_SIZE L
+            # b = efficientnet_v2_m(weights=EfficientNet_V2_M_Weights.IMAGENET1K_V1) # MODEL_SIZE M
+            # b = efficientnet_v2_s(weights=EfficientNet_V2_S_Weights.IMAGENET1K_V1) # MODEL_SIZE S
+
+            u1 = torch.nn.Sequential(*b.features[4:6])
+            u2 = torch.nn.Sequential(*b.features[6:8])
+
+            # MODEL_SIZE L
+            t1 = torch.nn.Sequential(
+                torch.nn.Conv2d(96, 320, 1), 
+                torch.nn.BatchNorm2d(320),
+                torch.nn.ReLU()
+            )
+            t2 = torch.nn.Sequential(
+                torch.nn.Conv2d(224, 640, 1), 
+                torch.nn.BatchNorm2d(640),
+                torch.nn.ReLU()
+            )
+            t3 = torch.nn.Sequential(
+                torch.nn.Conv2d(640, 640, 1), 
+                torch.nn.BatchNorm2d(640),
+                torch.nn.ReLU()
+            )
+            
+            # MODEL_SIZE M
+            # t1 = torch.nn.Sequential(
+            #     torch.nn.Conv2d(80, 320, 1), 
+            #     torch.nn.BatchNorm2d(320),
+            #     torch.nn.ReLU()
+            # )
+            # t2 = torch.nn.Sequential(
+            #     torch.nn.Conv2d(176, 640, 1), 
+            #     torch.nn.BatchNorm2d(640),
+            #     torch.nn.ReLU()
+            # )
+            # t3 = torch.nn.Sequential(
+            #     torch.nn.Conv2d(512, 640, 1), 
+            #     torch.nn.BatchNorm2d(640),
+            #     torch.nn.ReLU()
+            # )
+
+            # # MODEL_SIZE S
+            # t1 = torch.nn.Sequential(
+            #     torch.nn.Conv2d(64, 320, 1), 
+            #     torch.nn.BatchNorm2d(320),
+            #     torch.nn.ReLU()
+            # )
+            # t2 = torch.nn.Sequential(
+            #     torch.nn.Conv2d(160, 640, 1), 
+            #     torch.nn.BatchNorm2d(640),
+            #     torch.nn.ReLU()
+            # )
+            # t3 = torch.nn.Sequential(
+            #     torch.nn.Conv2d(1280, 640, 1), 
+            #     torch.nn.BatchNorm2d(640),
+            #     torch.nn.ReLU()
+            # )
+
+            modules = [torch.nn.Identity(), torch.nn.Identity(), *b.features[:4], u1, u2, t1, t2, t3]
+
+            for i, module in enumerate(modules):
+                module.i = i
+                module.f = -1
+            t1.f = 5
+            t2.f = 6
+            t3.f = 7
+            model.model = torch.nn.Sequential(*modules, *backbone.model.model[11:-1], model.model[-1])
+            model.model[-1].stride = model.model[-1].stride
+            return model
+
+            # model_seq = deepcopy(model.model)
+            # for i, module in enumerate(model_seq):
+            #     if not isinstance(module, v10Detect3d):
+            #         model.model[i] = deepcopy(backbone.model.model[i])
         return model
 
     def preprocess_batch(self, batch):

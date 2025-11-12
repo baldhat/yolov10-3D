@@ -223,7 +223,7 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
             preds,
             self.dataloader.dataset,
             paths=batch["im_file"],
-            fname=self.save_dir / f"val_batch{ni}_pred3d.jpg",
+            fname=self.save_dir / f"val_batch{ni}_pred3d.png",
             names=self.names
         )
         self.visualizer.plot_bev(
@@ -231,7 +231,7 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
             preds,
             self.dataloader.dataset,
             paths=batch["im_file"],
-            fname=self.save_dir / f"val_batch{ni}_pred_bev.jpg",
+            fname=self.save_dir / f"val_batch{ni}_pred_bev.svg",
             names=self.names
         )
 

@@ -14,7 +14,7 @@ batch: 32 # (int) number of images per batch (-1 for AutoBatch)
 imgsz: [960, 640] # (int | list) input images size as int for train and val modes, or list[w,h] for predict and export modes
 save: True # (bool) save train checkpoints and predict results
 save_period: -1 # (int) Save checkpoint every x epochs (disabled if < 1)
-val_period: 1 # (int) Validation every x epochs
+val_period: 5 # (int) Validation every x epochs
 val_start: 80
 cache: False # (bool) True/ram, disk or False. Use cache for data loading
 device: # (int | str | list, optional) device to run on, i.e. cuda device=0 or device=0,1,2,3 or device=cpu
@@ -37,6 +37,7 @@ fraction: 1.0 # (float) dataset fraction to train on (default is 1.0, all images
 profile: False # (bool) profile ONNX and TensorRT speeds during training for loggers
 freeze: None # (int | list, optional) freeze first n layers, or freeze list of layer indices during training
 multi_scale: False # (bool) Whether to use multiscale during training
+trainval: False
 # Segmentation
 overlap_mask: True # (bool) masks should overlap during training (segment train only)
 mask_ratio: 4 # (int) mask downsample ratio (segment train only)
@@ -69,7 +70,7 @@ embed: # (list[int], optional) return feature vectors/embeddings from given laye
 use_o2m_depth: False
 use_dino_depth: False
 dino_path: /home/stud/mijo/experiments/results/dino_base_64_lr3e-6_noMix/dino/best.pt
-distillation_path: /home/stud/mijo/experiments/results/yolov10-3Db_cfa_dep_4/weights/best.pt
+distillation_path: /home/stud/mijo/experiments/results/yolov10-3Dx_trainval_selfDistill_1/weights/best.pt
 
 # Visualize settings ---------------------------------------------------------------------------------------------------
 show: False # (bool) show predicted images and videos if environment allows

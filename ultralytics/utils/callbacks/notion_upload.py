@@ -2,7 +2,7 @@ import os
 try:
     from notion_client import Client
 except:
-    pass
+    print("Notion upload disabled")
 import pandas as pd
 import yaml
 import numpy as np
@@ -11,7 +11,6 @@ import sys
 from pathlib import Path
 import matplotlib.pyplot as plt
 import torch
-from torch.utils.flop_counter import FlopCounterMode
 
 
 class Run:
@@ -111,24 +110,6 @@ class Run:
             "number": float(np.max(self.results["metrics/3D"]))
         }
 
-    @staticmethod
-    def _get_flops(model, inp, with_backward=False):
-    
-        istrain = model.training
-        model.eval()
-        
-        inp = inp if isinstance(inp, torch.Tensor) else torch.randn(inp)
-
-        flop_counter = FlopCounterMode(mods=model, display=True, depth=None)
-        with flop_counter:
-            if with_backward:
-                model(inp).sum().backward()
-            else:
-                model(inp)
-        total_flops =  flop_counter.get_total_flops() / 1000000000
-        if istrain:
-            model.train()
-        return total_flops
 
     @staticmethod
     def get_flops_(model, imgsz=[1280, 384], batch_sizes=[1,1,1]):
@@ -147,35 +128,27 @@ class Run:
                 im = torch.empty((bs, p.shape[1], *imgsz), device=p.device)  # input image in BCHW format
                 # torch.Size([1, 64, 160, 48]) torch.Size([1, 128, 80, 24]) torch.Size([1, 256, 40, 12])
                 fs = [torch.empty((1, 64, 160, 48)).cuda(), torch.empty((1, 128, 80, 24)).cuda(), torch.empty((1, 256, 40, 12)).cuda()]
-                flops = 0 # thop.profile(model.model[-1], inputs=[im], report_missing=True)[0] / 1e9 * 2  # imgsz GFLOPs
-                for x in range(1000):
+                flops = thop.profile(deepcopy(model), inputs=[im])[0] / 1e9 * 2  # imgsz GFLOPs
+                for x in range(500):
                     model(im)
                     #model.model[-1](fs)
                 t1 = time.time()
-                for x in range(100):
+                for x in range(200):
                     out = model(im)
                     #model.model[-1](fs)
                 t2 = time.time()                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
-                print(f"Batch size: {bs} Took: {(t2-t1) / 100 * 1000:.2f}ms, FLOPs: {flops:.2f} GFLOPs, batch size: {im.shape[0]}, ")
-                for x in range(1000):
-                    # model(im)
-                    model.model[-1](fs)
-                t1 = time.time()
-                for x in range(100):
-                    # out = model(im)
-                    model.model[-1](fs)
-                t2 = time.time()                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
-                print(f"Head: {bs} Took: {(t2-t1) / 100 * 1000:.2f}ms, FLOPs: {flops:.2f} GFLOPs, batch size: {im.shape[0]}, ")
-                from torch.profiler import profile, ProfilerActivity, record_function
-                with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                            record_shapes=True,
-                            profile_memory=True,
-                            with_stack=True) as prof:
-                    with record_function("inference"):
-                        out = model(im)
-                print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=50))
-                prof.export_chrome_trace("/home/stud/mijo/trace_n_baseline.json")
+                print(f"Batch size: {bs} Took: {(t2-t1) / 200 * 1000:.2f}ms, FLOPs: {flops:.2f} GFLOPs, batch size: {im.shape[0]}, ")
+                # from torch.profiler import profile, ProfilerActivity, record_function
+                # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                #             record_shapes=True,
+                #             profile_memory=True,
+                #             with_stack=True) as prof:
+                #     with record_function("inference"):
+                #         out = model(im)
+                # print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=50))
+                # prof.export_chrome_trace("/home/stud/mijo/trace_n_baseline.json")
         return 0 #flops
+
 
     def get_flops(self):
         return {

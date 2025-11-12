@@ -46,7 +46,12 @@ class KITTIDataset(data.Dataset):
             [1.73698127, 0.59706367, 1.76282397]])
 
         # data split loading
-        assert mode in ['train', 'val', 'trainval', 'test']
+        assert mode in ['train', 'val', 'test']
+        if args.trainval:
+            image_file_path = image_file_path.replace("train.txt", "trainval.txt")
+        if mode == "val" and args.split == "test":
+            mode = "test"
+            image_file_path = image_file_path.replace("val.txt", "test.txt")
         self.split = mode
         self.mode = mode
         root_dir = pathlib.Path(image_file_path).parent.parent
@@ -54,6 +59,8 @@ class KITTIDataset(data.Dataset):
         self.idx_list = [x.strip() for x in open(split_dir).readlines()]
         if args.overfit:
             self.idx_list = self.idx_list[:64]
+        if len(self.idx_list) > 7518:
+            self.idx_list = self.idx_list[:7518]
 
         # path configuration
         self.data_dir = os.path.join(root_dir, 'testing' if self.mode == 'test' else 'training')
@@ -127,7 +134,7 @@ class KITTIDataset(data.Dataset):
         img = ori_img
         img0, img1 = None, None
         img_size = np.array(ori_img.size)
-        if self.split != 'test':
+        if True: #self.split != 'test':
             dst_W, dst_H = img_size
 
             if self.load_depth_maps:
@@ -241,7 +248,7 @@ class KITTIDataset(data.Dataset):
         gt_heading_res = []
         gt_src_img = [] # 0 or 1, when no mixup always 0
 
-        if self.split != 'test':
+        if True: #self.split != 'test':
             objects = self.get_label(index)
             # data augmentation for labels
             if random_flip_flag:
@@ -475,28 +482,17 @@ class KITTIDataset(data.Dataset):
 
     def get_stats(self, results, save_dir):
         self.save_results(results, output_dir=save_dir)
-        self.save_counter += 1
         self.save_results(results, output_dir=str(save_dir), epoch=self.save_counter)
-        # python = os.path.join(Path.home(), "anaconda3/envs/kitti_eval/bin/python")
-        # if not os.path.exists(python):
-        #     python = os.path.join(Path.home(), "miniconda3/envs/kitti_eval/bin/python")
-        if self.save_counter % 20 == 0:
-            command = f"ultralytics/data/datasets/evaluate_object_3d_offline_ap40 {self.label_dir} {os.path.join(save_dir, 'preds')}"
-            print("Running command: " + command)
-            lines = subprocess.check_output(command, shell= True, text= True, env={})
-            print("Result: " + lines)
-            result = 0
-            for line in lines.split("\n"):
-                if line.startswith("car_detection_3d"):
-                    result = float(line.split(" ")[3])
-            self.last_result = result
-            # result = eval_from_scrach(
-            #     self.label_dir,
-            #     os.path.join(save_dir, 'preds'),
-            #     ap_mode=40)
-            return result # result["3d@0.70"][1]
-        else:
-            return self.last_result
+        command = f"ultralytics/data/datasets/evaluate_object_3d_offline_ap40 {self.label_dir} {os.path.join(save_dir, 'preds')}"
+        print("Running command: " + command)
+        lines = subprocess.check_output(command, shell= True, text= True, env={})
+        print("Result: " + lines)
+        result = 0
+        for line in lines.split("\n"):
+            if line.startswith("car_detection_3d"):
+                result = float(line.split(" ")[3])
+        self.last_result = result
+        return self.last_result
 
     def save_results(self, results, output_dir='./outputs', epoch=None):
         output_dir = str(os.path.join(output_dir, 'preds'))

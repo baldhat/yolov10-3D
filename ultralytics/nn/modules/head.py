@@ -842,6 +842,7 @@ class v10Detect3d(nn.Module):
         return sum([self.output_channels[predecessor] for predecessor in predecessors]) if len(predecessors) > 0 else 0
 
     def decode(self, cls, pred_o2d, pred_s2d, pred_o3d, pred_s3d, pred_hd, pred_dep, pred_dep_un):
+        self.strides, self.anchors = self.strides.to(cls.device), self.anchors.to(cls.device)
         s2d = pred_s2d * self.strides
         o2d = (pred_o2d + self.anchors) * self.strides
         xy1 = o2d - s2d / 2
@@ -965,7 +966,7 @@ class v10Detect3d(nn.Module):
 
     def get_head_ranks(self):
         head_names = list(self.output_channels.keys())
-        scales = [8, 16, 32]
+        scales = [8, 16]
         ranks = np.zeros((2, 3, 8), dtype=np.float32)
         svalues = np.zeros((2, 3, 8, 128))
         weight_distri = np.zeros((2, 3, 8, 2)) # center, others

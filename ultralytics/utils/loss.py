@@ -770,7 +770,7 @@ def debug_show_assigned_targets2d(batch, targets_2d, fg_mask, pred_bboxes, strid
 
         ax.imshow(img)
         ax.axis("off")
-    plt.show()
+    plt.savefig("/home/stud/mijo/tmp/assignedTargets2d.png")
     print()
 
 def debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps, gt_kps, mask_gt):
@@ -806,11 +806,11 @@ def debug_show_assigned_targets3d(batch, targets_3d, fg_mask, pred_kps, gt_kps, 
 
         ax.imshow(img)
         ax.axis("off")
-    plt.show()
+    plt.savefig("/home/stud/mijo/tmp/assignedTargets3d.png")
     print()
 
 def debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor):
-    max_imgs = 4
+    max_imgs = 16
     fig, ax = plt.subplots(math.ceil(max_imgs ** 0.5), math.ceil(max_imgs ** 0.5),
                            figsize=(36, 18), gridspec_kw={'wspace': 0, 'hspace': 0}, constrained_layout=True)
     ax = ax.ravel()
@@ -844,6 +844,9 @@ def debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor):
             pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1).astype(np.int32)[[0, 1, 3, 2]]
             space = cv2.polylines(space, pts=[pts], isClosed=True, color=c)
         
+        #np.save(f"/home/stud/mijo/dev/2DTAL_{i}.npy", anchors[fg_mask[i]].cpu().numpy())
+        #np.save(f"/home/stud/mijo/dev/GT_{i}.npy", gt_kps[i][mask_gt[i].bool().squeeze(-1)].cpu().numpy())
+        
         for assigned in anchors[fg_mask[i]].cpu().numpy():
             bottom_corners = (assigned[:4] * SCALE)
             x = bottom_corners[:, 0] + R
@@ -861,7 +864,7 @@ def debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor):
 
         ax[i].imshow(space)
         ax[i].axis("off")
-    plt.savefig("/home/stud/mijo/bev.png")
+    plt.savefig("/home/stud/mijo/tmp/assignments_bev.png")
     print()
 
 def project_to_image(kps, calib):

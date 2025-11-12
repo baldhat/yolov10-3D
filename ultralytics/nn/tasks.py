@@ -126,7 +126,7 @@ class BaseModel(nn.Module):
             (torch.Tensor): The last output of the model.
         """
         y, dt, embeddings = [], [], []  # outputs
-        for m in self.model:
+        for i, m in enumerate(self.model):
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
             if profile:
@@ -305,7 +305,7 @@ class DetectionModel(BaseModel):
             forward = lambda x: self.forward(x)[0] if isinstance(m, (Segment, Pose, OBB)) else self.forward(x)
             if isinstance(m, (v10Detect, v10Detect3d)):
                 forward = lambda x: self.forward(x)["one2many"]
-            m.stride = torch.tensor([s / x.shape[-2] for x in forward(torch.zeros(1, ch, s, s))])  # forward
+            m.stride = torch.Tensor([8, 16, 32]).cuda() #torch.tensor([s / x.shape[-2] for x in forward(torch.zeros(1, ch, s, s))])  # forward
             self.stride = m.stride
             m.bias_init()  # only run once
         else:
@@ -314,7 +314,7 @@ class DetectionModel(BaseModel):
         # Init weights, biases
         initialize_weights(self)
         if verbose:
-            self.info()
+            # self.info()
             LOGGER.info("")
 
     def _predict_augment(self, x):
