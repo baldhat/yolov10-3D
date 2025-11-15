@@ -26,6 +26,9 @@ our_color = to_color("FFCA3A") # Yellow
 base_color = to_color("FF595E") # Red
 fov_color = to_color("805D9340") # Purple
 text_color = to_color("000000")
+print(gt_color*255)
+print(our_color*255)
+print(base_color*255)
 
 class Detection3d:
     def __init__(self, line):
@@ -137,7 +140,7 @@ def plot_bev(gts, base_dets, our_dets, filename, fov=60):
                         figsize=(24, 12), gridspec_kw={'wspace': 0, 'hspace': 0}, constrained_layout=True)
 
     num_lines = 11
-    R = 50
+    R = 60
     border = 3
     ax.set_xlim(-R - border, R + border)
     ax.set_ylim(-border, R + border)
@@ -167,35 +170,35 @@ def plot_bev(gts, base_dets, our_dets, filename, fov=60):
     wedge = Wedge((0, 0), R, -fov/2 + 90, fov/2 + 90, color=lightblue)
     ax.add_artist(wedge)
 
-    for j, object in enumerate(gts):            
-        dimensions = np.array([object.l, object.w])
-        translation = object.pos[[0, 2]]
-        ry = -object.ry
+    for j, (gt, b, o) in enumerate(zip(gts, base_dets, our_dets)):            
+        dimensions = np.array([gt.l, gt.w])
+        translation = gt.pos[[0, 2]]
+        ry = -gt.ry
+        gt_center = translation
 
         corners = get_rotated_rectangle_points(translation, dimensions, ry * 180 / np.pi)
         art = ax.add_artist(Polygon(corners, closed=True, fill=False, edgecolor=gt_color, facecolor=gt_color, zorder=3, linewidth=5))
-        if j == 0:
-            art.set_label("Ground Truth")
+        #ax.text(gt_center[0], gt_center[1], str(j))
         
-    for j, object in enumerate(base_dets):
-        dimensions = object.dimensions[::-1][:2]
-        translation = object.location[[0, 2]]
-        ry = -object.ry
+        dimensions = np.array([b.l, b.w])
+        translation = b.pos[[0, 2]]
+        ry = -b.ry
+        b_center = translation
 
         corners = get_rotated_rectangle_points(translation, dimensions, ry * 180 / np.pi)
         art = ax.add_artist(Polygon(corners, closed=True, fill=False, edgecolor=base_color, facecolor=base_color, zorder=3, linewidth=5))
-        if j == 0:
-            art.set_label("Baseline")
         
-    for j, object in enumerate(our_dets):
-        dimensions = object.dimensions[::-1][:2]
-        translation = object.location[[0, 2]]
-        ry = -object.ry
+        dimensions = np.array([o.l, o.w])
+        translation = o.pos[[0, 2]]
+        ry = -o.ry
+        o_center = translation
 
         corners = get_rotated_rectangle_points(translation, dimensions, ry * 180 / np.pi)
         art = ax.add_artist(Polygon(corners, closed=True, fill=False, edgecolor=our_color, facecolor=our_color, zorder=3, linewidth=5))
-        if j == 0:
-            art.set_label("Ours")
+            
+        fac = 1
+        ax.arrow(b_center[0], b_center[1], (gt_center[0] - b_center[0]) * fac, (gt_center[1] - b_center[1]) * fac, color=base_color, zorder=5, width=0.1, length_includes_head=True)
+        ax.arrow(o_center[0], o_center[1], (gt_center[0] - o_center[0]) * fac, (gt_center[1] - o_center[1]) * fac, color=our_color, zorder=5, width=0.1, length_includes_head=True)
 
     plt.savefig(filename, bbox_inches="tight", format="svg")
     fig.clear()

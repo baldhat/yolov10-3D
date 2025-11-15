@@ -129,7 +129,7 @@ class KITTIDataset(data.Dataset):
 
     def __getitem__(self, item):
         #  ============================   get inputs   ===========================
-        index = 8 #int(self.idx_list[item])  # index mapping, get real data id
+        index = int(self.idx_list[item])  # index mapping, get real data id
         ori_img = self.get_image(index)
         img = ori_img
         img0, img1 = None, None
@@ -180,26 +180,26 @@ class KITTIDataset(data.Dataset):
             while count_num < 50:
                 count_num += 1
                 random_index = np.random.randint(len(self.idx_list))
-                random_index = 98 #int(self.idx_list[random_index])
+                random_index = int(self.idx_list[random_index])
                 calib_temp = self.get_calib(random_index)
 
-                #if calib_temp.cu == calib.cu and calib_temp.cv == calib.cv and calib_temp.fu == calib.fu and calib_temp.fv == calib.fv:
-                img1 = self.get_image(random_index)
-                if self.load_depth_maps:
-                    seg_mask_tmp = self.get_segmentation(random_index)
-                img_size_temp = np.array(img.size)
-                dst_W_temp, dst_H_temp = img_size_temp
-                if dst_W_temp == dst_W and dst_H_temp == dst_H:
-                    objects_1 = self.get_label(index)
-                    objects_2 = self.get_label(random_index)
-                    if len(objects_1) + len(objects_2) < self.max_objs:
-                        random_mix_flag = True
-                        if random_flip_flag == True:
-                            img1 = img1.transpose(Image.FLIP_LEFT_RIGHT)
-                            if self.load_depth_maps:
-                                seg_mask_tmp = seg_mask_tmp.transpose(Image.FLIP_LEFT_RIGHT)
-                        img = Image.blend(img, img1.resize((img.width, img.height)), alpha=0.5)
-                        break
+                if calib_temp.cu == calib.cu and calib_temp.cv == calib.cv and calib_temp.fu == calib.fu and calib_temp.fv == calib.fv:
+                    img1 = self.get_image(random_index)
+                    if self.load_depth_maps:
+                        seg_mask_tmp = self.get_segmentation(random_index)
+                    img_size_temp = np.array(img.size)
+                    dst_W_temp, dst_H_temp = img_size_temp
+                    if dst_W_temp == dst_W and dst_H_temp == dst_H:
+                        objects_1 = self.get_label(index)
+                        objects_2 = self.get_label(random_index)
+                        if len(objects_1) + len(objects_2) < self.max_objs:
+                            random_mix_flag = True
+                            if random_flip_flag == True:
+                                img1 = img1.transpose(Image.FLIP_LEFT_RIGHT)
+                                if self.load_depth_maps:
+                                    seg_mask_tmp = seg_mask_tmp.transpose(Image.FLIP_LEFT_RIGHT)
+                            img = Image.blend(img, img1, alpha=0.5)
+                            break
 
         # add affine transformation for 2d images.
         trans, trans_inv = get_affine_transform(center, crop_size, 0, self.resolution, inv=1)

@@ -839,14 +839,14 @@ def assigned_targets2d_comparison(batch, targets_2d, fg_mask, fg_mask2D, pred_bb
         for j, box in enumerate(pred_boxes):
             c = our_color
             p1, p2 = box.split((2, 2), dim=0)
-            cv2.rectangle(img, p1.int().numpy(), p2.int().numpy(), c)  # gt
+            cv2.rectangle(img, p1.int().numpy(), p2.int().numpy(), c, thickness=3)  # gt
             #cv2.circle(img, (p1 + (p2 - p1) / 2).int().numpy(), 4, (0, 255, 255), -1)
 
         pred_boxes = pred_bboxes[i][fg_mask2D[i]].cpu()
         for j, box in enumerate(pred_boxes):
             c = base_color
             p1, p2 = box.split((2, 2), dim=0)
-            cv2.rectangle(img, p1.int().numpy(), p2.int().numpy(), c)  # gt
+            cv2.rectangle(img, p1.int().numpy(), p2.int().numpy(), c, thickness=3)  # gt
             #cv2.circle(img, (p1 + (p2 - p1) / 2).int().numpy(), 4, (0, 255, 255), -1)
 
         ax.imshow(img)
@@ -856,7 +856,7 @@ def assigned_targets2d_comparison(batch, targets_2d, fg_mask, fg_mask2D, pred_bb
     print()
 
 
-def assigned_bev_comparison(pred_kps, gt_kps, fg_mask, fg_mask2D, mask_gt, stride_tensor, fovs):
+def assigned_bev_comparison(pred_kps, gt_kps, fg_mask, fg_mask2D, mask_gt, stride_tensor, fovs, target_gt_idx2d, target_gt_idx):
     max_imgs = 16
     
     def to_color(a):
@@ -899,33 +899,55 @@ def assigned_bev_comparison(pred_kps, gt_kps, fg_mask, fg_mask2D, mask_gt, strid
         wedge = Wedge((0, 0), R, -fovs[i]/2 + 90, fovs[i]/2 + 90, color=fov_color)
         ax.add_artist(wedge)
         
-        for assigned in anchors[fg_mask2D[i]].cpu().numpy():
-            bottom_corners = assigned[:4]
+        pred2d = anchors[fg_mask2D[i]].cpu().numpy()
+        pred3d = anchors[fg_mask[i]].cpu().numpy()
+        pred_gt = gt_kps[i][mask_gt[i].bool().squeeze(-1)].cpu().numpy()
+        for j, as2d in enumerate(pred2d):
+            bottom_corners = as2d[:4]
             x = bottom_corners[:, 0]
             y = bottom_corners[:, 2]
+            center2d = np.mean(x), np.mean(y)
             pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1)[
                 [0, 1, 3, 2]]
             ax.add_artist(Polygon(pts, closed=True, fill=False, edgecolor=base_color, facecolor=base_color, zorder=3, linewidth=5))
-
-        for assigned in anchors[fg_mask[i]].cpu().numpy():
-            bottom_corners = assigned[:4]
-            x = bottom_corners[:, 0]
-            y = bottom_corners[:, 2]
-            pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1)[
-                [0, 1, 3, 2]]
-            ax.add_artist(Polygon(pts, closed=True, fill=False, edgecolor=our_color, facecolor=our_color, zorder=3, linewidth=5))
+            
+            gt_index = target_gt_idx2d[i][fg_mask2D[i]][j]
+            gt = pred_gt[gt_index]
         
-        
-        for gt in gt_kps[i][mask_gt[i].bool().squeeze(-1)].cpu().numpy():
             bottom_corners = gt[:4]
             x = bottom_corners[:, 0]
             y = bottom_corners[:, 2]
+            centergt = np.mean(x), np.mean(y)
             pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1)[
                 [0, 1, 3, 2]]
             ax.add_artist(Polygon(pts, closed=True, fill=False, edgecolor=gt_color, facecolor=gt_color, zorder=3, linewidth=5))
+            
+            ax.plot([center2d[0], centergt[0]], [center2d[1], centergt[1]], c=base_color)
+            
+        for j, as3d in enumerate(pred3d):
+            bottom_corners = as3d[:4]
+            x = bottom_corners[:, 0]
+            y = bottom_corners[:, 2]
+            center = np.mean(x), np.mean(y)
+            pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1)[
+                [0, 1, 3, 2]]
+            ax.add_artist(Polygon(pts, closed=True, fill=False, edgecolor=our_color, facecolor=our_color, zorder=3, linewidth=5))
+            
+            gt_index = target_gt_idx[i][fg_mask[i]][j]
+            gt = pred_gt[gt_index]
+        
+            bottom_corners = gt[:4]
+            x = bottom_corners[:, 0]
+            y = bottom_corners[:, 2]
+            centergt = np.mean(x), np.mean(y)
+            pts = np.concatenate((np.expand_dims(x, 1), np.expand_dims(y, 1)), axis=1)[
+                [0, 1, 3, 2]]
+            ax.add_artist(Polygon(pts, closed=True, fill=False, edgecolor=gt_color, facecolor=gt_color, zorder=3, linewidth=5))
+            
+            ax.plot([center[0], centergt[0]], [center[1], centergt[1]], c=our_color)
 
         ax.axis("off")
-        plt.savefig(f"/home/stud/mijo/tmp/comparison_bev_{i:02d}.svg")
+        plt.savefig(f"/home/wiss/mejo/tmp/comparison_bev_{i:02d}.svg")
         plt.close()
     print()
 
@@ -1197,7 +1219,8 @@ class DDDetectionLoss:
             targets_2d2D = targets2D[2:4]
             targets_3d2D = targets2D[4:9] # center, size, depth, head_bin, head_res
             self.plot_assignment_comparison(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt,
-                                            fg_mask2D, targets_3d2D,  pred_kps2D, gt_kps2D, [np.rad2deg(2*np.arctan2(1280, 2* calib.cpu().numpy()[2])) for calib in calibs])
+                                            fg_mask2D, targets_3d2D,  pred_kps2D, gt_kps2D, [np.rad2deg(2*np.arctan2(1280, 2* calib.cpu().numpy()[2])) for calib in calibs],
+                                            target_gt_idx2D, target_gt_idx)
         #self.plot_assignments(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt)
         
         self.plot_features(embeddings[0][0], batch["img"][0])
@@ -1259,11 +1282,24 @@ class DDDetectionLoss:
         debug_show_pred_bevs(pred_kps, gt_kps, fg_mask, mask_gt, stride_tensor)
 
     def plot_assignment_comparison(self, batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt,
-            fg_mask2D, targets_3d2D,  pred_kps2D, gt_kps2D, fovs
+            fg_mask2D, targets_3d2D,  pred_kps2D, gt_kps2D, fovs, target_gt_idx2d, target_gt_idx
     ):
-        #assigned_targets2d_comparison(batch, targets_2d, fg_mask, fg_mask2D, pred_bboxes, stride_tensor)
-        #assigned_bev_comparison(pred_kps, gt_kps, fg_mask, fg_mask2D, mask_gt, stride_tensor, fovs)
-        pass
+        target_center_2d, target_size_2d = targets_2d
+        target_bboxes = torch.cat(
+            (target_center_2d - target_size_2d / 2, target_center_2d + target_size_2d / 2), dim=-1)
+        plot = False
+        for bs in range(gt_kps2D.shape[0]):
+            for i, bbox1 in enumerate(target_bboxes[bs][fg_mask[bs]]):
+                for j, bbox2 in enumerate(target_bboxes[bs][fg_mask[bs]]):
+                    if i == j:
+                        continue
+                    if bbox_iou(bbox1, bbox2, xywh=False) > 0.8 and len(target_bboxes[bs][fg_mask[bs]]) < 8:
+                        print(bs)
+                        plot = True
+        if plot:
+            assigned_targets2d_comparison(batch, targets_2d, fg_mask, fg_mask2D, pred_bboxes, stride_tensor)
+            assigned_bev_comparison(pred_kps, gt_kps, fg_mask, fg_mask2D, mask_gt, stride_tensor, fovs, target_gt_idx2d, target_gt_idx)
+            print()
         
 
     def compute_loss_weights(self, current_loss):
@@ -1344,7 +1380,7 @@ def compute_heading_loss(input, target_cls, target_reg, loss_weight):
 
     # regression loss
     input_reg = input[..., 12:24]
-    cls_onehot = torch.zeros(target_cls.shape[0], 12).cuda().scatter_(dim=1, index=target_cls.view(-1, 1), value=1)
+    cls_onehot = torch.zeros(target_cls.shape[0], 12).to(input.device).scatter_(dim=1, index=target_cls.view(-1, 1), value=1)
     input_reg = torch.sum(input_reg * cls_onehot, 1)
     reg_loss = (F.l1_loss(input_reg, target_reg, reduction='none') * loss_weight).sum()
 
