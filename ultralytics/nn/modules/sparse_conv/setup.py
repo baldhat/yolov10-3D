@@ -9,7 +9,7 @@ setup(
     ext_modules=[
         CUDAExtension(
             name='sparse_conv2d',
-            sources=['sparse_conv2d.cu'],
+            sources=['sparse_conv2d.cu', 'sparse_conv2d_fast_op.cpp'],
             extra_compile_args={'cxx': ['-O3'],
                                 'nvcc': ['-O3',
                                          '--expt-relaxed-constexpr',

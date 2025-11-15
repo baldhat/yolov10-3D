@@ -8,6 +8,22 @@ import torch.nn.functional as F
 import sparse_conv2d as _spc   # the compiled CUDA extension from the previous steps
 from torch.profiler import record_function
 
+import torch
+import sparse_conv2d  # your compiled extension
+import ultralytics.nn.modules.sparse_conv.sparse_conv2d_fast_symbolic  
+
+def sparse_conv2d_fast(input, weight, bias, indices,
+                       stride_h, stride_w,
+                       pad_h, pad_w,
+                       dilation_h, dilation_w,
+                       groups):
+    return torch.ops.sparseconv.sparse_conv2d_fast(
+        input, weight, bias, indices,
+        stride_h, stride_w, pad_h, pad_w,
+        dilation_h, dilation_w, groups
+    )
+
+
 
 def _pair(v):
     """Utility that mimics torch.nn.modules.utils._pair."""
@@ -98,9 +114,7 @@ class SparseConv2d(nn.Module):
         -------
         Tensor[B, C_out, H_out, W_out] – dense output.
         """
-        # ------------------------------------------------------------------
-        # 1️⃣  Fast path – regular dense convolution when no indices are given
-        # ------------------------------------------------------------------
+
         if indices is None or indices.numel() == 0 or not input.is_cuda:
             # Use the built‑in functional implementation – this guarantees
             # identical numerical results to a plain nn.Conv2d.
@@ -114,16 +128,12 @@ class SparseConv2d(nn.Module):
                 groups=self.groups,
             )
 
-        # ------------------------------------------------------------------
-        # 2️⃣  Sparse path – call the custom CUDA kernel
-        # ------------------------------------------------------------------
         if not input.is_cuda:
             raise RuntimeError("SparseConv2d currently only supports CUDA tensors.")
         if not indices.is_cuda:
             raise RuntimeError("Indices tensor must be on the same CUDA device as input.")
 
-        #with record_function("my_custom_kernel"):
-        out = _spc.forward(
+        out = sparse_conv2d_fast(
             input,
             self.weight,
             self.bias

@@ -111,7 +111,7 @@ class Run:
         }
 
     @staticmethod
-    def get_flops_(model, imgsz=[1280, 384], batch_sizes=[1]):
+    def get_flops_(model, imgsz=[1280, 384], batch_sizes=[1,1,1,1]):
         import torch
         from copy import deepcopy
         import thop
@@ -127,16 +127,20 @@ class Run:
                 im = torch.empty((bs, p.shape[1], *imgsz), device=p.device)  # input image in BCHW format
                 # torch.Size([1, 64, 160, 48]) torch.Size([1, 128, 80, 24]) torch.Size([1, 256, 40, 12])
                 fs = [torch.empty((1, 64, 160, 48)).cuda(), torch.empty((1, 128, 80, 24)).cuda(), torch.empty((1, 256, 40, 12)).cuda()]
-                flops = 0 #thop.profile(deepcopy(model), inputs=[im], report_missing=True)[0] / 1e9 * 2  # imgsz GFLOPs
+                flops = thop.profile(deepcopy(model), inputs=[im])[0] / 1e9 * 2  # imgsz GFLOPs
                 for x in range(1000):
-                    #model(im)
-                    model.model[-1](fs)
+                    model(im)
+                    #model.model[-1](fs)
                 t1 = time.time()
                 for x in range(100):
-                    #out = model(im)
-                    model.model[-1](fs)
+                    out = model(im)
+                    # model.model[-1](fs)
                 t2 = time.time()
-                print(f"Batch size: {bs} Took: {(t2-t1) / 100 * 1000:.2f}ms, FLOPs: {flops:.2f} GFLOPs, batch size: {im.shape[0]}, ")
+                torch.cuda.reset_peak_memory_stats()
+                model(im)
+                peak =torch.cuda.max_memory_allocated()
+                reserved =torch.cuda.max_memory_reserved()
+                print(f"Batch size: {bs} Took: {(t2-t1) / 100 * 1000:.2f}ms, FLOPs: {flops:.2f} GFLOPs, Memory peak: {peak}, Memory reserved: {reserved}")
                 # from torch.profiler import profile, ProfilerActivity, record_function
                 # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 #             record_shapes=True,

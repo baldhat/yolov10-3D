@@ -69,6 +69,8 @@ from ultralytics.data.utils import check_det_dataset
 from ultralytics.nn.autobackend import check_class_names, default_class_names
 from ultralytics.nn.modules import C2f, Detect, RTDETRDecoder, v10Detect, v10Detect3d
 from ultralytics.nn.tasks import DetectionModel, SegmentationModel, WorldModel
+import ultralytics.nn.modules.sparse_conv.sparse_conv2d_fast_symbolic
+import ultralytics.nn.modules.sparse_conv.sparse_conv2d_fast_export
 from ultralytics.utils import (
     ARM64,
     DEFAULT_CFG,
