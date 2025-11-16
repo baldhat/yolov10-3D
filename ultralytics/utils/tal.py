@@ -382,6 +382,9 @@ class TaskAlignedAssigner3d(nn.Module):
         self.use_2d = use_2d
         self.kps_dist_metric = kps_dist_metric
         self.constrain_anchors = constrain_anchors
+        self.iou2d = []
+        self.iou3d = []
+        self.count = 0
 
         self.mean_overlap = []
         self.mean_align_metric = []
@@ -468,6 +471,17 @@ class TaskAlignedAssigner3d(nn.Module):
         elif self.kps_dist_metric == "l2":
             dist = nn.functional.mse_loss(pd_kps, gt_kps, reduction='none').sum(dim=(-1, -2)) / 24
             return 1 / torch.exp(0.5 * dist)
+        
+    def plot(self):
+        self.count += 1
+        if self.count % 1000 == 0:    
+            plt.close()
+            fig, ax = plt.subplots(1, 1)
+            ax.plot(self.iou2d, label="2d")
+            ax.plot(self.iou3d, label="3d")
+            ax.legend()
+            plt.savefig(f"/home/stud/mijo/iou_entwicklung{self.topk}.svg")
+            np.save(f"/home/stud/mijo/iou_entwicklung{self.topk}", np.array([self.iou2d, self.iou3d]))
 
     def get_pos_mask(self, pd_scores, pd_bboxes, pd_keypoints, gt_labels, gt_bboxes, gt_keypoints, anc_points, mask_gt):
         """Get in_gts mask, (b, max_num_obj, h*w)."""
@@ -475,7 +489,7 @@ class TaskAlignedAssigner3d(nn.Module):
         num_anchors = mask_in_gts.shape[-1]
         # Get anchor_align metric, (b, max_num_obj, h*w)
         if self.use_3d and self.use_2d:
-            align_metric, overlaps = self.get_box_kp_metrics(pd_scores, pd_bboxes, pd_keypoints, gt_labels, gt_bboxes,
+            align_metric, overlaps, iou2d = self.get_box_kp_metrics(pd_scores, pd_bboxes, pd_keypoints, gt_labels, gt_bboxes,
                          gt_keypoints,
                          mask_in_gts * mask_gt if self.constrain_anchors else mask_gt.repeat(1, 1, num_anchors).bool())
         elif self.use_3d and not self.use_2d:
@@ -489,6 +503,9 @@ class TaskAlignedAssigner3d(nn.Module):
         # Get topk_metric mask, (b, max_num_obj, h*w)
         mask_topk = self.select_topk_candidates(align_metric, topk_mask=mask_gt.expand(-1, -1, self.topk).bool())
 
+        self.iou3d.append(overlaps[mask_topk.bool()].mean().item())
+        self.iou2d.append(iou2d[mask_topk.bool()].mean().item())
+        self.plot()
         # Merge all mask to a final mask, (b, max_num_obj, h*w)
         if self.constrain_anchors:
             mask_gt_ = mask_in_gts * mask_gt
@@ -600,7 +617,7 @@ class TaskAlignedAssigner3d(nn.Module):
         overlaps[mask_gt] = self.iou_calculation(gt_boxes, pd_boxes)
 
         align_metric = bbox_scores.pow(self.alpha) * overlaps.pow(self.beta) * similarities.pow(self.gamma)
-        return align_metric, similarities
+        return align_metric, similarities, overlaps
 
     def add_cls_mean_size(self, gt_size_3d, gt_labels, mean_sizes):
         cls_idx = nn.functional.one_hot(gt_labels.squeeze(-1).long(), num_classes=self.num_classes).bool().to(gt_labels.device)
