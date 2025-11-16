@@ -5,7 +5,7 @@ import cv2
 import torch
 import pathlib
 from ultralytics.data.datasets.decode_helper import  *
-# from ultralytics.data.datasets.kitti_eval import eval_from_scrach
+from ultralytics.data.datasets.kitti_eval import eval_from_scrach
 import subprocess
 from pathlib import Path
 
@@ -482,17 +482,11 @@ class KITTIDataset(data.Dataset):
 
     def get_stats(self, results, save_dir):
         self.save_results(results, output_dir=save_dir)
-        self.save_results(results, output_dir=str(save_dir), epoch=self.save_counter)
-        command = f"ultralytics/data/datasets/evaluate_object_3d_offline_ap40 {self.label_dir} {os.path.join(save_dir, 'preds')}"
-        print("Running command: " + command)
-        lines = subprocess.check_output(command, shell= True, text= True, env={})
-        print("Result: " + lines)
-        result = 0
-        for line in lines.split("\n"):
-            if line.startswith("car_detection_3d"):
-                result = float(line.split(" ")[3])
-        self.last_result = result
-        return self.last_result
+        result = eval_from_scrach(
+            self.label_dir,
+            os.path.join(save_dir, 'preds'),
+            ap_mode=40)
+        return result["3d@0.70"][1]
 
     def save_results(self, results, output_dir='./outputs', epoch=None):
         output_dir = str(os.path.join(output_dir, 'preds'))
@@ -591,34 +585,40 @@ class KITTIDataset(data.Dataset):
                 dimensions = pred_s3d[i, j].numpy()
                 dimensions += self.cls_mean_size[int(cls_id)]
 
-                depth = pred_dep[i, j].numpy()
-                sigma = torch.exp(-pred_dep_un[i, j]).item()
+                z = pred_dep[i, j].numpy()
+                lam = 60
+                
+                for s_ in [-2, -1, -0.5, 0, 0.5, 1, 2]:
+                    depth = z + s_
+                    si = np.exp(z/lam)
+                    ts = np.exp(-((s_**2)/(si**2)))
+                    score = scores[i, j].item() * ts
 
-                if undo_augment:
-                    x3d = pred_center3d[i, j, 0].numpy()
-                    y3d = pred_center3d[i, j, 1].numpy()
-                    c3d = affine_transform(np.array([x3d, y3d]), np.array(inv_trans[i]))
-                    if self.use_camera_dis:
-                        locations = calibs[i].camera_dis_to_rect(c3d[0], c3d[1], depth).reshape(-1)
+                    if undo_augment:
+                        x3d = pred_center3d[i, j, 0].numpy()
+                        y3d = pred_center3d[i, j, 1].numpy()
+                        c3d = affine_transform(np.array([x3d, y3d]), np.array(inv_trans[i]))
+                        if self.use_camera_dis:
+                            locations = calibs[i].camera_dis_to_rect(c3d[0], c3d[1], depth).reshape(-1)
+                        else:
+                            locations = calibs[i].img_to_rect(c3d[0], c3d[1], depth).reshape(-1)
                     else:
-                        locations = calibs[i].img_to_rect(c3d[0], c3d[1], depth).reshape(-1)
-                else:
-                    x3d = pred_center3d[i, j, 0].numpy() * 1242 / 1280.0
-                    y3d = pred_center3d[i, j, 1].numpy() * 375 / 384.0
-                    if self.use_camera_dis:
-                        locations = calibs[i].camera_dis_to_rect(x3d, y3d, depth).reshape(-1)
-                    else:
-                        locations = calibs[i].img_to_rect(x3d, y3d, depth).reshape(-1)
-                locations[1] += dimensions[0] / 2
+                        x3d = pred_center3d[i, j, 0].numpy() * 1242 / 1280.0
+                        y3d = pred_center3d[i, j, 1].numpy() * 375 / 384.0
+                        if self.use_camera_dis:
+                            locations = calibs[i].camera_dis_to_rect(x3d, y3d, depth).reshape(-1)
+                        else:
+                            locations = calibs[i].img_to_rect(x3d, y3d, depth).reshape(-1)
+                    locations[1] += dimensions[0] / 2
 
-                alpha = alphas[i, j].item()
-                ry = calibs[i].alpha2ry(alpha, x)
+                    alpha = alphas[i, j].item()
+                    ry = calibs[i].alpha2ry(alpha, x)
 
-                score = scores[i, j].item() * sigma
-                if score < threshold:
-                    continue
-
-                targets.append([cls_id, alpha] + bbox_ + dimensions.tolist() + locations.tolist() + [ry, score])
+                    #score = scores[i, j].item() * sigma
+                    if score[0] < threshold:
+                        continue
+                    
+                    targets.append([cls_id, alpha] + bbox_ + dimensions.tolist() + locations.tolist() + [ry, score[0]])
 
             results[im_files[i]] = targets
         return results
