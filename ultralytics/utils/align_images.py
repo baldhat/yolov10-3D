@@ -33,12 +33,12 @@ def get_calib(idx):
     assert os.path.exists(calib_file)
     return Calibration(calib_file)
 
-np.random.seed(123)
+np.random.seed(1234)
 
 counter = 0
-for i in [6]:
+for i in [7]: #range(7, 7000):
     option = False
-    for j in [2022]:
+    for j in [1251]: #range(7000):
         if i == j:
             continue
         img_file = '%06d.png' % i
@@ -54,7 +54,7 @@ for i in [6]:
                 box1 = torch.tensor(obj1.box2d).unsqueeze(0)
                 box2 = torch.tensor(obj2.box2d).unsqueeze(0)
                 iou = bbox_iou(box1, box2, xywh=False)
-                if iou[0].item() > 0.8 and box1[0, 0] > 50:
+                if iou[0].item() > 0.9 and box1[0, 0] > 50 and box1[0, 0] < 900:
                     print(box1)
                     print(box2)
                     option = True 
@@ -66,38 +66,44 @@ for i in [6]:
             img2 = Image.fromarray(img2).resize((img1.shape[1], img1.shape[0]))
             img1 = Image.fromarray(img1) 
             img = Image.blend(img1, img2, 0.5)
-            cv2.imwrite(f"/home/wiss/mejo/jonathan_tmp/repo/option{counter}.png", np.array(img))
-            cv2.imwrite(f"/home/wiss/mejo/jonathan_tmp/repo/raw0_{counter}.png", np.array(img1))
-            cv2.imwrite(f"/home/wiss/mejo/jonathan_tmp/repo/raw1_{counter}.png", np.array(img2))
+            cv2.imwrite(f"/home/stud/mijo/dev/yolov10-3D/output/option{counter}.png", np.array(img))
+            cv2.imwrite(f"/home/stud/mijo/dev/yolov10-3D/output/raw0_{counter}.png", np.array(img1))
+            cv2.imwrite(f"/home/stud/mijo/dev/yolov10-3D/output/raw1_{counter}.png", np.array(img2))
             
             labels1.extend(labels2)
             print(labels1[0].pos)
             d2 = []
             for gt in labels1:
                 pred = deepcopy(gt)
-                offset = np.random.randn(3)
-                offset[2] *= pred.pos[2] / 15
+                offset = np.random.randn(3) / 2
+                offset[2] *= pred.pos[2] / 20
                 pred.pos += offset
+                pred.l += np.random.randn(1)[0] / 5
+                pred.w += np.random.randn(1)[0] / 5
                 #pred.ry += np.random.rand(1) * 0.2
                 d2.append(pred)
-            print(d2[0].pos)
+            # print(d2[0].pos)
             d3 = []
             for gt in labels1:
                 pred = deepcopy(gt)
-                offset = np.random.randn(3)
+                offset = np.random.randn(3) / 2
                 offset[2] *= pred.pos[2] / 20
                 pred.pos += offset
+                pred.l += np.random.randn(1)[0] / 5
+                pred.w += np.random.randn(1)[0] / 5
                 #pred.ry += np.random.rand(1) * 0.2
                 d3.append(pred)
-            print(d3[0].pos)
+            # print(d3[0].pos)
             
-            d2[7], d2[0] = deepcopy(d2[0]), deepcopy(d2[7])
-            print(d2[0].occlusion)
-            print(d2[7].occlusion)
-            print(d2[0].trucation)
-            print(d2[7].trucation)
+            d3[7], d3[1] = deepcopy(d3[1]), deepcopy(d3[7])
+            d2[7].pos += np.random.randn(3) / 2
+            d2[1].pos += np.random.randn(3) / 2
+            # print(d2[0].occlusion)
+            # print(d2[7].occlusion)
+            # print(d2[0].trucation)
+            # print(d2[7].trucation)
             
-            plot_bev(labels1, d2, d3, "/home/wiss/mejo/jonathan_tmp/repo/bev.svg", np.rad2deg(2*np.arctan2(1242, 2* calib.fu)))
+            plot_bev(labels1, d3, d2, f"/home/stud/mijo/dev/yolov10-3D/output/bev{counter}.svg", np.rad2deg(2*np.arctan2(1242, 2* calib.fu)))
             
             print(f"Found:{counter} : {i:06d} - {j:06d}")
             counter += 1

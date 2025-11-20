@@ -167,7 +167,7 @@ def plot_bev(gts, base_dets, our_dets, filename, fov=60):
         
         0, 252, 239
     lightblue = (0, 252/255.0, 239/255.0, 32/255.0)
-    wedge = Wedge((0, 0), R, -fov/2 + 90, fov/2 + 90, color=lightblue)
+    wedge = Wedge((0, 0), R, -fov/2 + 90, fov/2 + 90, color=fov_color)
     ax.add_artist(wedge)
 
     for j, (gt, b, o) in enumerate(zip(gts, base_dets, our_dets)):            
@@ -178,7 +178,7 @@ def plot_bev(gts, base_dets, our_dets, filename, fov=60):
 
         corners = get_rotated_rectangle_points(translation, dimensions, ry * 180 / np.pi)
         art = ax.add_artist(Polygon(corners, closed=True, fill=False, edgecolor=gt_color, facecolor=gt_color, zorder=3, linewidth=5))
-        #ax.text(gt_center[0], gt_center[1], str(j))
+        # ax.text(gt_center[0], gt_center[1], str(j))
         
         dimensions = np.array([b.l, b.w])
         translation = b.pos[[0, 2]]
