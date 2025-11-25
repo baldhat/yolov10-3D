@@ -60,7 +60,7 @@ class YOLOv10_3DDetectionTrainer(DetectionTrainer):
             backbone = YOLOv10.from_pretrained("jameslahm/" + self.model.split("_")[0])
             backbone.model.model[12].f = [-1, 9]
             backbone.model.model[15].f = [-1, 8]
-            b = resnet152(weights=ResNet152_Weights.IMAGENET1K_V2)
+            b = resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
 
             t1 = torch.nn.Sequential(
                 torch.nn.Conv2d(512, 320, 1), 
