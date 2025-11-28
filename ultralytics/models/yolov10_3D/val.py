@@ -183,11 +183,8 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
         )  # number of targets per class
 
 
-        try:
-            self.metrics.metric3d = self.dataloader.dataset.get_stats(self.results, self.save_dir)
-            self.results = {}
-        except Exception as e:
-            print(f"Failed to evaluate mAP: {e}")
+        self.metrics.metric3d = self.dataloader.dataset.get_stats(self.results, self.save_dir)
+        self.results = {}
         return self.metrics.results_dict
 
     def _process_batch(self, detections, gt_bboxes, gt_cls):

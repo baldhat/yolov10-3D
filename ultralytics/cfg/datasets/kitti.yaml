@@ -1,9 +1,9 @@
 # Train/val/test sets as 1) dir: path/to/imgs, 2) file: path/to/imgs.txt, or 3) list: [path/to/imgs1, path/to/imgs2, ..]
-path: ../datasets/KITTI
+path:  /storage/group/deepscenario/KITTI/kitti_raw_data/2011_09_26/2011_09_26_drive_0002_sync/
 
-train: ImageSets/train.txt
-val: ImageSets/val.txt
-test: ImageSets/test.txt
+train: ../../../ImageSets/train.txt 
+val: ../../../ImageSets/val.txt
+test: ../../../ImageSets/test.txt
 # trainval: ImageSets/trainval.txt
 
 # Classes

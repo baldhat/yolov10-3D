@@ -10,6 +10,7 @@ import subprocess
 from pathlib import Path
 
 import torch.utils.data as data
+from ultralytics.utils import create_video
 from PIL import Image
 
 from ultralytics.data.utils import angle2class
@@ -46,33 +47,38 @@ class KITTIDataset(data.Dataset):
             [1.73698127, 0.59706367, 1.76282397]])
 
         # data split loading
-        assert mode in ['train', 'val', 'test']
-        if args.trainval:
-            image_file_path = image_file_path.replace("train.txt", "trainval.txt")
-        if mode == "val" and args.split == "test":
-            mode = "test"
-            image_file_path = image_file_path.replace("val.txt", "test.txt")
-        self.split = mode
-        self.mode = mode
-        root_dir = pathlib.Path(image_file_path).parent.parent
-        split_dir = image_file_path
-        self.idx_list = [x.strip() for x in open(split_dir).readlines()]
-        if args.overfit:
-            self.idx_list = self.idx_list[:64]
-        if len(self.idx_list) > 7518:
-            self.idx_list = self.idx_list[:7518]
+        # assert mode in ['train', 'val', 'test']
+        # if args.trainval:
+        #     image_file_path = image_file_path.replace("train.txt", "trainval.txt")
+        # if mode == "val" and args.split == "test":
+        #     mode = "test"
+        #     image_file_path = image_file_path.replace("val.txt", "test.txt")
+        # self.split = mode
+        # self.mode = mode
+        # root_dir = pathlib.Path(image_file_path).parent.parent
+        # split_dir = image_file_path
+        # self.idx_list = [x.strip() for x in open(split_dir).readlines()]
+        # if args.overfit:
+        #     self.idx_list = self.idx_list[:64]
+        # if len(self.idx_list) > 7518:
+        #     self.idx_list = self.idx_list[:7518]
+        
+        self.image_dir = "/storage/group/deepscenario/KITTI/kitti_raw_data/2011_09_26/2011_09_26_drive_0017_sync/image_02/data/"
+        self.calib_file = os.path.join(self.image_dir, "../../../calib_cam_to_cam.txt")
+        self.idx_list = [int(x.split(".")[0]) for x in os.listdir(self.image_dir)]
+        self.mode = "test"
 
-        # path configuration
-        self.data_dir = os.path.join(root_dir, 'testing' if self.mode == 'test' else 'training')
-        self.image_dir = os.path.join(self.data_dir, 'image_2')
-        self.depth_dir = os.path.join(root_dir, 'deepseg', "training", "image_2") \
-            if os.path.exists(os.path.join(root_dir, 'deepseg', "training", "image_2")) \
-            else os.path.join(self.data_dir, 'image_2')
-        self.calib_dir = os.path.join(self.data_dir, 'calib')
-        self.label_dir = os.path.join(self.data_dir, 'label_2')
+        # # path configuration
+        # self.data_dir = os.path.join(root_dir, 'testing' if self.mode == 'test' else 'training')
+        # self.image_dir = os.path.join(self.data_dir, 'image_2')
+        # self.depth_dir = os.path.join(root_dir, 'deepseg', "training", "image_2") \
+        #     if os.path.exists(os.path.join(root_dir, 'deepseg', "training", "image_2")) \
+        #     else os.path.join(self.data_dir, 'image_2')
+        # self.calib_dir = os.path.join(self.data_dir, 'calib')
+        # self.label_dir = os.path.join(self.data_dir, 'label_2')
 
-        self.im_files = self.get_im_files()
-        self.labels = self.get_labels()
+        # self.im_files = self.get_im_files()
+        # self.labels = self.get_labels()
 
         # data augmentation configuration
         self.data_augmentation = True if self.mode in ['train', 'trainval'] else False
@@ -89,7 +95,7 @@ class KITTIDataset(data.Dataset):
         os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 
     def get_image(self, idx):
-        img_file = os.path.join(self.image_dir, '%06d.png' % idx)
+        img_file = os.path.join(self.image_dir, '%010d.png' % idx)
         assert os.path.exists(img_file)
         return Image.open(img_file)  # (H, W, 3) RGB mode
 
@@ -110,16 +116,16 @@ class KITTIDataset(data.Dataset):
         return Image.fromarray(np.where(file <= 0, self.max_depth_threshold + 1, file))
 
 
-    def get_labels(self):
-        labels = [self.get_label(int(idx)) for idx in self.idx_list]
-        labels = [item for sublist in labels for item in sublist]
-        labels = [item for item in labels if item.cls_type in self.writelist]
-        return labels
+    # def get_labels(self):
+    #     labels = [self.get_label(int(idx)) for idx in self.idx_list]
+    #     labels = [item for sublist in labels for item in sublist]
+    #     labels = [item for item in labels if item.cls_type in self.writelist]
+    #     return labels
 
     def get_calib(self, idx):
-        calib_file = os.path.join(self.calib_dir, '%06d.txt' % idx)
-        assert os.path.exists(calib_file)
-        return Calibration(calib_file)
+        # calib_file = os.path.join(self.calib_dir, '%06d.txt' % idx)
+        # assert os.path.exists(calib_file)
+        return Calibration(self.calib_file)
 
     def get_im_files(self):
         return [os.path.join(self.image_dir, '%06d.png' % int(idx)) for idx in self.idx_list]
@@ -248,7 +254,7 @@ class KITTIDataset(data.Dataset):
         gt_heading_res = []
         gt_src_img = [] # 0 or 1, when no mixup always 0
 
-        if True: #self.split != 'test':
+        if False: #self.split != 'test':
             objects = self.get_label(index)
             # data augmentation for labels
             if random_flip_flag:
@@ -482,17 +488,18 @@ class KITTIDataset(data.Dataset):
 
     def get_stats(self, results, save_dir):
         self.save_results(results, output_dir=save_dir)
-        self.save_results(results, output_dir=str(save_dir), epoch=self.save_counter)
-        command = f"ultralytics/data/datasets/evaluate_object_3d_offline_ap40 {self.label_dir} {os.path.join(save_dir, 'preds')}"
-        print("Running command: " + command)
-        lines = subprocess.check_output(command, shell= True, text= True, env={})
-        print("Result: " + lines)
-        result = 0
-        for line in lines.split("\n"):
-            if line.startswith("car_detection_3d"):
-                result = float(line.split(" ")[3])
-        self.last_result = result
-        return self.last_result
+        create_video.create(save_dir, self.image_dir)
+        # self.save_results(results, output_dir=str(save_dir), epoch=self.save_counter)
+        # command = f"ultralytics/data/datasets/evaluate_object_3d_offline_ap40 {self.label_dir} {os.path.join(save_dir, 'preds')}"
+        # print("Running command: " + command)
+        # lines = subprocess.check_output(command, shell= True, text= True, env={})
+        # print("Result: " + lines)
+        # result = 0
+        # for line in lines.split("\n"):
+        #     if line.startswith("car_detection_3d"):
+        #         result = float(line.split(" ")[3])
+        # self.last_result = result
+        # return self.last_result
 
     def save_results(self, results, output_dir='./outputs', epoch=None):
         output_dir = str(os.path.join(output_dir, 'preds'))
