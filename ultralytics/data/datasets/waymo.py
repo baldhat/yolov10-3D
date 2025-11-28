@@ -32,11 +32,12 @@ class WaymoDataset(data.Dataset):
         self.max_objs = 50
         self.use_camera_dis = False
 
+        segment = "segment-12102100359426069856_3931_470_3951_470_with_camera_labels"
         with open(filepath, 'r') as f:
             raw_split = json.load(f)
-        if args.overfit:
-            raw_split["images"] = [image for image in raw_split["images"] if image["id"] < 50]
-            raw_split["annotations"] = [anns for anns in raw_split["annotations"] if anns["image_id"] < 50]
+        raw_split["images"] = [image for image in raw_split["images"] if segment in image["file_name"]]
+        img_ids = [it["id"] for it in raw_split["images"]]
+        raw_split["annotations"] = [anns for anns in raw_split["annotations"] if anns["image_id"] in img_ids]
 
         self.imgs = {img['id']: img for img in sorted(raw_split['images'], key=lambda img: img['id'])}
         self.idx_to_img_id = {idx: img_id for idx, img_id in enumerate(self.imgs)}
@@ -440,15 +441,17 @@ class WaymoDataset(data.Dataset):
                 "gt": gt_annos
             }, f)
 
-        python = os.path.join(Path.home(), "anaconda3/envs/py36_waymo_tf/bin/python")
-        if not os.path.exists(python):
-            python = os.path.join(Path.home(), "miniconda3/envs/py36_waymo_tf/bin/python")
-        command = f"{python} -u ultralytics/data/datasets/waymo_eval.py --iou 0.7 --pred {file_path}"
-        lines = subprocess.check_output(command, shell= True, text= True, env={})
+        import ultralytics.utils.create_video_waymo as create_video_waymo
+        create_video_waymo.create(save_dir)
+        # python = os.path.join(Path.home(), "anaconda3/envs/py36_waymo_tf/bin/python")
+        # if not os.path.exists(python):
+        #     python = os.path.join(Path.home(), "miniconda3/envs/py36_waymo_tf/bin/python")
+        # command = f"{python} -u ultralytics/data/datasets/waymo_eval.py --iou 0.7 --pred {file_path}"
+        # lines = subprocess.check_output(command, shell= True, text= True, env={})
 
-        print(lines)
-        metric3d = float(lines.split("\n")[4].split("|")[2].strip().split(" ")[0]) # 0.7 IoU, Level 1
-        return metric3d
+        # print(lines)
+        # metric3d = float(lines.split("\n")[4].split("|")[2].strip().split(" ")[0]) # 0.7 IoU, Level 1
+        return 0 #metric3d
 
     def decode_preds_eval(self, preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=True, threshold=0.001):
         return self.decode_preds(preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=undo_augment, threshold=threshold)
