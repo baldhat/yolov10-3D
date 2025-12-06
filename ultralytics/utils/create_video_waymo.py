@@ -191,7 +191,7 @@ def plot_bev(our_dets, filename, fov=60):
         translation = object.location[[0, 2]]
         ry = object.ry
 
-        corners = get_rotated_rectangle_points(translation, dimensions, ry * 180 / np.pi)
+        corners = get_rotated_rectangle_points(translation, dimensions, - ry * 180 / np.pi)
         art = ax.add_artist(Polygon(corners, closed=True, fill=False, edgecolor=our_color, facecolor=our_color, zorder=3, linewidth=5))
         if j == 0:
             art.set_label("Ours")
@@ -251,6 +251,8 @@ def create(ours_path):
     
     os.system(f"cd {output_path} && ffmpeg -framerate 10 -pattern_type glob -i '*.png' -c:v libx264 -pix_fmt yuv420p out.mp4")
     print(output_path / "out.mp4")
+    os.system(f"cd {output_path} && ffmpeg -framerate 10 -pattern_type glob -i '*.svg' -c:v libx264 -pix_fmt yuv420p out_svg.mp4")
+    print(output_path / "out_svg.mp4")
     
 if __name__=="__main__":
-    create(Path("/home/stud/mijo/dev/yolov10-3D/runs/detect/val26"))
+    create(Path("/home/stud/mijo/dev/yolov10-3D/runs/detect/val37"))
