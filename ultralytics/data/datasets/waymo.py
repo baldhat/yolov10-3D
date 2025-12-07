@@ -32,7 +32,7 @@ class WaymoDataset(data.Dataset):
         self.max_objs = 50
         self.use_camera_dis = False
 
-        segment = "segment-12102100359426069856_3931_470_3951_470_with_camera_labels"
+        segment = 'segment-13336883034283882790_7100_000_7120_000_with_camera_labels'
         with open(filepath, 'r') as f:
             raw_split = json.load(f)
         raw_split["images"] = [image for image in raw_split["images"] if segment in image["file_name"]]
@@ -507,6 +507,7 @@ class WaymoDataset(data.Dataset):
 
     def decode_preds(self, preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=True,
                      threshold=0.001):
+        threshold = 0.001
         preds = preds.detach().cpu()
         bbox, pred_center3d, pred_s3d, pred_hd, pred_dep, pred_dep_un, scores, labels = preds.split(
             (4, 2, 3, 24, 1, 1, 1, 1), dim=-1)

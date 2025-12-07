@@ -70,10 +70,10 @@ def load_dets(filename):
         return [Detection3d(it) for it in lines]
     
 def filter_(dets: [Detection3d]):
-    return [det for det in dets if det.score > 0.1 and det.classname in ["Car", "Pedestrian", "Cyclist"]]
+    return [det for det in dets if det.score > 0.001 and det.classname in ["Car"]]
 
 def filter_gts(dets):
-    return [det for det in dets if det.classname in ["Car", "Pedestrian", "Cyclist"]]
+    return [det for det in dets if det.classname in ["Car"]]
 
 def associate(gts: [Object3d], dets: [Detection3d]):
     if len(dets) == 0:
@@ -221,10 +221,12 @@ def plot_all(img, our_dets, calib, out_path):
 def create(ours_path):
     ours_name = str(ours_path).split("/")[-1]
     
-    output_path = Path("/storage/group/deepscenario/jonathan_for_johannes/video/") / ours_name
+    name = str(np.random.randint(0, 100000))
+    output_path = Path(f"/usr/wiss/mejo/storage/user/_archiv_paper/2026_CVPR_LeAD-M3D/von_johannes/yolov10-3D_x2_vis/waymo_video_dir/{name}")
     if not os.path.exists(output_path):
-        os.mkdir(output_path)
-    
+        os.makedirs(output_path, exist_ok=True)
+
+    print(ours_path / "eval_results.json")
     o_dets = json.load(open(ours_path / "eval_results.json", "r"))["pred"]
     bbox_os ,type_os, frame_id_os, score_os = o_dets["bbox"], o_dets["type"], o_dets["frame_id"], o_dets["score"]
 
@@ -249,8 +251,26 @@ def create(ours_path):
         out_path = output_path / img_name
         plot_all(img, our_dets_, calib, str(out_path))
     
-    os.system(f"cd {output_path} && ffmpeg -framerate 10 -pattern_type glob -i '*.png' -c:v libx264 -pix_fmt yuv420p out.mp4")
-    print(output_path / "out.mp4")
+    # os.system(f"cd {output_path} && ffmpeg -framerate 10 -pattern_type glob -i '*.png' -c:v libx264 -pix_fmt yuv420p out.mp4")
+    # print(output_path / "out.mp4")
+
+    # 1. Create video for original *.png files
+    p = Path(output_path)
+    svg_res="1050x546"
+    os.system(f"cd {output_path} && ffmpeg -framerate 10 -pattern_type glob -i '*.png' -c:v libx264 -pix_fmt yuv420p out_png.mp4")
     
+    # 2. Delete all *.png files (original and converted SVGs share the same logic now for ultimate minimalism)
+    [os.remove(f) for f in p.iterdir() if f.is_file() and f.suffix == '.png']
+    
+    # 3. Convert all *.svg to *.png (rasterization at final desired resolution)
+    [os.system(f"cd {output_path} && ffmpeg -i '{svg.name}' -s {svg_res} '{svg.stem}.png'") for svg in p.glob('*.svg')]
+    
+    # 4. Create video from the newly created *.png files (which were originally SVGs)
+    os.system(f"cd {output_path} && ffmpeg -framerate 10 -pattern_type glob -i '*.png' -s {svg_res} -c:v libx264 -pix_fmt yuv420p out_svg.mp4")
+    
+    # BONUS: Clean up the intermediate *.svg files and the newly created *.png files
+    [os.remove(f) for f in p.iterdir() if f.is_file() and f.suffix in ('.svg', '.png')]
+
+
 if __name__=="__main__":
     create(Path("/home/stud/mijo/dev/yolov10-3D/runs/detect/val26"))

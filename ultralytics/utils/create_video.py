@@ -191,9 +191,10 @@ def plot_all(img, our_dets, calib, out_path):
     
 def create(ours_path, gt_path):
     ours_name = str(ours_path).split("/")[-1]
-    output_path = Path("/storage/group/deepscenario/jonathan_for_johannes/video/") / ours_name
+    name = str(np.random.randint(0, 10000))
+    output_path = Path(f"/usr/wiss/mejo/storage/user/_archiv_paper/2026_CVPR_LeAD-M3D/von_johannes/yolov10-3D_x2_vis/waymo_video_dir_{name}") / ours_name
     if not os.path.exists(output_path):
-        os.mkdir(output_path)
+        os.makedirs(output_path, exist_ok=True)
 
     gt_path = Path(gt_path)
 
@@ -214,7 +215,22 @@ def create(ours_path, gt_path):
         out_path = output_path / fn
         plot_all(img, our_dets_, calib, str(out_path))
     
-    os.system(f"cd {output_path} && ffmpeg -framerate 10 -pattern_type glob -i '*.png' -s 1280x384 -c:v libx264 -pix_fmt yuv420p out.mp4")
+    # 1. Create video for original *.png files
+    png_res="1280x384"; p = Path(output_path)
+    svg_res="1024x546"
+    os.system(f"cd {output_path} && ffmpeg -framerate 10 -pattern_type glob -i '*.png' -s {png_res} -c:v libx264 -pix_fmt yuv420p out_png.mp4")
+    
+    # 2. Delete all *.png files (original and converted SVGs share the same logic now for ultimate minimalism)
+    [os.remove(f) for f in p.iterdir() if f.is_file() and f.suffix == '.png']
+    
+    # 3. Convert all *.svg to *.png (rasterization at final desired resolution)
+    [os.system(f"cd {output_path} && ffmpeg -i '{svg.name}' -s {svg_res} '{svg.stem}.png'") for svg in p.glob('*.svg')]
+    
+    # 4. Create video from the newly created *.png files (which were originally SVGs)
+    os.system(f"cd {output_path} && ffmpeg -framerate 10 -pattern_type glob -i '*.png' -s {svg_res} -c:v libx264 -pix_fmt yuv420p out_svg.mp4")
+    
+    # BONUS: Clean up the intermediate *.svg files and the newly created *.png files
+    [os.remove(f) for f in p.iterdir() if f.is_file() and f.suffix in ('.svg', '.png')]
     print(output_path / "out.mp4")
         
     

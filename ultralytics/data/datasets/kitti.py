@@ -63,7 +63,7 @@ class KITTIDataset(data.Dataset):
         # if len(self.idx_list) > 7518:
         #     self.idx_list = self.idx_list[:7518]
         
-        self.image_dir = "/storage/group/deepscenario/KITTI/kitti_raw_data/2011_09_26/2011_09_26_drive_0017_sync/image_02/data/"
+        self.image_dir = "/storage/group/deepscenario/KITTI/kitti_raw_data/2011_09_28/2011_09_28_drive_0104_sync/image_02/data/"
         self.calib_file = os.path.join(self.image_dir, "../../../calib_cam_to_cam.txt")
         self.idx_list = [int(x.split(".")[0]) for x in os.listdir(self.image_dir)]
         self.mode = "test"
