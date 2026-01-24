@@ -1257,9 +1257,9 @@ class KITTIVisualizer():
                 egoc_rot_matrix = self.get_egoc_rot_matrix(ry)
 
                 self.plot_3d_obj(img,
-                                 VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
-                                             dimensions, bbox2d, cls),
-                                 calib.P2, gt=True)
+                                 [VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
+                                             dimensions, bbox2d, cls)],
+                                 calib.P2, [ plt.get_cmap("tab10")(0)])
 
             ax[i].imshow(img)
             ax[i].axis("off")

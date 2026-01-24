@@ -15,6 +15,7 @@ from PIL import Image
 from ultralytics.data.utils import angle2class
 from ultralytics.data.datasets.kitti_utils import get_objects_from_label, Calibration, get_affine_transform, affine_transform
 
+from ultralytics.utils.metrics import bbox_iou
 from ultralytics.utils.ops import  xyxy2xywh, xywh2xyxy
 
 
@@ -150,7 +151,7 @@ class KITTIDataset(data.Dataset):
         scale = 1
 
         if self.data_augmentation:
-            if np.random.random() < 0.5 and self.mixup:
+            if np.random.random() < self.mixup:
                 random_mix_flag = True
                 img0 = img.copy()
 
@@ -184,8 +185,7 @@ class KITTIDataset(data.Dataset):
 
                 if calib_temp.cu == calib.cu and calib_temp.cv == calib.cv and calib_temp.fu == calib.fu and calib_temp.fv == calib.fv:
                     img1 = self.get_image(random_index)
-                    if self.load_depth_maps:
-                        seg_mask_tmp = self.get_segmentation(random_index)
+                    
                     img_size_temp = np.array(img.size)
                     dst_W_temp, dst_H_temp = img_size_temp
                     if dst_W_temp == dst_W and dst_H_temp == dst_H:
@@ -195,9 +195,7 @@ class KITTIDataset(data.Dataset):
                             random_mix_flag = True
                             if random_flip_flag == True:
                                 img1 = img1.transpose(Image.FLIP_LEFT_RIGHT)
-                                if self.load_depth_maps:
-                                    seg_mask_tmp = seg_mask_tmp.transpose(Image.FLIP_LEFT_RIGHT)
-                            img = Image.blend(img, img1, alpha=0.5)
+                            #img = Image.blend(img, img1, alpha=0.5)
                             break
 
         # add affine transformation for 2d images.
@@ -376,6 +374,12 @@ class KITTIDataset(data.Dataset):
                     bbox_2d_[:2] = bbox_2d[:2]
                     bbox_2d_[2:] = bbox_2d[2:]
                     bbox_2d_ = xyxy2xywh(bbox_2d_)
+                    
+                    if (self.max_overlap(bbox_2d_, gt_boxes_2d) < 0.2):
+                        img = self.transfer_rectangle(img1, img, bbox_2d_)
+                    else:
+                        continue
+                    
                     gt_size_2d_ = bbox_2d_[2:]
                     center_2d = np.array([(bbox_2d[0] + bbox_2d[2]) / 2, (bbox_2d[1] + bbox_2d[3]) / 2],
                                          dtype=np.float32)  # W * H
@@ -479,6 +483,38 @@ class KITTIDataset(data.Dataset):
             "src_img": torch.tensor(np.array(gt_src_img, dtype=np.uint8)),
             "non_mix_imgs": torch.tensor(np.concatenate((img0[None],img1[None]) if random_mix_flag else (img[None], img[None]), axis=0))
         }
+        
+    def max_overlap(self, bbox_2d_, gt_boxes_2d):
+        iou = bbox_iou(torch.tensor(bbox_2d_)[None], torch.tensor(gt_boxes_2d), xywh=True)
+        if iou.numel() > 0:
+            return iou.max().item()
+        else:
+            return 0
+
+    def transfer_rectangle(self, src_img, dst_img, coords):
+        """
+        Cuts a rectangle from src_img and pastes it into dst_img.
+        
+        Args:
+            src_img (torch.Tensor): Source image [C, H, W]
+            dst_img (torch.Tensor): Destination image [C, H, W]
+            coords (tuple): (x1, y1, w, h) coordinates
+            
+        Returns:
+            torch.Tensor: The modified destination image
+        """
+        x1, y1, x2, y2 = torch.round(xywh2xyxy(torch.tensor(coords))).int()
+        x1 = torch.clamp(x1, 0, self.resolution[0])
+        x2 = torch.clamp(x2, 0, self.resolution[0])
+        y1 = torch.clamp(y1, 0, self.resolution[1])
+        y2 = torch.clamp(y2, 0, self.resolution[1])
+        
+        
+        # Slicing syntax: [channels, height_range, width_range]
+        # Note: y corresponds to height, x corresponds to width.
+        dst_img[..., y1:y2, x1:x2] = src_img[..., y1:y2, x1:x2]
+        
+        return dst_img
 
     def get_stats(self, results, save_dir):
         self.save_results(results, output_dir=save_dir)
