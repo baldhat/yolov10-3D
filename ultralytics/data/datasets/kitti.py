@@ -33,6 +33,7 @@ class KITTIDataset(data.Dataset):
         
         self.save_counter = 0
         self.last_result = 0
+        self.virtual_focal_length = args.virtual_focal_length
 
         '''    
         ['Car': np.array([3.88311640418,1.62856739989,1.52563191462]),
@@ -148,6 +149,7 @@ class KITTIDataset(data.Dataset):
         random_mix_flag = False
         calib = self.get_calib(index)
         scale = 1
+        vdepth_factor0 = self.virtual_focal_length / calib.fv
 
         if self.data_augmentation:
             if np.random.random() < 0.5 and self.mixup:
@@ -181,9 +183,10 @@ class KITTIDataset(data.Dataset):
                 random_index = np.random.randint(len(self.idx_list))
                 random_index = int(self.idx_list[random_index])
                 calib_temp = self.get_calib(random_index)
-
-                if calib_temp.cu == calib.cu and calib_temp.cv == calib.cv and calib_temp.fu == calib.fu and calib_temp.fv == calib.fv:
-                    img1 = self.get_image(random_index)
+                vdepth_factor1 = self.virtual_focal_length / calib_temp.fv
+                
+                img1 = self.get_image(random_index)
+                if img1.size[0] == img0.size[0] and img1.size[1] == img0.size[1]:
                     if self.load_depth_maps:
                         seg_mask_tmp = self.get_segmentation(random_index)
                     img_size_temp = np.array(img.size)
@@ -246,6 +249,7 @@ class KITTIDataset(data.Dataset):
         gt_depth = []
         gt_heading_bin = []
         gt_heading_res = []
+        gt_vdep_factors = []
         gt_src_img = [] # 0 or 1, when no mixup always 0
 
         if True: #self.split != 'test':
@@ -330,6 +334,7 @@ class KITTIDataset(data.Dataset):
                 gt_heading_res.append(heading_res)
 
                 gt_src_img.append(0) # object in img0
+                gt_vdep_factors.append(vdepth_factor0)
 
                 s3d = (np.array([objects[i].h, objects[i].w, objects[i].l], dtype=np.float32)
                        - self.cls_mean_size[self.cls2train_id[objects[i].cls_type]])
@@ -417,6 +422,7 @@ class KITTIDataset(data.Dataset):
                     s3d = (np.array([objects[i].h, objects[i].w, objects[i].l], dtype=np.float32)
                            - self.cls_mean_size[self.cls2train_id[objects[i].cls_type]])
                     gt_size_3d.append(s3d)
+                    gt_vdep_factors.append(vdepth_factor1)
 
                     if self.load_depth_maps:
                         depth_maps.append(np.where(seg_mask_tmp == objects[i].line_index, depth, 1000))
@@ -472,6 +478,7 @@ class KITTIDataset(data.Dataset):
             "size_3d": torch.tensor(np.array(gt_size_3d)),
             "depth": torch.tensor(np.array(gt_depth)),
             "depth_map": depth_map,
+            "vdepth_factors": torch.tensor(gt_vdep_factors),
             "mean_sizes": torch.tensor(self.cls_mean_size),
             "heading_bin": torch.tensor(np.array(gt_heading_bin)),
             "heading_res": torch.tensor(np.array(gt_heading_res)),
@@ -591,7 +598,7 @@ class KITTIDataset(data.Dataset):
                 dimensions = pred_s3d[i, j].numpy()
                 dimensions += self.cls_mean_size[int(cls_id)]
 
-                depth = pred_dep[i, j].numpy()
+                depth = pred_dep[i, j].numpy() / (self.virtual_focal_length / calibs[i].fv)
                 sigma = torch.exp(-pred_dep_un[i, j]).item()
 
                 if undo_augment:
@@ -603,8 +610,8 @@ class KITTIDataset(data.Dataset):
                     else:
                         locations = calibs[i].img_to_rect(c3d[0], c3d[1], depth).reshape(-1)
                 else:
-                    x3d = pred_center3d[i, j, 0].numpy() * 1242 / 1280.0
-                    y3d = pred_center3d[i, j, 1].numpy() * 375 / 384.0
+                    x3d = pred_center3d[i, j, 0].numpy() / ratio_pad[i][0]
+                    y3d = pred_center3d[i, j, 1].numpy()/ ratio_pad[i][1]
                     if self.use_camera_dis:
                         locations = calibs[i].camera_dis_to_rect(x3d, y3d, depth).reshape(-1)
                     else:
@@ -633,7 +640,7 @@ class KITTIDataset(data.Dataset):
             value = values[i]
             if k in ["img", "coord_range", "ratio_pad", "calib", "mixed", "depth_map", "non_mix_imgs"]:
                 value = torch.stack(value, 0)
-            if k in ["bboxes", "cls", "depth", "center_3d", "center_2d", "size_2d", "heading_bin",
+            if k in ["bboxes", "cls", "depth", "center_3d", "vdepth_factors", "center_2d", "size_2d", "heading_bin",
                      "heading_res", "size_3d", "src_img"]:
                 value = torch.cat(value, 0)
             if k not in ["mean_sizes"]:

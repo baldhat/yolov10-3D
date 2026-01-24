@@ -959,12 +959,12 @@ class DDDetectionLoss:
     def preprocess(self, targets, batch_size, scale_tensor):
         """Preprocesses the target counts and matches with the input batch size to output a tensor."""
         if targets.shape[0] == 0:
-            out = torch.zeros(batch_size, 0, 18, device=self.device)
+            out = torch.zeros(batch_size, 0, 19, device=self.device)
         else:
             i = targets[:, 0]  # image index
             _, counts = i.unique(return_counts=True)
             counts = counts.to(dtype=torch.int32)
-            out = torch.zeros(batch_size, counts.max(), 18, device=self.device)
+            out = torch.zeros(batch_size, counts.max(), 19, device=self.device)
             for j in range(batch_size):
                 matches = i == j
                 n = matches.sum()
@@ -1013,12 +1013,13 @@ class DDDetectionLoss:
                                 batch["bboxes"], batch["center_2d"], batch["size_2d"],
                                 batch["center_3d"], batch["size_3d"], batch["depth"].view(-1, 1),
                                 batch["heading_bin"].view(-1, 1), batch["heading_res"].view(-1, 1),
+                                batch["vdepth_factors"].view(-1, 1),
                                 batch["src_img"].view(-1, 1)), 1)
         gts = self.preprocess(gts.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
         calibs = batch["calib"]
         mean_sizes = batch["mean_sizes"]
-        gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin, gt_heading_res, gt_src_img = gts.split(
-            (1, 4, 2, 2, 2, 3, 1, 1, 1, 1), 2)
+        gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin, gt_heading_res, gt_vdepth_factors, gt_src_img = gts.split(
+            (1, 4, 2, 2, 2, 3, 1, 1, 1, 1, 1), 2)
         mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0)
 
         # Pboxes
@@ -1029,7 +1030,7 @@ class DDDetectionLoss:
             pred_bboxes.detach().type(gt_bboxes.dtype),
             pred_3d.detach(),
             anchor_points * stride_tensor,
-            (gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin, gt_heading_res),
+            (gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin, gt_heading_res, gt_vdepth_factors),
             mask_gt,
             stride_tensor,
             calibs,
@@ -1037,7 +1038,7 @@ class DDDetectionLoss:
         )
         try:
             (_, target_scores, target_center_2d, target_size_2d, target_center_3d,
-             target_size_3d, target_depth, target_heading_bin, target_heading_res) = targets
+             target_size_3d, target_depth, target_heading_bin, target_heading_res, target_vdepth_factors) = targets
         except Exception as e:
             print(e)
             return loss.sum() * batch_size, loss
@@ -1045,7 +1046,7 @@ class DDDetectionLoss:
         target_scores_sum = max(target_scores.sum(), 1)
 
         targets_2d = targets[2:4]
-        targets_3d = targets[4:9] # center, size, depth, head_bin, head_res
+        targets_3d = targets[4:] # center, size, depth, head_bin, head_res
 
         #self.plot_assignments(batch, targets_2d, fg_mask, pred_bboxes, stride_tensor, targets_3d,  pred_kps, gt_kps, mask_gt)
         
@@ -1108,7 +1109,7 @@ class DDDetectionLoss:
     def compute_box3d_loss(self, targets_3d, pred_3d, anchor_points, stride_tensor, fg_mask, num_targets, loss_weight):
         pred_depth = pred_3d[fg_mask][..., -2]
         pred_depth_un = pred_3d[fg_mask][..., -1]
-        target_depth = targets_3d[-3][fg_mask].squeeze()
+        target_depth = targets_3d[2][fg_mask].squeeze() * targets_3d[5][fg_mask].squeeze() 
         depth_loss = ((laplacian_aleatoric_uncertainty_loss_new(pred_depth, target_depth, pred_depth_un)*loss_weight).sum()
                       / num_targets * self.hyp.depth)
 
@@ -1434,8 +1435,8 @@ class SupervisionLoss:
                              pred_dep_un.permute(0, 2, 1).contiguous()), -1)  # depth uncertainty (1)
         # = 38
 
-        gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin, gt_heading_res, gt_src_img = gts.split(
-            (1, 4, 2, 2, 2, 3, 1, 1, 1, 1), 2)
+        gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin, gt_heading_res, gt_src_img, gt_vdepth_factors = gts.split(
+            (1, 4, 2, 2, 2, 3, 1, 1, 1, 1, 1), 2)
         #mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0)
 
         # Pboxes
@@ -1447,7 +1448,7 @@ class SupervisionLoss:
             pred_3d.detach(),
             anchor_points * stride_tensor,
             (gt_labels, gt_bboxes, gt_center_2d, gt_size_2d, gt_center_3d, gt_size_3d, gt_depth, gt_heading_bin,
-             gt_heading_res),
+             gt_heading_res, gt_vdepth_factors),
             mask_gt,
             stride_tensor,
             calibs,
