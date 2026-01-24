@@ -549,8 +549,7 @@ class v10Detect(Detect):
             b[-1].bias.data[: m.nc] = math.log(5 / m.nc / (640 / s) ** 2)  # cls (.01 objects, 80 classes, 640 img)
 
 class v10Detect3d(nn.Module):
-    max_det = 50
-
+    max_det = 5
     dynamic = False  # force grid reconstruction
     export = False  # export mode
     shape = None
@@ -750,6 +749,13 @@ class v10Detect3d(nn.Module):
         return patches
 
 
+    def select_candidates(self, scores, batch_size):
+        cls_scores_max = torch.max(scores, dim=1)[0]
+        topk_indices = torch.zeros((batch_size, self.max_det, 2), dtype=torch.long, device=scores.device)
+        for b in range(batch_size):
+            _, topk_ind = torch.topk(cls_scores_max[b].view(-1), self.max_det, dim=0, largest=True)
+            topk_indices[b, :, 0], topk_indices[b, :, 1] = self.unravel_index(topk_ind, cls_scores_max[b].shape)
+        return topk_indices
     
     def inference_forward_feat(self, x, heads):
         y = []
@@ -758,7 +764,7 @@ class v10Detect3d(nn.Module):
         
         for i in range(self.nl):
             out = heads[0][i](x[i])
-            candidate_indices = select_candidates_kernel(out, 50)
+            candidate_indices = select_candidates_kernel(out, self.max_det)
             data = x[i].unsqueeze(1).expand(-1, 7, -1, -1, -1).reshape(batch_sz, 7*x[i].shape[1], x[i].shape[2], x[i].shape[3])
             head_out, _ = self.single_head_forward(heads[1][i], data, candidate_indices)
             y.append(torch.cat([out, head_out[:, self.bh_indices]], dim=1))
