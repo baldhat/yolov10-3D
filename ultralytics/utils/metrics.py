@@ -530,7 +530,7 @@ def compute_ap(recall, precision):
 
 
 def ap_per_class(
-    tp, conf, pred_cls, target_cls, plot=False, on_plot=None, save_dir=Path(), names=(), eps=1e-16, prefix=""
+    tp, conf, pred_cls, target_cls, plot=True, on_plot=None, save_dir=Path(), names=(), eps=1e-16, prefix=""
 ):
     """
     Computes the average precision per class for object detection evaluation.
@@ -612,6 +612,7 @@ def ap_per_class(
         plot_mc_curve(x, f1_curve, save_dir / f"{prefix}F1_curve.png", names, ylabel="F1", on_plot=on_plot)
         plot_mc_curve(x, p_curve, save_dir / f"{prefix}P_curve.png", names, ylabel="Precision", on_plot=on_plot)
         plot_mc_curve(x, r_curve, save_dir / f"{prefix}R_curve.png", names, ylabel="Recall", on_plot=on_plot)
+    print("recall: ", r_curve[:, 300])
 
     i = smooth(f1_curve.mean(0), 0.1).argmax()  # max F1 index
     p, r, f1 = p_curve[:, i], r_curve[:, i], f1_curve[:, i]  # max-F1 precision, recall, F1 values
@@ -824,7 +825,7 @@ class DetMetrics(SimpleClass):
         curves_results: TODO
     """
 
-    def __init__(self, save_dir=Path("."), plot=False, on_plot=None, names=()) -> None:
+    def __init__(self, save_dir=Path("."), plot=True, on_plot=None, names=()) -> None:
         """Initialize a DetMetrics instance with a save directory, plot flag, callback function, and class names."""
         self.save_dir = save_dir
         self.plot = plot
@@ -841,7 +842,7 @@ class DetMetrics(SimpleClass):
             conf,
             pred_cls,
             target_cls,
-            plot=self.plot,
+            plot=True,
             save_dir=self.save_dir,
             names=self.names,
             on_plot=self.on_plot,
@@ -895,7 +896,7 @@ class DetMetrics(SimpleClass):
 
 class Det3dMetrics(DetMetrics):
 
-    def __init__(self, save_dir=Path("."), plot=False, on_plot=None, names=()) -> None:
+    def __init__(self, save_dir=Path("."), plot=True, on_plot=None, names=()) -> None:
         super().__init__(save_dir, plot, on_plot, names)
         self.metric3d = 0
 

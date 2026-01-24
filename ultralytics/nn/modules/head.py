@@ -545,8 +545,7 @@ class v10Detect(Detect):
             b[-1].bias.data[: m.nc] = math.log(5 / m.nc / (640 / s) ** 2)  # cls (.01 objects, 80 classes, 640 img)
 
 class v10Detect3d(nn.Module):
-    max_det = 50
-
+    max_det = 5
     dynamic = False  # force grid reconstruction
     export = False  # export mode
     shape = None
@@ -756,7 +755,7 @@ class v10Detect3d(nn.Module):
         cls_scores_max = torch.max(scores, dim=1)[0]
         topk_indices = torch.zeros((batch_size, self.max_det, 2), dtype=torch.long, device=scores.device)
         for b in range(batch_size):
-            _, topk_ind = torch.topk(cls_scores_max[b].view(-1), 50, dim=0, largest=True)
+            _, topk_ind = torch.topk(cls_scores_max[b].view(-1), self.max_det, dim=0, largest=True)
             topk_indices[b, :, 0], topk_indices[b, :, 1] = self.unravel_index(topk_ind, cls_scores_max[b].shape)
         return topk_indices
     
