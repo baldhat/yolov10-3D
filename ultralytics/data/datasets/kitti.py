@@ -5,7 +5,9 @@ import cv2
 import torch
 import pathlib
 from ultralytics.data.datasets.decode_helper import  *
-# from ultralytics.data.datasets.kitti_eval import eval_from_scrach
+from ultralytics.data.datasets.kitti_eval import eval_from_scrach
+from torchvision.transforms import v2
+import torchvision.transforms.v2.functional as F
 import subprocess
 from pathlib import Path
 
@@ -150,7 +152,7 @@ class KITTIDataset(data.Dataset):
         scale = 1
 
         if self.data_augmentation:
-            if np.random.random() < 0.5 and self.mixup:
+            if np.random.random() < self.mixup:
                 random_mix_flag = True
                 img0 = img.copy()
 
@@ -429,6 +431,8 @@ class KITTIDataset(data.Dataset):
                         gt_depth.append(depth)
 
         inputs = torch.tensor(img)
+        inputs = self.apply_custom_randaug(inputs)
+        
         info = {'img_id': index,
                 'img_size': img_size,
                 'trans_inv': trans_inv}
@@ -479,20 +483,62 @@ class KITTIDataset(data.Dataset):
             "src_img": torch.tensor(np.array(gt_src_img, dtype=np.uint8)),
             "non_mix_imgs": torch.tensor(np.concatenate((img0[None],img1[None]) if random_mix_flag else (img[None], img[None]), axis=0))
         }
+      
+    def apply_op(self, img, op_name, mag):
+        # We use the functional (F) API here for precise control over the magnitude
+        if op_name == "sharpness":
+            # 1.0 is original, 0.0 is blurred, 2.0 is sharp
+            return F.adjust_sharpness(img, sharpness_factor=1.0 + mag)
+        elif op_name == "contrast":
+            return F.adjust_contrast(img, contrast_factor=1.0 + mag)
+        elif op_name == "color":
+            return F.adjust_saturation(img, saturation_factor=1.0 + mag)
+        elif op_name == "brightness":
+            return F.adjust_brightness(img, brightness_factor=1.0 + mag)
+        elif op_name == "equalize":
+            return F.equalize(img)
+        elif op_name == "solarize":
+            # threshold is usually 0-255 for uint8, or 0.0-1.0 for float
+            return F.solarize(img, threshold=1.0 - mag)
+        elif op_name == "posterize":
+            # Bits must be an integer between 1-8. 
+            # High magnitude = fewer bits (more distortion)
+            bits = max(1, int(8 - (mag * 4)))
+            return F.posterize(img, bits=bits)
+        return img  
+        
+    def apply_custom_randaug(self, tensor_img, num_ops=2, magnitude=9):
+        """
+        Applies a subset of RandAugment transformations to a PyTorch tensor.
+        Magnitude should be on a scale of [0, 10].
+        """
+
+        op_list = ["sharpness", "contrast", "color", "brightness", "equalize", "solarize", "posterize"]
+        
+        # Randomly pick N operations
+        indices = torch.randint(0, len(op_list), (num_ops,))
+        for i in indices:
+            tensor_img = self.apply_op(tensor_img, op_list[i], magnitude)
+        return tensor_img
 
     def get_stats(self, results, save_dir):
         self.save_results(results, output_dir=save_dir)
         self.save_results(results, output_dir=str(save_dir), epoch=self.save_counter)
-        command = f"ultralytics/data/datasets/evaluate_object_3d_offline_ap40 {self.label_dir} {os.path.join(save_dir, 'preds')}"
-        print("Running command: " + command)
-        lines = subprocess.check_output(command, shell= True, text= True, env={})
-        print("Result: " + lines)
-        result = 0
-        for line in lines.split("\n"):
-            if line.startswith("car_detection_3d"):
-                result = float(line.split(" ")[3])
-        self.last_result = result
-        return self.last_result
+        # command = f"ultralytics/data/datasets/evaluate_object_3d_offline_ap40 {self.label_dir} {os.path.join(save_dir, 'preds')}"
+        # print("Running command: " + command)
+        # lines = subprocess.check_output(command, shell= True, text= True, env={})
+        # print("Result: " + lines)
+        # result = 0
+        # for line in lines.split("\n"):
+        #     if line.startswith("car_detection_3d"):
+        #         result = float(line.split(" ")[3])
+        # self.last_result = result
+        # return self.last_result
+        result = eval_from_scrach(
+            self.label_dir,
+            os.path.join(save_dir, 'preds'),
+            ap_mode=40)
+        return result["3d@0.70"][1]
 
     def save_results(self, results, output_dir='./outputs', epoch=None):
         output_dir = str(os.path.join(output_dir, 'preds'))
