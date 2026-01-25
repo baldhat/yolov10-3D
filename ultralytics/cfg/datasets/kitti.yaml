@@ -1,9 +1,9 @@
 # Train/val/test sets as 1) dir: path/to/imgs, 2) file: path/to/imgs.txt, or 3) list: [path/to/imgs1, path/to/imgs2, ..]
-path: /home/wiss/mejo/storage/presil/final_dataset3/standard
+path: /home/wiss/mejo/storage/presil/final_dataset_nusc_only/standard
 
-train: /home/wiss/mejo/storage/presil/final_dataset3/standard/ImageSets/train.txt
-val: /home/wiss/mejo/storage/presil/final_dataset3/standard/ImageSets/val.txt
-test: /home/wiss/mejo/storage/presil/final_dataset3/standard/ImageSets/test.txt
+train: /home/wiss/mejo/storage/presil/final_dataset_nusc_only/standard/ImageSets/train.txt
+val: /home/wiss/mejo/storage/presil/final_dataset_nusc_only/standard/ImageSets/val.txt
+test: /home/wiss/mejo/storage/presil/final_dataset_nusc_only/standard/ImageSets/test.txt
 # trainval: ImageSets/trainval.txt
 
 # Classes
