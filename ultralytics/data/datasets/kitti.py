@@ -5,7 +5,6 @@ import cv2
 import torch
 import pathlib
 from ultralytics.data.datasets.decode_helper import  *
-from ultralytics.data.datasets.kitti_eval import eval_from_scrach
 import subprocess
 from pathlib import Path
 
@@ -33,6 +32,7 @@ class KITTIDataset(data.Dataset):
         self.writelist = ['Car' ,'Pedestrian' ,'Cyclist']
         
         self.save_counter = 0
+        self.args = args
         self.last_result = 0
 
         '''    
@@ -518,22 +518,30 @@ class KITTIDataset(data.Dataset):
 
     def get_stats(self, results, save_dir):
         self.save_results(results, output_dir=save_dir)
-        # self.save_results(results, output_dir=str(save_dir), epoch=self.save_counter)
-        # command = f"ultralytics/data/datasets/evaluate_object_3d_offline_ap40 {self.label_dir} {os.path.join(save_dir, 'preds')}"
-        # print("Running command: " + command)
-        # lines = subprocess.check_output(command, shell= True, text= True, env={})
-        # print("Result: " + lines)
-        # result = 0
-        # for line in lines.split("\n"):
-        #     if line.startswith("car_detection_3d"):
-        #         result = float(line.split(" ")[3])
-        # self.last_result = result
-        # return self.last_result
-        result = eval_from_scrach(
-            self.label_dir,
-            os.path.join(save_dir, 'preds'),
-            ap_mode=40)
-        return result["3d@0.70"][1]
+        if self.args.fast_eval:
+            try:
+                from ultralytics.data.datasets.kitti_eval import eval_from_scrach
+                result = eval_from_scrach(
+                self.label_dir,
+                os.path.join(save_dir, 'preds'),
+                ap_mode=40)
+                return result["3d@0.70"][1]
+            except Exception as e:
+                self.save_results(results, output_dir=str(save_dir), epoch=self.save_counter)
+                return 0
+        else:
+            self.save_results(results, output_dir=str(save_dir), epoch=self.save_counter)
+            command = f"ultralytics/data/datasets/evaluate_object_3d_offline_ap40 {self.label_dir} {os.path.join(save_dir, 'preds')}"
+            print("Running command: " + command)
+            lines = subprocess.check_output(command, shell= True, text= True, env={})
+            print("Result: " + lines)
+            result = 0
+            for line in lines.split("\n"):
+                if line.startswith("car_detection_3d"):
+                    result = float(line.split(" ")[3])
+            self.last_result = result
+            return self.last_result
+        
 
     def save_results(self, results, output_dir='./outputs', epoch=None):
         output_dir = str(os.path.join(output_dir, 'preds'))

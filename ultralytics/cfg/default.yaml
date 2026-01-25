@@ -16,6 +16,7 @@ save: True # (bool) save train checkpoints and predict results
 save_period: -1 # (int) Save checkpoint every x epochs (disabled if < 1)
 val_period: 5 # (int) Validation every x epochs
 val_start: 80
+fast_eval: false
 cache: False # (bool) True/ram, disk or False. Use cache for data loading
 device: # (int | str | list, optional) device to run on, i.e. cuda device=0 or device=0,1,2,3 or device=cpu
 workers: 2 # TODO (int) number of worker threads for data loading (per RANK if DDP)
@@ -127,7 +128,7 @@ max_depth_threshold: 120
 min_depth_threshold: 1
 min_scale: 0.6
 max_scale: 1.4
-overfit: False
+overfit: True
 gradient_balancer: #"cfa"
 gradient_balancer_strategy: #"depVSrestWdist"
 # Distillation
