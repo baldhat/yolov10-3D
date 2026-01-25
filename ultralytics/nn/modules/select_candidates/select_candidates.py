@@ -1,6 +1,5 @@
 import torch
 import select_candidates_cuda
-import ultralytics.nn.modules.top_k
 
 def topk_indices(logits: torch.Tensor, k: int = 50):
     """

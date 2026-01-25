@@ -132,7 +132,7 @@ class Run:
                     model(im)
                     #model.model[-1](fs)
                 t1 = time.time()
-                for x in range(100):
+                for x in range(200):
                     out = model(im)
                     # model.model[-1](fs)
                 t2 = time.time()
@@ -140,7 +140,7 @@ class Run:
                 model(im)
                 peak =torch.cuda.max_memory_allocated()
                 reserved =torch.cuda.max_memory_reserved()
-                print(f"Batch size: {bs} Took: {(t2-t1) / 100 * 1000:.2f}ms, FLOPs: {flops:.2f} GFLOPs, Memory peak: {peak}, Memory reserved: {reserved}")
+                print(f"Batch size: {bs} Took: {(t2-t1) / 200 * 1000:.2f}ms, FLOPs: {flops:.2f} GFLOPs, Memory peak: {peak}, Memory reserved: {reserved}")
                 # from torch.profiler import profile, ProfilerActivity, record_function
                 # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 #             record_shapes=True,
