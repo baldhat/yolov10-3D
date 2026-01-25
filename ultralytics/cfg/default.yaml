@@ -128,7 +128,7 @@ max_depth_threshold: 120
 min_depth_threshold: 1
 min_scale: 0.6
 max_scale: 1.4
-overfit: True
+overfit: False
 gradient_balancer: #"cfa"
 gradient_balancer_strategy: #"depVSrestWdist"
 # Distillation
