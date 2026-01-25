@@ -25,7 +25,7 @@ class KITTIDataset(data.Dataset):
         self.max_objs = 50
         self.class_name = ['Car', 'Pedestrian', 'Cyclist']
         self.cls2train_id = {'Car': 0, 'Pedestrian': 1, 'Cyclist': 2}
-        self.resolution = np.array([1280, 384])  # W * H
+        self.resolution = np.array([1280, 736])  # W * H
         self.use_3d_center = True  # cfg['use_3d_center']
         self.load_depth_maps = args.load_depth_maps
         self.use_camera_dis = args.cam_dis
@@ -58,10 +58,10 @@ class KITTIDataset(data.Dataset):
         root_dir = pathlib.Path(image_file_path).parent.parent
         split_dir = image_file_path
         self.idx_list = [x.strip() for x in open(split_dir).readlines()]
-        if args.overfit:
-            self.idx_list = self.idx_list[:64]
-        if len(self.idx_list) > 7518:
-            self.idx_list = self.idx_list[:7518]
+        # if args.overfit:
+        #     self.idx_list = self.idx_list[:64]
+        # if len(self.idx_list) > 7518:
+        #     self.idx_list = self.idx_list[:7518]
 
         # path configuration
         self.data_dir = os.path.join(root_dir, 'testing' if self.mode == 'test' else 'training')
