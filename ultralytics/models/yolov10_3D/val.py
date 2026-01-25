@@ -208,8 +208,18 @@ class YOLOv10_3DDetectionValidator(DetectionValidator):
 
     def _prepare_batch(self, batch):
         infos_ = self.collate_infos(batch)
-        calibs = [self.dataloader.dataset.get_calib(info) for info in infos_['img_id']]
+        calibs = []
+        for b,(img_id, mixup_img_id) in enumerate(zip(infos_["img_id"], infos_["mixup_img_id"])):
+            c = []
+            mask = batch["batch_idx"] == b
+            for gt in batch["src_img"][mask]:
+                if gt == 0:
+                    c.append(self.dataloader.dataset.get_calib(img_id))   
+                else:
+                    c.append(self.dataloader.dataset.get_calib(mixup_img_id))   
+            calibs.append(c)
         return self.dataloader.dataset.decode_batch_eval(batch, calibs)
+
 
     def _prepare_preds(self, preds, batch):
         infos_ = self.collate_infos(batch)

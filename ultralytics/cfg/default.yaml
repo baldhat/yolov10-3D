@@ -15,7 +15,7 @@ imgsz: [1280, 736] # (int | list) input images size as int for train and val mod
 save: True # (bool) save train checkpoints and predict results
 save_period: -1 # (int) Save checkpoint every x epochs (disabled if < 1)
 val_period: 1 # (int) Validation every x epochs
-val_start: 0
+val_start: -1
 cache: False # (bool) True/ram, disk or False. Use cache for data loading
 device: # (int | str | list, optional) device to run on, i.e. cuda device=0 or device=0,1,2,3 or device=cpu
 workers: 2 # TODO (int) number of worker threads for data loading (per RANK if DDP)
@@ -70,7 +70,7 @@ embed: # (list[int], optional) return feature vectors/embeddings from given laye
 use_o2m_depth: False
 use_dino_depth: False
 dino_path: /home/stud/mijo/experiments/results/dino_base_64_lr3e-6_noMix/dino/best.pt
-distillation_path: /home/stud/mijo/experiments/results/yolov10-3Dx_2/weights/best.pt
+distillation_path: /storage/group/deepscenario/jonathan_for_johannes/yolov10-3Dx_2/weights/best.pt
 
 virtual_focal_length: 720
 

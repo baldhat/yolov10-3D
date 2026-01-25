@@ -150,6 +150,7 @@ class KITTIDataset(data.Dataset):
         calib = self.get_calib(index)
         scale = 1
         vdepth_factor0 = self.virtual_focal_length / calib.fv
+        mixup_img_id = -1
 
         if self.data_augmentation:
             if np.random.random() < 0.5 and self.mixup:
@@ -187,6 +188,7 @@ class KITTIDataset(data.Dataset):
                 
                 img1 = self.get_image(random_index)
                 if img1.size[0] == img0.size[0] and img1.size[1] == img0.size[1]:
+                    mixup_img_id = random_index
                     if self.load_depth_maps:
                         seg_mask_tmp = self.get_segmentation(random_index)
                     img_size_temp = np.array(img.size)
@@ -437,7 +439,8 @@ class KITTIDataset(data.Dataset):
         inputs = torch.tensor(img)
         info = {'img_id': index,
                 'img_size': img_size,
-                'trans_inv': trans_inv}
+                'trans_inv': trans_inv,
+                "mixup_img_id": mixup_img_id}
 
         if len(gt_boxes_2d) > 0:
             # We need xywh in [0, 1]
@@ -544,21 +547,27 @@ class KITTIDataset(data.Dataset):
                     y3d = batch["center_3d"][mask][j, 1].cpu().numpy()
                     c3d = affine_transform(np.array([x3d, y3d]), np.array(batch["info"][i]["trans_inv"]))
                     if self.use_camera_dis:
-                        locations = calibs[i].camera_dis_to_rect(c3d[0], c3d[1], depth).reshape(-1)
+                        locations = calibs[i][j].camera_dis_to_rect(c3d[0], c3d[1], depth).reshape(-1)
                     else:
-                        locations = calibs[i].img_to_rect(c3d[0], c3d[1], depth).reshape(-1)
+                        locations = calibs[i][j].img_to_rect(c3d[0], c3d[1], depth).reshape(-1)
                 else:
                     x3d = batch["center_3d"][mask][j, 0].cpu().numpy() / batch["ratio_pad"][i][0, 0]
                     y3d = batch["center_3d"][mask][j, 1].cpu().numpy() / batch["ratio_pad"][i][0, 1]
                     if self.use_camera_dis:
-                        locations = calibs[i].camera_dis_to_rect(x3d, y3d, depth).reshape(-1)
+                        locations = calibs[i][j].camera_dis_to_rect(x3d, y3d, depth).reshape(-1)
                     else:
-                        locations = calibs[i].img_to_rect(x3d, y3d, depth).reshape(-1)
+                        if isinstance(calibs[i], Calibration):
+                            locations = calibs[i].img_to_rect(x3d, y3d, depth).reshape(-1)
+                        else:
+                            locations = calibs[i][j].img_to_rect(x3d, y3d, depth).reshape(-1)
                 locations[1] += dimensions[0] / 2
 
                 hd_bin, hd_res = batch["heading_bin"][mask][j].item(), batch["heading_res"][mask][j].item()
                 alpha = class2angle(hd_bin, hd_res, to_label_format=True)
-                ry = calibs[i].alpha2ry(alpha, x)
+                if isinstance(calibs[i], Calibration):
+                    ry = calibs[i].alpha2ry(alpha, x)
+                else:
+                    ry = calibs[i][j].alpha2ry(alpha, x)
 
                 score = 1
 
@@ -610,8 +619,8 @@ class KITTIDataset(data.Dataset):
                     else:
                         locations = calibs[i].img_to_rect(c3d[0], c3d[1], depth).reshape(-1)
                 else:
-                    x3d = pred_center3d[i, j, 0].numpy() / ratio_pad[i][0]
-                    y3d = pred_center3d[i, j, 1].numpy()/ ratio_pad[i][1]
+                    x3d = pred_center3d[i, j, 0].numpy() / ratio_pad[i][0, 0]
+                    y3d = pred_center3d[i, j, 1].numpy() / ratio_pad[i][0, 1]
                     if self.use_camera_dis:
                         locations = calibs[i].camera_dis_to_rect(x3d, y3d, depth).reshape(-1)
                     else:

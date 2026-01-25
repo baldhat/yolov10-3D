@@ -1229,10 +1229,24 @@ class KITTIVisualizer():
     def __init__(self, classes=["Car", "Pedestrian", "Cyclist"]):
         self.classes = classes
         self.max_imgs = 9
+        
+        
+    def get_calibs(self, batch, dataset, infos_):
+        calibs = []
+        for b,(img_id, mixup_img_id) in enumerate(zip(infos_["img_id"], infos_["mixup_img_id"])):
+            c = []
+            mask = batch["batch_idx"] == b
+            for gt in batch["src_img"][mask]:
+                if gt == 0:
+                    c.append(dataset.get_calib(img_id))   
+                else:
+                    c.append(dataset.get_calib(mixup_img_id))   
+            calibs.append(c)
+        return calibs
 
     def plot_batch(self, batch, dataset, filename):
         infos_ = self.collate_infos(batch)
-        calibs = [dataset.get_calib(info) for info in infos_['img_id']]
+        calibs = self.get_calibs(batch, dataset, infos_)
         targets = dataset.decode_batch(batch, calibs, undo_augment=False)
         images, infos = batch["img"], batch["info"]
 
@@ -1248,7 +1262,7 @@ class KITTIVisualizer():
             #img = np.clip((img * dataset.std + dataset.mean), 0, 255).astype(np.uint8)
             img = cv2.resize(img, info["img_size"])
 
-            for object in result:
+            for j, object in enumerate(result):
                 cls = object[0]
                 bbox2d = np.array(object[2:6])
                 dimensions = np.array([object[8], object[7], object[6]])
@@ -1257,26 +1271,15 @@ class KITTIVisualizer():
                 egoc_rot_matrix = self.get_egoc_rot_matrix(ry)
 
                 self.plot_3d_obj(img,
-                                 VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
-                                             dimensions, bbox2d, cls),
-                                 calib.P2, gt=True)
+                                 [VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
+                                             dimensions, bbox2d, cls)],
+                                 calib[j].P2, colors=[(255, 0, 0, 100)])
 
             ax[i].imshow(img)
             ax[i].axis("off")
 
         plt.savefig(filename, dpi=300, bbox_inches="tight")
         plt.clf()
-
-        if dataset.load_depth_maps:
-            fig, ax = plt.subplots(math.ceil(self.max_imgs ** 0.5), math.ceil(self.max_imgs ** 0.5),
-                                   figsize=(18, 12), gridspec_kw={'wspace': 0, 'hspace': 0}, constrained_layout=True)
-            ax = ax.ravel()
-            for i, depth_map in enumerate(batch["depth_map"]):
-                if i >= self.max_imgs:
-                    break
-                ax[i].imshow(depth_map)
-                ax[i].axis("off")
-            plt.savefig(str(filename) + "depth.png", dpi=300, bbox_inches="tight")
 
     def plot_preds(self, batch, preds, dataset, paths, fname, names, threshold=0.1):
         infos_ = self.collate_infos(batch)
@@ -1308,9 +1311,9 @@ class KITTIVisualizer():
                 egoc_rot_matrix = self.get_egoc_rot_matrix(ry)
 
                 self.plot_3d_obj(img,
-                                 VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
-                                             dimensions, bbox2d, cls),
-                                 calib.P2, bbox2d=False)
+                                 [VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
+                                             dimensions, bbox2d, cls)],
+                                 calib.P2, [(255, 0, 0, 100)])
 
             for object in target:
                 cls = object[0]
@@ -1321,9 +1324,9 @@ class KITTIVisualizer():
                 egoc_rot_matrix = self.get_egoc_rot_matrix(ry)
 
                 self.plot_3d_obj(img,
-                                 VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
-                                             dimensions, bbox2d, cls),
-                                 calib.P2, bbox2d=False, gt=True)
+                                 [VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
+                                             dimensions, bbox2d, cls)],
+                                 calib.P2, [(0, 255, 0, 100)])
 
             ax[i].imshow(img)
             ax[i].axis("off")
