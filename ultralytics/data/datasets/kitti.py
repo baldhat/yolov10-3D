@@ -489,7 +489,7 @@ class KITTIDataset(data.Dataset):
             "non_mix_imgs": torch.tensor(np.concatenate((img0[None],img1[None]) if random_mix_flag else (img[None], img[None]), axis=0))
         }
 
-       def get_stats(self, results, save_dir):
+        def get_stats(self, results, save_dir):
             self.save_results(results, output_dir=save_dir)
             if self.args.fast_eval:
                 try:
