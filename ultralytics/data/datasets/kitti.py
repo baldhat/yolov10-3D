@@ -84,6 +84,7 @@ class KITTIDataset(data.Dataset):
         self.max_scale = args.max_scale
         self.shift = args.translate
         self.mixup = args.mixup
+        self.random_cut = args.random_cut
         self.max_depth_threshold = args.max_depth_threshold
         self.min_depth_thres = args.min_depth_threshold
 
@@ -145,7 +146,9 @@ class KITTIDataset(data.Dataset):
         # data augmentation for image
         center = np.array(img_size) / 2
         crop_size = img_size
-        random_crop_flag, random_flip_flag = False, False
+        random_crop_flag = False
+        random_flip_flag = False
+        random_cut_flag = False
         random_mix_flag = False
         calib = self.get_calib(index)
         scale = 1
@@ -173,6 +176,9 @@ class KITTIDataset(data.Dataset):
                 shift_1 = img_size[1] * np.clip(np.random.randn() * self.shift, -2 * self.shift, 2 * self.shift)
                 center[0] += shift_0
                 center[1] += shift_1
+            
+            if np.random.random() < self.random_cut:
+                random_cut_flag = True
 
         if random_mix_flag == True:
             count_num = 0
@@ -195,7 +201,30 @@ class KITTIDataset(data.Dataset):
                             random_mix_flag = True
                             if random_flip_flag == True:
                                 img1 = img1.transpose(Image.FLIP_LEFT_RIGHT)
-                            #img = Image.blend(img, img1, alpha=0.5)
+                            img = Image.blend(img, img1, alpha=0.5)
+                            break
+                        
+        if random_cut_flag == True:
+            count_num = 0
+            random_cut_flag = False
+            while count_num < 50:
+                count_num += 1
+                cut_index = np.random.randint(len(self.idx_list))
+                cut_index = int(self.idx_list[cut_index])
+                calib_temp = self.get_calib(cut_index)
+
+                if calib_temp.cu == calib.cu and calib_temp.cv == calib.cv and calib_temp.fu == calib.fu and calib_temp.fv == calib.fv:
+                    cut_img = self.get_image(cut_index)
+                    
+                    img_size_temp = np.array(img.size)
+                    dst_W_temp, dst_H_temp = img_size_temp
+                    if dst_W_temp == dst_W and dst_H_temp == dst_H:
+                        objects_1 = self.get_label(index)
+                        objects_2 = self.get_label(cut_index)
+                        if len(objects_1) + len(objects_2) < self.max_objs:
+                            random_cut_flag = True
+                            if random_flip_flag == True:
+                                cut_img = cut_img.transpose(Image.FLIP_LEFT_RIGHT)
                             break
 
         # add affine transformation for 2d images.
@@ -214,16 +243,12 @@ class KITTIDataset(data.Dataset):
                                   method=Image.AFFINE,
                                   data=tuple(trans_inv.reshape(-1).tolist()),
                                   resample=Image.BILINEAR)
-        if self.load_depth_maps:
-            seg_mask = np.array(seg_mask.transform(tuple(self.resolution.tolist()),
-                                    method=Image.AFFINE,
-                                    data=tuple(trans_inv.reshape(-1).tolist()),
-                                    resample=Image.NEAREST, fillcolor=51))
-            if random_mix_flag == True:
-                seg_mask_tmp = np.array(seg_mask_tmp.transform(tuple(self.resolution.tolist()),
-                                            method=Image.AFFINE,
-                                            data=tuple(trans_inv.reshape(-1).tolist()),
-                                            resample=Image.NEAREST, fillcolor=51))
+        
+        if random_cut_flag:
+            cut_img = cut_img.transform(tuple(self.resolution.tolist()),
+                                  method=Image.AFFINE,
+                                  data=tuple(trans_inv.reshape(-1).tolist()),
+                                  resample=Image.BILINEAR)
 
         # image encoding
         img = np.array(img).astype(np.float32) / 255.0
@@ -233,6 +258,10 @@ class KITTIDataset(data.Dataset):
             img0 = img0.transpose(2, 0, 1)  # C * H * W
             img1 = np.array(img1).astype(np.float32) / 255.0
             img1 = img1.transpose(2, 0, 1)  # C * H * W
+            
+        if random_cut_flag:
+            cut_img = np.array(cut_img).astype(np.float32) / 255.0
+            cut_img = cut_img.transpose(2, 0, 1)  # C * H * W
 
         #  ============================   get labels   ==============================
         gt_boxes_2d = []
@@ -339,7 +368,7 @@ class KITTIDataset(data.Dataset):
                     gt_depth.append(dep)
                 else:
                     gt_depth.append(depth)
-
+                    
             if random_mix_flag == True:
                 # if False:
                 objects = self.get_label(random_index)
@@ -375,10 +404,94 @@ class KITTIDataset(data.Dataset):
                     bbox_2d_[2:] = bbox_2d[2:]
                     bbox_2d_ = xyxy2xywh(bbox_2d_)
                     
-                    if (self.max_overlap(bbox_2d_, gt_boxes_2d) < 0.2):
-                        img = self.transfer_rectangle(img1, img, bbox_2d_)
-                    else:
+                    gt_size_2d_ = bbox_2d_[2:]
+                    center_2d = np.array([(bbox_2d[0] + bbox_2d[2]) / 2, (bbox_2d[1] + bbox_2d[3]) / 2],
+                                         dtype=np.float32)  # W * H
+
+                    # process 3d bbox & get 3d center
+                    center_3d = objects[i].pos + [0, -objects[i].h / 2, 0]  # real 3D center in 3D space
+                    r_center_3d = center_3d.reshape(-1, 3)  # shape adjustment (N, 3)
+                    center_3d, _ = calib.rect_to_img(r_center_3d)  # project 3D center to image plane
+                    center_3d = center_3d[0]  # shape adjustment
+                    center_3d = affine_transform(center_3d.reshape(-1), trans)
+
+                    # generate the center of gaussian heatmap [optional: 3d center or 2d center]
+                    center_heatmap = center_3d.astype(np.int32)
+                    if center_heatmap[0] < 0 or center_heatmap[0] >= self.resolution[0]: continue
+                    if center_heatmap[1] < 0 or center_heatmap[1] >= self.resolution[1]: continue
+                    # encoding depth
+                    depth = objects[i].pos[-1]
+                    depth *= scale
+                    if depth > self.max_depth_threshold:
                         continue
+                    
+                    
+
+                    cls_id = self.cls2train_id[objects[i].cls_type]
+                    gt_cls.append([cls_id])
+                    gt_boxes_2d.append(bbox_2d_)
+                    gt_center_3d.append(center_3d)
+                    gt_center_2d.append(center_2d)
+                    gt_size_2d.append(gt_size_2d_)
+
+                    # encoding heading angle
+                    heading_angle = calib.ry2alpha(objects[i].ry, (objects[i].box2d[0] + objects[i].box2d[2]) / 2)
+                    if heading_angle > np.pi:  heading_angle -= 2 * np.pi  # check range
+                    if heading_angle < -np.pi: heading_angle += 2 * np.pi
+                    heading_bin, heading_res = angle2class(heading_angle)
+                    gt_heading_bin.append(heading_bin)
+                    gt_heading_res.append(heading_res)
+
+                    gt_src_img.append(0) # object in img1
+
+                    s3d = (np.array([objects[i].h, objects[i].w, objects[i].l], dtype=np.float32)
+                           - self.cls_mean_size[self.cls2train_id[objects[i].cls_type]])
+                    gt_size_3d.append(s3d)
+
+                    if self.use_camera_dis:
+                        r_center_3d *= scale
+                        dep = np.linalg.norm(r_center_3d)
+                        gt_depth.append(dep)
+                    else:
+                        gt_depth.append(depth)
+
+            if random_cut_flag == True:
+                # if False:
+                objects = self.get_label(cut_index)
+                # data augmentation for labels
+                if random_flip_flag:
+                    for object in objects:
+                        [x1, _, x2, _] = object.box2d
+                        object.box2d[0], object.box2d[2] = img_size[0] - x2, img_size[0] - x1
+                        object.ry = np.pi - object.ry
+                        object.pos[0] *= -1
+                        if object.ry > np.pi:  object.ry -= 2 * np.pi
+                        if object.ry < -np.pi: object.ry += 2 * np.pi
+                object_num_temp = len(objects) if len(objects) < (self.max_objs - object_num) else (
+                        self.max_objs - object_num)
+                for i in range(object_num_temp):
+                    if len(gt_cls) == 50:
+                        break
+                    
+                    if objects[i].cls_type not in self.writelist:
+                        continue
+
+                    if objects[i].level_str == 'UnKnown' or (objects[i].pos[-1] * scale < self.min_depth_thres):
+                        continue
+
+                    if objects[i].trucation > 0.5 or objects[i].occlusion > 2:
+                        continue
+
+                    # process 2d bbox & get 2d center
+                    bbox_2d = objects[i].box2d.copy()
+                    # add affine transformation for 2d boxes.
+                    bbox_2d[:2] = affine_transform(bbox_2d[:2], trans)
+                    bbox_2d[2:] = affine_transform(bbox_2d[2:], trans)
+
+                    bbox_2d_ = np.copy(bbox_2d)
+                    bbox_2d_[:2] = bbox_2d[:2]
+                    bbox_2d_[2:] = bbox_2d[2:]
+                    bbox_2d_ = xyxy2xywh(bbox_2d_)
                     
                     gt_size_2d_ = bbox_2d_[2:]
                     center_2d = np.array([(bbox_2d[0] + bbox_2d[2]) / 2, (bbox_2d[1] + bbox_2d[3]) / 2],
@@ -399,6 +512,11 @@ class KITTIDataset(data.Dataset):
                     depth = objects[i].pos[-1]
                     depth *= scale
                     if depth > self.max_depth_threshold:
+                        continue
+                    
+                    if (self.max_overlap(bbox_2d_, gt_boxes_2d) < 0.2):
+                        img = self.transfer_rectangle(cut_img, img, bbox_2d_)
+                    else:
                         continue
 
                     cls_id = self.cls2train_id[objects[i].cls_type]
@@ -421,9 +539,6 @@ class KITTIDataset(data.Dataset):
                     s3d = (np.array([objects[i].h, objects[i].w, objects[i].l], dtype=np.float32)
                            - self.cls_mean_size[self.cls2train_id[objects[i].cls_type]])
                     gt_size_3d.append(s3d)
-
-                    if self.load_depth_maps:
-                        depth_maps.append(np.where(seg_mask_tmp == objects[i].line_index, depth, 1000))
 
                     if self.use_camera_dis:
                         r_center_3d *= scale
@@ -479,9 +594,9 @@ class KITTIDataset(data.Dataset):
             "mean_sizes": torch.tensor(self.cls_mean_size),
             "heading_bin": torch.tensor(np.array(gt_heading_bin)),
             "heading_res": torch.tensor(np.array(gt_heading_res)),
-            "mixed": torch.tensor(np.array(random_mix_flag, dtype=np.uint8)),
+            "mixed": torch.tensor(np.array(random_cut_flag, dtype=np.uint8)),
             "src_img": torch.tensor(np.array(gt_src_img, dtype=np.uint8)),
-            "non_mix_imgs": torch.tensor(np.concatenate((img0[None],img1[None]) if random_mix_flag else (img[None], img[None]), axis=0))
+            "non_mix_imgs": torch.tensor(np.concatenate((img[None], cut_img[None]) if random_cut_flag else (img[None], img[None]), axis=0))
         }
         
     def max_overlap(self, bbox_2d_, gt_boxes_2d):

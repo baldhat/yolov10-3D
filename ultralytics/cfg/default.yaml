@@ -168,6 +168,7 @@ perspective: 0.0 # (float) image perspective (+/- fraction), range 0-0.001
 flipud: 0.0 # (float) image flip up-down (probability)
 fliplr: 0.5 # (float) image flip left-right (probability)
 random_crop: 0.5 # (float) image crop (probability)
+random_cut: 0.8
 bgr: 0.0 # (float) image channel BGR (probability)
 mosaic: 1.0 # (float) image mosaic (probability)
 mixup: 0.5 # (float) image mixup (probability)
