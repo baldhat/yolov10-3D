@@ -1257,9 +1257,9 @@ class KITTIVisualizer():
                 egoc_rot_matrix = self.get_egoc_rot_matrix(ry)
 
                 self.plot_3d_obj(img,
-                                 VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
-                                             dimensions, bbox2d, cls),
-                                 calib.P2, gt=True)
+                                 [VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
+                                             dimensions, bbox2d, cls)],
+                                 calib.P2, [(255, 0, 0, 100)])
 
             ax[i].imshow(img)
             ax[i].axis("off")
@@ -1308,9 +1308,9 @@ class KITTIVisualizer():
                 egoc_rot_matrix = self.get_egoc_rot_matrix(ry)
 
                 self.plot_3d_obj(img,
-                                 VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
-                                             dimensions, bbox2d, cls),
-                                 calib.P2, bbox2d=False)
+                                 [VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
+                                             dimensions, bbox2d, cls)],
+                                 calib.P2, [(255, 0, 0, 100)])
 
             for object in target:
                 cls = object[0]
@@ -1321,9 +1321,9 @@ class KITTIVisualizer():
                 egoc_rot_matrix = self.get_egoc_rot_matrix(ry)
 
                 self.plot_3d_obj(img,
-                                 VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
-                                             dimensions, bbox2d, cls),
-                                 calib.P2, bbox2d=False, gt=True)
+                                 [VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
+                                             dimensions, bbox2d, cls)],
+                                 calib.P2, [(0, 255, 0, 100)])
 
             ax[i].imshow(img)
             ax[i].axis("off")

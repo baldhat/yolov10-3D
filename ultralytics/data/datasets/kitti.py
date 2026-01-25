@@ -5,7 +5,7 @@ import cv2
 import torch
 import pathlib
 from ultralytics.data.datasets.decode_helper import  *
-from ultralytics.data.datasets.kitti_eval import eval_from_scrach
+#from ultralytics.data.datasets.kitti_eval import eval_from_scrach
 from torchvision.transforms import v2
 import torchvision.transforms.v2.functional as F
 import subprocess
@@ -499,7 +499,7 @@ class KITTIDataset(data.Dataset):
             return F.equalize(img)
         elif op_name == "solarize":
             # threshold is usually 0-255 for uint8, or 0.0-1.0 for float
-            return F.solarize(img, threshold=1.0 - mag)
+            return F.solarize(img, threshold=0.5 + mag)
         elif op_name == "posterize":
             # Bits must be an integer between 1-8. 
             # High magnitude = fewer bits (more distortion)
@@ -507,7 +507,7 @@ class KITTIDataset(data.Dataset):
             return F.posterize(img, bits=bits)
         return img  
         
-    def apply_custom_randaug(self, tensor_img, num_ops=2, magnitude=9):
+    def apply_custom_randaug(self, tensor_img, num_ops=2):
         """
         Applies a subset of RandAugment transformations to a PyTorch tensor.
         Magnitude should be on a scale of [0, 10].
@@ -518,27 +518,27 @@ class KITTIDataset(data.Dataset):
         # Randomly pick N operations
         indices = torch.randint(0, len(op_list), (num_ops,))
         for i in indices:
-            tensor_img = self.apply_op(tensor_img, op_list[i], magnitude)
+            tensor_img = self.apply_op(tensor_img, op_list[i], 0.5 - torch.rand(1).item())
         return tensor_img
 
     def get_stats(self, results, save_dir):
         self.save_results(results, output_dir=save_dir)
         self.save_results(results, output_dir=str(save_dir), epoch=self.save_counter)
-        # command = f"ultralytics/data/datasets/evaluate_object_3d_offline_ap40 {self.label_dir} {os.path.join(save_dir, 'preds')}"
-        # print("Running command: " + command)
-        # lines = subprocess.check_output(command, shell= True, text= True, env={})
-        # print("Result: " + lines)
-        # result = 0
-        # for line in lines.split("\n"):
-        #     if line.startswith("car_detection_3d"):
-        #         result = float(line.split(" ")[3])
-        # self.last_result = result
-        # return self.last_result
-        result = eval_from_scrach(
-            self.label_dir,
-            os.path.join(save_dir, 'preds'),
-            ap_mode=40)
-        return result["3d@0.70"][1]
+        command = f"ultralytics/data/datasets/evaluate_object_3d_offline_ap40 {self.label_dir} {os.path.join(save_dir, 'preds')}"
+        print("Running command: " + command)
+        lines = subprocess.check_output(command, shell= True, text= True, env={})
+        print("Result: " + lines)
+        result = 0
+        for line in lines.split("\n"):
+            if line.startswith("car_detection_3d"):
+                result = float(line.split(" ")[3])
+        self.last_result = result
+        return self.last_result
+        # result = eval_from_scrach(
+        #     self.label_dir,
+        #     os.path.join(save_dir, 'preds'),
+        #     ap_mode=40)
+        # return result["3d@0.70"][1]
 
     def save_results(self, results, output_dir='./outputs', epoch=None):
         output_dir = str(os.path.join(output_dir, 'preds'))
