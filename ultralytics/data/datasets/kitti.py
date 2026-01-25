@@ -517,6 +517,7 @@ class KITTIDataset(data.Dataset):
         return dst_img
 
     def get_stats(self, results, save_dir):
+        self.save_counter += 1
         self.save_results(results, output_dir=save_dir)
         if self.args.fast_eval:
             try:
