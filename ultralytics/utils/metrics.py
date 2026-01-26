@@ -612,7 +612,7 @@ def ap_per_class(
         plot_mc_curve(x, f1_curve, save_dir / f"{prefix}F1_curve.png", names, ylabel="F1", on_plot=on_plot)
         plot_mc_curve(x, p_curve, save_dir / f"{prefix}P_curve.png", names, ylabel="Precision", on_plot=on_plot)
         plot_mc_curve(x, r_curve, save_dir / f"{prefix}R_curve.png", names, ylabel="Recall", on_plot=on_plot)
-    print("recall: ", r_curve[:, 300])
+    print("recall: ", r_curve[:, 0])
 
     i = smooth(f1_curve.mean(0), 0.1).argmax()  # max F1 index
     p, r, f1 = p_curve[:, i], r_curve[:, i], f1_curve[:, i]  # max-F1 precision, recall, F1 values
