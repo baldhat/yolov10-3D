@@ -545,7 +545,7 @@ class v10Detect(Detect):
             b[-1].bias.data[: m.nc] = math.log(5 / m.nc / (640 / s) ** 2)  # cls (.01 objects, 80 classes, 640 img)
 
 class v10Detect3d(nn.Module):
-    max_det = 5
+    max_det = 200
     dynamic = False  # force grid reconstruction
     export = False  # export mode
     shape = None
@@ -835,9 +835,9 @@ class v10Detect3d(nn.Module):
     
     def forward(self, x):
         if not self.training and not self.dense:
-            one2one, o2o_embs = self.inference_forward_feat([xi.detach() for xi in x], self.o2o_heads)
+            # one2one, o2o_embs = self.inference_forward_feat([xi.detach() for xi in x], self.o2o_heads)
             # self.get_head_ranks()
-            # one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
+            one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
         else:
             one2one, o2o_embs = self.forward_feat([xi.detach() for xi in x], self.o2o_heads)
 

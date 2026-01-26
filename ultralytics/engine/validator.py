@@ -189,7 +189,7 @@ class BaseValidator:
             with dt[3]:
                 preds = self.postprocess(preds)
 
-            if self.args.plots and batch_i < 3:
+            if self.args.plots and batch_i < 50:
                 self.plot_val_samples(batch, batch_i)
                 self.plot_predictions(batch, preds, batch_i)
             self.update_metrics(preds, batch)

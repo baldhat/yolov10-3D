@@ -561,11 +561,11 @@ class KITTIDataset(data.Dataset):
         return results
 
     def decode_preds_eval(self, preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=True,
-                          threshold=0.001):
+                          threshold=-100000):
         return self.decode_preds(preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=undo_augment, threshold=threshold)
 
     def decode_preds(self, preds, calibs, im_files, ratio_pad, inv_trans, undo_augment=True,
-                     threshold=0.001):
+                     threshold=0.0):
         preds = preds.detach().cpu()
         bbox, pred_center3d, pred_s3d, pred_hd, pred_dep, pred_dep_un, scores, labels = preds.split(
             (4, 2, 3, 24, 1, 1, 1, 1), dim=-1)

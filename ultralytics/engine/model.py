@@ -137,9 +137,9 @@ class Model(nn.Module):
         # Load or create new YOLO model
         if Path(model).suffix in (".yaml", ".yml"):
             self._new(model, task=task, verbose=verbose)
-            #m, ckpt = attempt_load_one_weight("/home/stud/mijo/experiments/results/yolov10-3Dn_ours_12/weights/best.pt")
-            #sd = m.state_dict()
-            #self.model.load_state_dict(sd)
+            m, ckpt = attempt_load_one_weight("/home/stud/mijo/experiments/results/yolov10-3Dn_ours_12/weights/best.pt")
+            sd = m.state_dict()
+            self.model.load_state_dict(sd)
         else:
             self._load(model, task=task)
 
