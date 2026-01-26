@@ -17,19 +17,6 @@ from scipy.spatial.transform import Rotation
 from ultralytics.utils.ops import  xyxy2xywh, xywh2xyxy
 from scipy.optimize import linear_sum_assignment
 
-plotter = KITTIVisualizer()
-
-def to_color(a):
-    return np.array([int(a[i:i+2], 16) for i in range(0, len(a), 2)]) / 255
-
-
-gt_color = to_color("52B69A") # Green
-our_color = to_color("FFCA3A") # Yellow
-base_color = to_color("FF595E") # Red
-fov_color = to_color("805D9340") # Purple
-text_color = to_color("000000")
-
-colors = plt.get_cmap("tab10")
 
 class Detection3d:
     def __init__(self, line):
@@ -113,155 +100,7 @@ def equals(gt1: Object3d, gt2: Object3d):
 def load_calib(path):
     return Calibration(str(path))
 
-def load_image(path):
-    return cv.imread(str(path))
 
-def plot_labels(img, gts: [Object3d], calib, color):
-    for object in gts:
-        cls = object.cls_type
-        bbox2d = object.box2d
-        dimensions = np.array([object.l, object.w, object.h])
-        translation = object.pos
-        ry = object.ry
-        egoc_rot_matrix = plotter.get_egoc_rot_matrix(ry)
-
-        plotter.plot_3d_obj(img,
-                            VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
-                                        dimensions, bbox2d, cls),
-                            calib.P2, color=gt_color)
-
-def plot_dets(img, dets, calib):
-    objects = []
-    for i, object in enumerate(dets):
-        cls = object.classname
-        bbox2d = object.bbox
-        dimensions = object.dimensions[::-1]
-        translation = object.location
-        ry = object.ry
-        egoc_rot_matrix = plotter.get_egoc_rot_matrix(ry)
-
-        objects.append( VisObject3D(translation, Rotation.from_matrix(egoc_rot_matrix).as_rotvec(),
-                                        dimensions, bbox2d, cls))
-    objects = sorted(objects, key=lambda x: x.translation[2], reverse=True)
-    plotter.plot_3d_obj(img, objects,calib.P2, [colors(i % 10) for i,_ in enumerate(objects)])
-
-def plot_bev(gts, base_dets, our_dets, filename, fov=60):
-    print(fov)
-    plt.clf()
-
-    def get_rotated_rectangle_points(center, size, angle_degrees):
-        cx, cy = center
-        w, h = size
-        angle = np.deg2rad(angle_degrees)
-
-        # Rectangle corners before rotation (centered at origin)
-        rect = np.array([
-            [-w/2, -h/2],
-            [ w/2, -h/2],
-            [ w/2,  h/2],
-            [-w/2,  h/2]
-        ])
-
-        # Rotation matrix
-        R = np.array([
-            [np.cos(angle), -np.sin(angle)],
-            [np.sin(angle),  np.cos(angle)]
-        ])
-
-        # Rotate and translate
-        rotated_rect = rect @ R.T + [cx, cy]
-        return rotated_rect
-
-    fig, ax = plt.subplots(1, 1,
-                        figsize=(24, 12), gridspec_kw={'wspace': 0, 'hspace': 0}, constrained_layout=True)
-
-    num_lines = 11
-    R = 50
-    border = 3
-    ax.set_xlim(-R - border, R + border)
-    ax.set_ylim(-border, R + border)
-    ax.set_aspect(1.0)
-    ax.set_xticks([])
-    ax.set_yticks([])
-    ax.set_facecolor((1, 1, 1))
-    
-
-    # for theta in np.linspace(0, np.pi, 7):
-    #     xs, ys = [R * np.cos(theta), 0], [R * np.sin(theta), 0]
-    #     ax.plot(xs, ys, linewidth=2, color=(1, 1, 1), zorder=1)
-
-    for radius, c_color in zip(np.linspace(R, 0, num_lines), np.linspace(0.95, 0.5, num_lines)):
-        x = np.sin(np.deg2rad(fov / 2)) * (radius - 1.5)
-        y = np.cos(np.deg2rad(fov / 2)) * (radius - 1.5)
-        if radius % 10 == 0:
-            ax.text(x + 1.3, y - 1.2, str(int(radius)) + "m", rotation=-(5 + fov/2), fontsize=25, color=(0.15, 0.15, 1))
-        if radius == 0:
-            continue
-        #circle = Circle((0, 0), radius, color=(0, 0, 0), linewidth=3, fill=False, zorder=1)
-        circle = Circle((0, 0), radius, color=(c_color, c_color, c_color), linewidth=3, fill=True, zorder=1)
-        ax.add_artist(circle)
-        
-        
-    lightblue = (0, 252/255.0, 239/255.0)
-    wedge = Wedge((0, 0), R, -fov/2 + 90, fov/2 + 90, 
-                  color=fov_color,  
-                  #linewidth=3, 
-                  fill=True)
-    ax.add_artist(wedge)
-
-    for j, object in enumerate(gts):            
-        dimensions = np.array([object.l, object.w])
-        translation = object.pos[[0, 2]]
-        ry = -object.ry
-
-        corners = get_rotated_rectangle_points(translation, dimensions, ry * 180 / np.pi)
-        art = ax.add_artist(Polygon(corners, closed=True, fill=False, edgecolor=gt_color, facecolor=gt_color, zorder=3, linewidth=5))
-        if j == 0:
-            art.set_label("Ground Truth")
-        
-    for j, object in enumerate(base_dets):
-        dimensions = object.dimensions[::-1][:2]
-        translation = object.location[[0, 2]]
-        ry = -object.ry
-
-        corners = get_rotated_rectangle_points(translation, dimensions, ry * 180 / np.pi)
-        art = ax.add_artist(Polygon(corners, closed=True, fill=False, edgecolor=base_color, facecolor=base_color, zorder=3, linewidth=5))
-        if j == 0:
-            art.set_label("Baseline")
-        
-    for j, object in enumerate(our_dets):
-        dimensions = object.dimensions[::-1][:2]
-        translation = object.location[[0, 2]]
-        ry = -object.ry
-
-        corners = get_rotated_rectangle_points(translation, dimensions, ry * 180 / np.pi)
-        art = ax.add_artist(Polygon(corners, closed=True, fill=False, edgecolor=our_color, facecolor=our_color, zorder=3, linewidth=5))
-        if j == 0:
-            art.set_label("Ours")
-
-    plt.savefig(filename, bbox_inches="tight", format="svg")
-    fig.clear()
-    plt.close()
-    print(filename)
-
-def plot_all(img, gts, our_dets, base_dets, calib, out_path):
-    base_img = img.copy()
-    our_img = img.copy()
-        
-    # plot_labels(our_img, gts, calib, color="g")
-    plot_dets(our_img, our_dets, calib)
-    our_name = out_path.replace(".png", "_ours.png")
-    cv.imwrite(our_name, (our_img*255.0).astype(np.uint8))
-    print(our_name)
-    
-    # plot_labels(base_img, gts, calib, color="g")
-    # plot_dets(base_img, base_dets, calib, color="r")
-    # base_name = out_path.replace(".png", "_base.png")
-    # cv.imwrite(base_name, (base_img*255.0).astype(np.uint8))
-    # print(base_name)
-    
-    plot_bev(gts, base_dets, our_dets, out_path.replace(".png", "_bev.svg"), np.rad2deg(2*np.arctan2(base_img.shape[1], 2* calib.fu)))
-    
 if __name__=='__main__':
     test_plot = False
     
@@ -289,7 +128,7 @@ if __name__=='__main__':
 
     counter = 0
 
-    scores = {}
+    
 
     for ci, fn in enumerate(open(val_files, "r").readlines()):
         if test_plot and ci > 3:
@@ -334,38 +173,5 @@ if __name__=='__main__':
         base_pos_errors, base_rot_errors = calculate_errors(base_gts, base_dets)
         our_pos_errors, our_rot_errors = calculate_errors(our_gts, our_dets)
         
-        # print where the base errors are significantly larger than our errors
-        for j, our_gt in enumerate(our_gts):
-            found = False
-            for i, base_gt in enumerate(base_gts):
-                found = True
-                if not equals(base_gt, our_gt):
-                    continue
-                
-                diff = base_pos_errors[i] - our_pos_errors[j]
-                if diff > 0.7 and diff < 15:
-                    #print(f"Better Location! Base: {base_dets[i].location}, Ours: {our_dets[j].location}")
-                    improvement_counter += 1 #math.ceil(base_pos_errors[i] - our_pos_errors[j] - 5)
-                    
-                if np.abs(base_rot_errors[i] - our_rot_errors[j]) > 1:
-                    #print(f"Better Rotation! Base: {base_dets[i].ry}, Ours: {our_dets[j].ry}")
-                    #plot = True
-                    pass
-            if not found:
-                pass
-                #print("We detected more objects")
-                improvement_counter += 1
-                    
-        if improvement_counter >= 2 or test_plot:
-            print(filename)
-            img_name = filename.replace("txt", "png")
-            img = load_image(gt_path / ".." / "image_2" / img_name).astype(np.float32) / 255.0
-            out_path = output_path / img_name
-            plot_all(img, gts, our_dets, base_dets, calib, str(out_path))
-            print()
-            counter += 1
-            scores[filename] = improvement_counter
+        
             
-    print(f"\n\nFound {counter} candidates overall.")
-    print("Top Ten:")
-    print("\n".join([it[0] +": " + str(it[1]) for it in list(reversed(sorted(scores.items(), key=operator.itemgetter(1))))[:10]]))
