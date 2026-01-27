@@ -104,8 +104,8 @@ def load_calib(path):
 if __name__=='__main__':
     test_plot = False
     
-    val_files = Path("/storage/user/mijo/mixup_kitti/ImageSets/val.txt")
-    gt_path = Path("/storage/user/mijo/mixup_kitti//training/label_2/")
+    val_files = Path("/storage/group/deepscenario/KITTI/ImageSets/val.txt")
+    gt_path = Path("/storage/group/deepscenario/KITTI/training/label_2/")
 
     import sys
     if len(sys.argv) >= 2:
@@ -116,7 +116,7 @@ if __name__=='__main__':
         ours_name = str(base_path).split("/")[-1]
     else:
         #base_path = Path("/storage/user/mejo/_archiv_paper/2026_CVPR_LeAD-M3D/von_johannes/yolov10-3D_baseline_b")
-        base_path = Path("/home/stud/mijo/dev/yolov10-3D/runs/detect/val-baseline2")
+        base_path = Path("/home/stud/mijo/dev/yolov10-3D/runs/detect/val-baseline1")
         ours_path = Path("/home/stud/mijo/dev/yolov10-3D/runs/detect/val-ours")
 
 
@@ -162,6 +162,8 @@ if __name__=='__main__':
         base_pos_errors.extend(base_err)
         our_pos_errors.extend(our_err)
     
+    print("ours len:", len(base_pos_errors))
+    print("base len:", len(our_pos_errors))
     print("Mean Depth error:")
     print("base:", np.array(base_pos_errors).mean())
     print("ours:", np.array(our_pos_errors).mean())
