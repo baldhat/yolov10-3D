@@ -6,6 +6,7 @@ import os
 import math
 import operator
 
+from tqdm import tqdm
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle, Polygon, Wedge
 
@@ -90,9 +91,8 @@ def associate(gts: [Object3d], dets: [Detection3d]):
     return matched_gts, matched_dets, [dets[fp] for fp in false_positives]
 
 def calculate_errors(gts: [Object3d], dets: [Detection3d]):
-    pos_errors = [np.linalg.norm(gt.pos - det.location) for gt,det in zip(gts, dets)]
-    rot_errors = [np.abs((gt.ry - det.ry)%np.pi) for gt,det in zip(gts, dets)]
-    return pos_errors, rot_errors
+    pos_errors = [np.linalg.norm(gt.pos[-1] - det.location[-1]) for gt,det in zip(gts, dets)]
+    return pos_errors
 
 def equals(gt1: Object3d, gt2: Object3d):
     return gt1.line_index == gt2.line_index
@@ -114,11 +114,9 @@ if __name__=='__main__':
         ours_name = str(ours_path).split("/")[-1]
         ours_name = str(base_path).split("/")[-1]
     else:
-        #base_name = "yolov10-3D_kitti_baseline_x_117"
-        base_name = "MonoLSS_predictions_600_epochs_kitti_val"
-        ours_name = "val"
-        base_path = Path("/storage/group/deepscenario/for_jonathan/" + base_name)
-        ours_path = Path("/home/stud/mijo/dev/yolov10-3D/runs/detect/" + ours_name)
+        #base_path = Path("/storage/user/mejo/_archiv_paper/2026_CVPR_LeAD-M3D/von_johannes/yolov10-3D_baseline_b")
+        base_path = Path("/home/stud/mijo/dev/yolov10-3D/runs/detect/val2")
+        ours_path = Path("/home/stud/mijo/dev/yolov10-3D/runs/detect/val")
 
     output_path = Path("/storage/group/deepscenario/jonathan_for_johannes/") / ours_name
     if not os.path.exists(output_path):
@@ -128,11 +126,10 @@ if __name__=='__main__':
 
     counter = 0
 
-    
+    our_pos_errors = []
+    base_pos_errors =  []
 
-    for ci, fn in enumerate(open(val_files, "r").readlines()):
-        if test_plot and ci > 3:
-            break
+    for ci, fn in tqdm(enumerate(open(val_files, "r").readlines())):
         filename = fn.strip() + ".txt"
         plot = False
         # load dets and gts
@@ -158,20 +155,18 @@ if __name__=='__main__':
         # associate dets to gts
         base_gts, base_dets, base_false_positives = associate(gts, base_dets_)
         our_gts, our_dets, our_false_positives = associate(gts, our_dets_)
-        
-        improvement_counter = 0
-        # check missing detections
-        if len(base_false_positives) > len(our_false_positives):
-            pass
-            #print(len(base_false_positives), len(our_false_positives))
-            #improvement_counter += (len(base_false_positives) - len(our_false_positives))
 
-        if len(base_dets) > len(our_dets):
-            continue
         
         # calculate position and rotation errors
-        base_pos_errors, base_rot_errors = calculate_errors(base_gts, base_dets)
-        our_pos_errors, our_rot_errors = calculate_errors(our_gts, our_dets)
+        base_err = calculate_errors(base_gts, base_dets)
+        our_err = calculate_errors(our_gts, our_dets)
+        
+        base_pos_errors.extend(base_err)
+        our_pos_errors.extend(our_err)
+    
+    print("base:", np.array(base_pos_errors).mean())
+    print("ours:", np.array(our_pos_errors).mean())
+        
         
         
             
