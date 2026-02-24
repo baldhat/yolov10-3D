@@ -104,16 +104,16 @@ def load_calib(path):
 if __name__=='__main__':
     test_plot = False
     
-    val_files = Path("/storage/group/deepscenario/KITTI/ImageSets/val.txt")
-    gt_path = Path("/storage/group/deepscenario/KITTI/training/label_2/")
+    val_files = Path("/storage/user/mijo/mixup_kitti/ImageSets/val.txt")
+    gt_path = Path("/storage/user/mijo/mixup_kitti/training/label_2/")
 
     import sys
     if len(sys.argv) >= 3:
         base_path = Path(sys.argv[1])
         ours_path = Path(sys.argv[2])
     else:
-        base_path = Path("/home/wiss/mejo/storage/user/_archiv_paper/2026_CVPR_LeAD-M3D/von_johannes/yolov10-3D_baseline_b/yolov10-3D_kitti_baseline_woM_b_101")
-        ours_path = Path("/home/wiss/mejo/storage/user/_archiv_paper/2026_CVPR_LeAD-M3D/von_johannes/yolov10-3D_baseline_b/yolov10-3D_kitti_baseline_b_110")
+        base_path = Path("/home/stud/mijo/dev/yolov10-3D/runs/detect/val")
+        ours_path = Path("/home/stud/mijo/dev/yolov10-3D/runs/detect/mixup-val-ours")
 
 
     our_pos_errors = []
